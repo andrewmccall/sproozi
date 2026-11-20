@@ -41,7 +41,7 @@ func TestLeakGuardRecordNeverContainsTheCredential(t *testing.T) {
 			guard.ServeHTTP(httptest.NewRecorder(), observe.WithContext(gateway.WithIdentity(observe.Context(), grant)))
 			stdout.taken()
 
-			r := leakRequest(fixtureExecutionUID, "https://other.test/upload", nil)
+			r := leakRequest(fixtureExecutionUID, uploadTarget, nil)
 			place(r)
 			response := httptest.NewRecorder()
 			guard.ServeHTTP(response, r.WithContext(gateway.WithIdentity(r.Context(), grant)))

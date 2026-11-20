@@ -202,21 +202,21 @@ func TestDestinationOutcomesAreRecorded(t *testing.T) {
 		spent                      bool
 	}{
 		{name: "plain HTTP is not inspected HTTPS", method: http.MethodGet, target: "http://registry.example:8443/pkg", client: served(200, "x")},
-		{name: "CONNECT is not inspected HTTPS", method: http.MethodConnect, target: "https://registry.example:8443/pkg", host: authority, client: served(200, "x")},
+		{name: "CONNECT is not inspected HTTPS", method: http.MethodConnect, target: testPackageURL, host: authority, client: served(200, "x")},
 		{name: "IP literal authority", method: http.MethodGet, target: "https://127.0.0.1:8443/pkg", host: authority, client: served(200, "x")},
 		{name: "destination not approved", method: http.MethodGet, target: "https://evil.example:8443/pkg", host: authority, client: served(200, "x")},
-		{name: "budget exhausted", method: http.MethodGet, target: "https://registry.example:8443/pkg", client: served(200, "x"),
+		{name: "budget exhausted", method: http.MethodGet, target: testPackageURL, client: served(200, "x"),
 			units: 1, tracker: budget.NewTracker(), spent: true},
-		{name: "ledger unavailable", method: http.MethodGet, target: "https://registry.example:8443/pkg", client: served(200, "x"),
+		{name: "ledger unavailable", method: http.MethodGet, target: testPackageURL, client: served(200, "x"),
 			units: 1, tracker: budget.NewTrackerWithLedger(failingLedger{})},
-		{name: "upstream transport error", method: http.MethodGet, target: "https://registry.example:8443/pkg", client: failing,
+		{name: "upstream transport error", method: http.MethodGet, target: testPackageURL, client: failing,
 			units: 5, tracker: budget.NewTracker()},
-		{name: "upstream non-2xx", method: http.MethodGet, target: "https://registry.example:8443/pkg", client: served(404, "missing"),
+		{name: "upstream non-2xx", method: http.MethodGet, target: testPackageURL, client: served(404, "missing"),
 			units: 5, tracker: budget.NewTracker()},
-		{name: "served", method: http.MethodGet, target: "https://registry.example:8443/pkg", client: served(200, "package"),
+		{name: "served", method: http.MethodGet, target: testPackageURL, client: served(200, "package"),
 			units: 5, tracker: budget.NewTracker()},
 	}
-	var lines []string
+	lines := make([]string, 0, len(cases))
 	for _, tc := range cases {
 		events := &recordedEvents{}
 		handler := &destination.Handler{Config: destination.HandlerConfig{Profiles: profiles, AuditLogger: events, HTTPClient: tc.client}}

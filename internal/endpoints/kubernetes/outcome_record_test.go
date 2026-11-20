@@ -253,7 +253,7 @@ func TestKubernetesOutcomesAreRecorded(t *testing.T) {
 		{name: "mcp/tools/call upstream non-2xx", method: http.MethodPost, target: mcpURL, body: listPods("demo"), client: served(500, `{"kind":"Status"}`),
 			units: 5, tracker: budget.NewTracker()},
 	}
-	var lines []string
+	lines := make([]string, 0, len(cases))
 	for _, tc := range cases {
 		events := &recordedEvents{}
 		config := kubernetes.HandlerConfig{Upstream: upstream, Client: tc.client, MaxResponseBytes: 8 << 20, AuditLogger: events}

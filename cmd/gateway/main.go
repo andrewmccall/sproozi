@@ -162,6 +162,14 @@ func loadGatewayLimits() (connectionLimits, time.Duration, error) {
 // is still validated so a broken Deployment does not go unnoticed.
 const memoryLimitEnv = "SPROOZI_GATEWAY_MEMORY_LIMIT"
 
+// Environment variables that select model credentials.
+const (
+	openAIKeyEnv     = "OPENAI_API_KEY"
+	copilotTokenEnv  = "COPILOT_SIGN_IN_TOKEN"
+	anthropicKeyEnv  = "ANTHROPIC_API_KEY"
+	modelAuthModeEnv = "MODEL_AUTH_MODE"
+)
+
 // minContainerMemoryLimit is the smallest container memory limit the gateway
 // accepts. Below it a 90% Go memory limit would leave the garbage collector
 // running continuously, and a mistyped value (bytes vs Mi) is the likely cause.
@@ -393,11 +401,11 @@ func pruneModelHosts(hosts, owned map[string]bool, mode string, openAIHeld, anth
 func loadSignInTokens(mode, openAIKey, anthropicKey string) (string, string, string, error) {
 	openAI := strings.TrimSpace(os.Getenv("OPENAI_SIGN_IN_TOKEN"))
 	anthropic := strings.TrimSpace(os.Getenv("ANTHROPIC_SIGN_IN_TOKEN"))
-	copilot := strings.TrimSpace(os.Getenv("COPILOT_SIGN_IN_TOKEN"))
+	copilot := strings.TrimSpace(os.Getenv(copilotTokenEnv))
 	for _, token := range []struct{ env, key, value, apiKey string }{
 		{"OPENAI_SIGN_IN_TOKEN", "openai-sign-in-token", openAI, openAIKey},
 		{"ANTHROPIC_SIGN_IN_TOKEN", "anthropic-sign-in-token", anthropic, anthropicKey},
-		{"COPILOT_SIGN_IN_TOKEN", "copilot-sign-in-token", copilot, ""},
+		{copilotTokenEnv, "copilot-sign-in-token", copilot, ""},
 	} {
 		if strings.ContainsAny(token.value, "\r\n") {
 			return "", "", "", errors.New(token.env + " is invalid: key " + token.key + " in " +
@@ -415,18 +423,18 @@ func loadSignInTokens(mode, openAIKey, anthropicKey string) (string, string, str
 }
 
 func loadModelCredentials(openAIUpstreamURL string) (string, string, string, error) {
-	openAIKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
-	anthropicKey := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
+	openAIKey := strings.TrimSpace(os.Getenv(openAIKeyEnv))
+	anthropicKey := strings.TrimSpace(os.Getenv(anthropicKeyEnv))
 	for _, credential := range []struct{ env, key, value string }{
-		{"OPENAI_API_KEY", openAIKeyName, openAIKey},
-		{"ANTHROPIC_API_KEY", anthropicKeyName, anthropicKey},
+		{openAIKeyEnv, openAIKeyName, openAIKey},
+		{anthropicKeyEnv, anthropicKeyName, anthropicKey},
 	} {
 		if strings.ContainsAny(credential.value, "\r\n") {
 			return "", "", "", errors.New(credential.env + " is invalid: key " + credential.key + " in " +
 				modelCredentialsSource + " must be a single line")
 		}
 	}
-	mode := envOrDefault("MODEL_AUTH_MODE", modelauth.APIKeyMode)
+	mode := envOrDefault(modelAuthModeEnv, modelauth.APIKeyMode)
 	if mode != modelauth.APIKeyMode && mode != modelauth.ChatGPTMode && mode != modelauth.WorkloadMode {
 		return "", "", "", fmt.Errorf("MODEL_AUTH_MODE=%q must be api_key, chatgpt or workload: check key mode in %s",
 			mode, modelAuthSource)

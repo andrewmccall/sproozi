@@ -156,24 +156,12 @@ func ledgerReading(tracker *budget.Tracker, key string) string {
 	return fmt.Sprintf("used=%d reserved=%d cost=%d", state.UnitsUsed, state.ReservedUnits, state.CostMicros)
 }
 
-// recordTransport answers upstream requests in process.
-type recordTransport func(*http.Request) (*http.Response, error)
-
-func (f recordTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
-func recordResponse(r *http.Request, status int, header http.Header, body string) *http.Response {
-	if header == nil {
-		header = http.Header{}
-	}
-	return &http.Response{StatusCode: status, Header: header, Body: io.NopCloser(strings.NewReader(body)), Request: r}
-}
-
 // recordedMCPUpstream serves a docs provider with a search tool and a tool
 // that always fails, and returns its registry and an HTTP client that trusts it.
 func recordedMCPUpstream(t *testing.T) (*remote.Registry, *http.Client) {
 	t.Helper()
-	server := sdk.NewServer(&sdk.Implementation{Name: "docs", Version: "test"}, nil)
-	sdk.AddTool(server, &sdk.Tool{Name: "search", Description: "Search a collection"},
+	server := sdk.NewServer(&sdk.Implementation{Name: docsName, Version: "test"}, nil)
+	sdk.AddTool(server, &sdk.Tool{Name: searchTool, Description: "Search a collection"},
 		func(_ context.Context, _ *sdk.CallToolRequest, args struct {
 			Collection string `json:"collection"`
 			Query      string `json:"query"`
@@ -196,8 +184,8 @@ func recordedMCPUpstream(t *testing.T) (*remote.Registry, *http.Client) {
 		t.Fatal(err)
 	}
 	data, err := json.Marshal(map[string]any{"servers": map[string]any{
-		"docs": map[string]string{"url": upstream.URL + "/mcp", "bearerTokenFile": token},
-		"down": map[string]string{"url": downURL + "/mcp"},
+		docsName: map[string]string{"url": upstream.URL + "/mcp", "bearerTokenFile": token},
+		"down":   map[string]string{"url": downURL + "/mcp"},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -221,7 +209,7 @@ func TestNamedMCPOutcomesAreRecorded(t *testing.T) {
 		s := api.MCPServerScope{Tools: map[string]api.MCPToolScope{}}
 		for _, tool := range tools {
 			rule := api.MCPToolScope{}
-			if tool == "search" {
+			if tool == searchTool {
 				rule.Arguments = &runtime.RawExtension{Raw: []byte(`{"type":"object","required":["collection"],"properties":{"collection":{"const":"operations"}}}`)}
 			}
 			s.Tools[tool] = rule
@@ -233,7 +221,7 @@ func TestNamedMCPOutcomesAreRecorded(t *testing.T) {
 			Authority: gateway.Reference{Backend: gateway.BackendKubernetes, Namespace: "agents", Name: "runner", UID: "sa-uid"},
 			Policy: gateway.PolicySnapshot{Name: "test-policy", Generation: 7, Spec: api.AgentPolicySpec{
 				AllowedCapabilities: []api.CapabilityKind{docs, down},
-				MCPServers:          map[string]api.MCPServerScope{"docs": scope("search", "fail"), "down": scope("search")},
+				MCPServers:          map[string]api.MCPServerScope{docsName: scope(searchTool, "fail"), "down": scope(searchTool)},
 				Budgets:             map[api.CapabilityKind]api.EndpointBudget{docs: {MaxUnits: 5}},
 			}},
 			Template:     gateway.TemplateSnapshot{Name: "test-template"},
@@ -271,7 +259,7 @@ func TestNamedMCPOutcomesAreRecorded(t *testing.T) {
 			change: func(g *gateway.ExecutionGrant) { g.Capabilities = []api.CapabilityKind{down} }},
 		{name: "POST required", method: http.MethodGet, target: docsURL},
 		{name: "invalid tool scope", method: http.MethodPost, target: docsURL, body: initialize,
-			change: func(g *gateway.ExecutionGrant) { g.Policy.Spec.MCPServers["docs"] = api.MCPServerScope{} }},
+			change: func(g *gateway.ExecutionGrant) { g.Policy.Spec.MCPServers[docsName] = api.MCPServerScope{} }},
 		{name: "oversized body", method: http.MethodPost, target: docsURL, body: strings.Repeat(" ", 65<<10)},
 		{name: "invalid JSON", method: http.MethodPost, target: docsURL, body: `{"jsonrpc":`},
 		{name: "unsupported envelope", method: http.MethodPost, target: docsURL, body: call(2, "resources/list", "")},
@@ -296,7 +284,7 @@ func TestNamedMCPOutcomesAreRecorded(t *testing.T) {
 			}},
 		{name: "upstream connection failed", method: http.MethodPost, target: "https://gateway.test/mcp/down", body: initialize},
 		{name: "approved tool missing upstream", method: http.MethodPost, target: docsURL, body: initialize,
-			change: func(g *gateway.ExecutionGrant) { g.Policy.Spec.MCPServers["docs"] = scope("search", "absent") }},
+			change: func(g *gateway.ExecutionGrant) { g.Policy.Spec.MCPServers[docsName] = scope(searchTool, "absent") }},
 		{name: "initialize", method: http.MethodPost, target: docsURL, body: initialize},
 		{name: "tools/list", method: http.MethodPost, target: docsURL, body: call(2, "tools/list", "")},
 		{name: "ping", method: http.MethodPost, target: docsURL, body: call(4, "ping", "")},
@@ -306,7 +294,7 @@ func TestNamedMCPOutcomesAreRecorded(t *testing.T) {
 		{name: "tools/call budget exhausted", method: http.MethodPost, target: docsURL, body: search("operations"), spent: 5},
 		{name: "tools/call upstream tool failed", method: http.MethodPost, target: docsURL, body: call(3, "tools/call", `{"name":"fail","arguments":{}}`)},
 	}
-	var lines []string
+	lines := make([]string, 0, len(cases))
 	for _, tc := range cases {
 		events := &recordedEvents{}
 		tracker := budget.NewTracker()

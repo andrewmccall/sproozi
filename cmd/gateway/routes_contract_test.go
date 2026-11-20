@@ -18,6 +18,7 @@ import (
 	packagesgateway "github.com/andrewmccall/sproozi/internal/endpoints/packages"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 	"github.com/andrewmccall/sproozi/internal/gateway/routetest"
+	"github.com/andrewmccall/sproozi/internal/modelauth"
 )
 
 // servingRoutes composes the dispatcher as main does, from the environment,
@@ -32,7 +33,8 @@ func servingRoutes(t *testing.T, events *routetest.Recorder) (gateway.Dispatcher
 	return composeServing(t, cfg, events)
 }
 
-func composeServing(t *testing.T, cfg *startupConfig, events *routetest.Recorder) (gateway.Dispatcher, *budget.Tracker) {
+func composeServing(t *testing.T, cfg *startupConfig,
+	events *routetest.Recorder) (gateway.Dispatcher, *budget.Tracker) {
 	t.Helper()
 	cfg.mcpRegistry = routetest.MCPRegistry(t)
 	client := routetest.Client(t)
@@ -75,13 +77,13 @@ func TestEveryComposedRouteKeepsTheRouteContract(t *testing.T) {
 		env  map[string]string
 	}{
 		{"openai-key", nil},
-		{"openai-and-anthropic-keys", map[string]string{"ANTHROPIC_API_KEY": "anthropic-fixture-key"}},
-		{"copilot-token", map[string]string{"COPILOT_SIGN_IN_TOKEN": "gho_fixture"}},
-		{"workload", map[string]string{"MODEL_AUTH_MODE": "workload", "OPENAI_API_KEY": ""}},
+		{"openai-and-anthropic-keys", map[string]string{anthropicKeyEnv: anthropicFixtureKey}},
+		{"copilot-token", map[string]string{copilotTokenEnv: "gho_fixture"}},
+		{modelauth.WorkloadMode, map[string]string{modelAuthModeEnv: modelauth.WorkloadMode, openAIKeyEnv: ""}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			validGatewayEnvironment(t)
-			t.Setenv("COPILOT_SIGN_IN_TOKEN", "")
+			t.Setenv(copilotTokenEnv, "")
 			t.Setenv("EGRESS_PROFILES_PATH", profiles)
 			for key, value := range tc.env {
 				t.Setenv(key, value)

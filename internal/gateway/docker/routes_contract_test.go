@@ -27,9 +27,9 @@ func TestEveryComposedRouteKeepsTheRouteContract(t *testing.T) {
 			name string
 			auth modelauth.Authenticator
 		}{
-			{"key", modelauth.APIKey{Key: "sk-gateway-fixture"}},
-			{"token", modelauth.Token{Value: "gateway-token-fixture"}},
-			{"sign-in", modelauth.Workload{}},
+			{mechanismKey, modelauth.APIKey{Key: "sk-gateway-fixture"}},
+			{mechanismToken, modelauth.Token{Value: "gateway-token-fixture"}},
+			{mechanismSignIn, modelauth.Workload{}},
 		} {
 			t.Run(string(kind)+"/"+mechanism.name, func(t *testing.T) {
 				client := routetest.Client(t)
@@ -44,7 +44,7 @@ func TestEveryComposedRouteKeepsTheRouteContract(t *testing.T) {
 					GitHub: &githubgateway.HandlerConfig{TokenProvider: routetest.TokenProvider{}, HTTPClient: client,
 						GitBaseURL: "https://github.com", APIBaseURL: "https://api.github.com"},
 					Kubernetes: &kubernetesgateway.HandlerConfig{Upstream: upstream, Client: client},
-					Model: modelgateway.HandlerConfig{UpstreamURL: "https://api.openai.com", ProviderAuth: mechanism.auth,
+					Model: modelgateway.HandlerConfig{UpstreamURL: openAIOrigin, ProviderAuth: mechanism.auth,
 						HTTPClient: client}}
 				if h, _ := harness.Managed(kind); h.Protocol == harness.ProtocolAnthropic {
 					config.Model.UpstreamURL = "https://api.anthropic.com"

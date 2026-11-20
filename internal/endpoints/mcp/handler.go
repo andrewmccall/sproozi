@@ -26,6 +26,7 @@ import (
 
 const maxResponseBytes = 8 << 20
 const discoverMethod = "server/discover"
+const toolsCallMethod = "tools/call"
 
 type HandlerConfig struct {
 	Registry    *Registry
@@ -116,14 +117,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.deny(r.Context(), w, event, http.StatusBadRequest, "invalid MCP request envelope")
 		return
 	}
-	if request.Method == "tools/call" {
+	if request.Method == toolsCallMethod {
 		if _, permitted := rules[params.Name]; !permitted {
 			event.Operation = "mcp.tools.call"
 			h.deny(r.Context(), w, event, http.StatusForbidden, "MCP tool denied")
 			return
 		}
 	}
-	if request.Method != "tools/call" {
+	if request.Method != toolsCallMethod {
 		// Discovery and notifications have no audit record, pending a
 		// decision (ADR 0070). Each tool call records its own.
 		gateway.Unrecorded(r.Context(), gateway.UnrecordedMCPDiscovery)
@@ -172,7 +173,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // retained downstream subscriptions are outside its lifetime and authority.
 func supportedRequest(request *jsonrpc.Request) bool {
 	switch request.Method {
-	case discoverMethod, "initialize", "tools/list", "tools/call", "ping":
+	case discoverMethod, "initialize", "tools/list", toolsCallMethod, "ping":
 		return request.IsCall()
 	case "notifications/initialized", "notifications/cancelled":
 		return !request.IsCall()

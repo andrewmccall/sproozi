@@ -26,6 +26,8 @@ import (
 	"github.com/andrewmccall/sproozi/internal/gateway"
 )
 
+const headerContentType = "Content-Type"
+
 var updateRecords = flag.Bool("update-records", false,
 	"rewrite testdata/outcomes.txt from the current code")
 
@@ -84,7 +86,7 @@ func (r *recordedEvents) taken() []audit.Event {
 func outcomeLine(t *testing.T, name string, response *httptest.ResponseRecorder, ledger string, events []audit.Event) string {
 	t.Helper()
 	var headers []string
-	for _, h := range []string{"Content-Type", "X-Content-Type-Options", "Cache-Control", "Connection"} {
+	for _, h := range []string{headerContentType, "X-Content-Type-Options", "Cache-Control", "Connection"} {
 		if v := response.Header().Get(h); v != "" {
 			headers = append(headers, strings.ToLower(h)+"="+v)
 		}
@@ -224,14 +226,14 @@ func TestPackageOutcomesAreRecorded(t *testing.T) {
 		{name: "metadata with an unlisted artifact", target: indexURL,
 			client: served(200, nil, `<a href="https://files.pythonhosted.org/packages/f/other-1.0-py3-none-any.whl">x</a>`),
 			grant:  grant(5, 0), tracker: budget.NewTracker()},
-		{name: "upstream non-2xx", target: indexURL, client: served(404, http.Header{"Content-Type": {"text/plain"}}, "not found"),
+		{name: "upstream non-2xx", target: indexURL, client: served(404, http.Header{headerContentType: {"text/plain"}}, "not found"),
 			grant: grant(5, 0), tracker: budget.NewTracker()},
-		{name: "metadata served", target: indexURL, client: served(200, http.Header{"Content-Type": {"text/html"}}, metadata),
+		{name: "metadata served", target: indexURL, client: served(200, http.Header{headerContentType: {"text/html"}}, metadata),
 			grant: grant(5, 0), tracker: budget.NewTracker()},
-		{name: "artifact served", target: wheelURL, client: served(200, http.Header{"Content-Type": {"application/octet-stream"}}, string(wheel)),
+		{name: "artifact served", target: wheelURL, client: served(200, http.Header{headerContentType: {"application/octet-stream"}}, string(wheel)),
 			grant: grant(5, 0), tracker: budget.NewTracker()},
 	}
-	var lines []string
+	lines := make([]string, 0, len(cases))
 	for _, tc := range cases {
 		events := &recordedEvents{}
 		handler := &packages.Handler{Config: packages.HandlerConfig{HTTPClient: tc.client, AuditLogger: events}}

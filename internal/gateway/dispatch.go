@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"path"
 	"slices"
-	"sort"
 	"strings"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -102,7 +101,7 @@ func (d Dispatcher) Validate() error {
 	if len(problems) == 0 {
 		return nil
 	}
-	sort.Strings(problems)
+	slices.Sort(problems)
 	return fmt.Errorf("gateway: routes without a valid admission: %s", strings.Join(problems, "; "))
 }
 

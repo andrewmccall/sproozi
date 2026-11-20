@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,6 +28,18 @@ import (
 	model "github.com/andrewmccall/sproozi/internal/endpoints/model"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 	"github.com/andrewmccall/sproozi/internal/modelauth"
+)
+
+// Paths, headers and bodies several record cases share.
+const (
+	testMessagesPath = "/v1/messages"
+	testModelsPath   = "/v1/models"
+	contentEncoding  = "Content-Encoding"
+	gzipEncoding     = "gzip"
+	trailingDataBody = `{"model":"test","messages":[]} {}`
+	// An image by URL leaves the call unsizable, so it reserves all that remains.
+	unsizableAnthropicRequest = `{"model":"claude-fixture","max_tokens":64000,"messages":[{"role":"user",` +
+		`"content":[{"type":"image","source":{"type":"url","url":"https://example.test/a.png"}}]}]}`
 )
 
 var updateRecords = flag.Bool("update-records", false,
@@ -284,7 +297,7 @@ func (run *caseRun) blocker(anthropic bool) {
 
 func unboundedBody(anthropic bool) string {
 	if anthropic {
-		return `{"model":"claude-fixture","max_tokens":64000,"messages":[{"role":"user","content":[{"type":"image","source":{"type":"url","url":"https://example.test/a.png"}}]}]}`
+		return unsizableAnthropicRequest
 	}
 	return `{"model":"test","input":[]}`
 }
@@ -292,7 +305,7 @@ func unboundedBody(anthropic bool) string {
 func target(anthropic bool, path string) string {
 	if anthropic {
 		if path == "" {
-			path = "/v1/messages"
+			path = testMessagesPath
 		}
 		return "https://api.anthropic.com" + path
 	}
@@ -366,15 +379,12 @@ func waitingForever(*caseRun) *http.Client {
 }
 
 // pipeClient answers 200 at once and relays what the case writes to the body.
-func pipeClient(contentType string, body **io.PipeWriter, requests chan<- struct{}) func(*caseRun) *http.Client {
+func pipeClient(contentType string, body **io.PipeWriter) func(*caseRun) *http.Client {
 	return func(run *caseRun) *http.Client {
 		reader, writer := io.Pipe()
 		*body = writer
 		run.cleanups = append(run.cleanups, func() { _ = writer.Close() })
 		return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-			if requests != nil {
-				requests <- struct{}{}
-			}
 			response := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: reader, Request: r}
 			if contentType != "" {
 				response.Header.Set("Content-Type", contentType)
@@ -463,8 +473,8 @@ func runModelCase(t *testing.T, tc modelCase) string {
 	t.Helper()
 	run := &caseRun{t: t, clock: newManualClock()}
 	defer func() {
-		for i := len(run.cleanups) - 1; i >= 0; i-- {
-			run.cleanups[i]()
+		for _, v := range slices.Backward(run.cleanups) {
+			v()
 		}
 	}()
 	var ledger budget.Ledger = budget.NewMemoryLedger()
@@ -559,7 +569,7 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 		`data: {"type":"response.completed","sequence_number":6,"response":{"id":"resp_fixture","object":"response","status":"completed","usage":null}}` + "\n\n"
 	largeEvent := `data: {"type":"response.output_text.delta","delta":"` + strings.Repeat("w", 8<<20) + `"}` + "\n\n"
 	largeJSON := `{"id":"chatcmpl-1","pad":"` + strings.Repeat("p", 8<<20) + `","usage":{"total_tokens":7,"prompt_tokens":5,"completion_tokens":2}}`
-	unsizable := `{"model":"claude-fixture","max_tokens":64000,"messages":[{"role":"user","content":[{"type":"image","source":{"type":"url","url":"https://example.test/a.png"}}]}]}`
+	unsizable := unsizableAnthropicRequest
 	priced := func(_ *caseRun, c *model.HandlerConfig) {
 		c.Pricing = &model.PricingTable{Models: map[string]model.ModelPrice{"test": {
 			InputMicrosPerMillionTokens: 1, CachedInputMicrosPerMillionTokens: 1, OutputMicrosPerMillionTokens: 1}}}
@@ -585,14 +595,14 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 					Ceiling: api.EndpointBudget{MaxUnits: 10}, Exhausted: true}}
 			}},
 		{name: "pre/openai operation not allowed", method: http.MethodGet, path: "/v1/files", body: ""},
-		{name: "pre/openai unsupported content encoding", path: chatPath, body: chatBody, header: map[string]string{"Content-Encoding": "br"}},
-		{name: "pre/openai undecodable gzip body", path: chatPath, body: "not gzip", header: map[string]string{"Content-Encoding": "gzip"}},
+		{name: "pre/openai unsupported content encoding", path: chatPath, body: chatBody, header: map[string]string{contentEncoding: "br"}},
+		{name: "pre/openai undecodable gzip body", path: chatPath, body: "not gzip", header: map[string]string{contentEncoding: gzipEncoding}},
 		{name: "pre/openai body over the gateway limit", path: chatPath, body: `{"x":"` + strings.Repeat("a", 1<<20) + `"}`},
 		{name: "pre/anthropic body over the gateway limit", anthropic: true, body: `{"x":"` + strings.Repeat("a", 1<<20) + `"}`},
-		{name: "pre/openai gzip body decoded and served", path: chatPath, body: gzipped(chatBody), header: map[string]string{"Content-Encoding": "gzip"}},
+		{name: "pre/openai gzip body decoded and served", path: chatPath, body: gzipped(chatBody), header: map[string]string{contentEncoding: gzipEncoding}},
 		{name: "pre/openai invalid JSON", path: chatPath, body: `{"model":"test","messages":[}`},
 		{name: "pre/openai duplicate key", path: chatPath, body: `{"model":"test","model":"other","messages":[]}`},
-		{name: "pre/openai trailing data", path: chatPath, body: `{"model":"test","messages":[]} {}`},
+		{name: "pre/openai trailing data", path: chatPath, body: trailingDataBody},
 		{name: "pre/openai number too large", path: chatPath, body: `{"model":"test","n":1e1000000000,"messages":[]}`},
 		{name: "pre/anthropic invalid JSON", anthropic: true, body: `{"model":"claude-fixture",`},
 		{name: "pre/anthropic unsupported operation", anthropic: true, path: "/v1/messages/batches", body: messagesBody},
@@ -611,9 +621,9 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 			body: `{"model":"unpriced","max_tokens":10,"messages":[]}`},
 		{name: "pre/openai unsupported option under a cost cap", path: testResponsesPath, limits: budgetOf(10_000, 1000), config: priced,
 			body: `{"model":"test","service_tier":"priority","input":[]}`},
-		{name: "pre/openai model discovery forwarded without a reservation", method: http.MethodGet, path: "/v1/models",
+		{name: "pre/openai model discovery forwarded without a reservation", method: http.MethodGet, path: testModelsPath,
 			client: respond(http.StatusOK, "application/json", `{"data":[{"id":"test"}]}`)},
-		{name: "pre/openai model discovery with chatgpt sign-in that fails", method: http.MethodGet, path: "/v1/models",
+		{name: "pre/openai model discovery with chatgpt sign-in that fails", method: http.MethodGet, path: testModelsPath,
 			config: func(_ *caseRun, c *model.HandlerConfig) {
 				c.ProviderAuth = failingChatGPT{errors.New("refresh failed")}
 			}},
@@ -730,19 +740,19 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 			client: respond(http.StatusTooManyRequests, "application/json", `{"error":{"message":"slow down"}}`)},
 
 		// Relay (rows 16-30).
-		{name: "row 16/openai stream with the wrong content type", path: testResponsesPath, body: `{"model":"test","stream":true,"input":[]}`,
+		{name: "row 16/openai stream with the wrong content type", path: testResponsesPath, body: responsesStreamRequest,
 			client: respond(http.StatusOK, "application/json", responsesStream)},
 		{name: "row 16/anthropic stream with the wrong content type", anthropic: true, body: anthropicStreamRequest,
 			client: respond(http.StatusOK, "text/plain", anthropicStream)},
 		{name: "row 17/anthropic first flush failed", anthropic: true, body: messagesBody, failFlush: true},
 		{name: "row 18/anthropic JSON relay write failed after the whole body", anthropic: true, body: messagesBody, failWrite: true},
-		{name: "row 19/openai stream relay write failed", path: testResponsesPath, body: `{"model":"test","stream":true,"input":[]}`,
+		{name: "row 19/openai stream relay write failed", path: testResponsesPath, body: responsesStreamRequest,
 			failWrite: true, client: respond(http.StatusOK, eventStream, responsesStream)},
 		{name: "row 20/openai event over the parse bound, write failed", path: testResponsesPath,
-			body: `{"model":"test","stream":true,"input":[]}`, failWrite: true,
+			body: responsesStreamRequest, failWrite: true,
 			client: respond(http.StatusOK, eventStream, largeEvent+responsesEvents[len(responsesEvents)-1])},
 		{name: "row 20/openai event over the parse bound, relayed", path: testResponsesPath,
-			body:   `{"model":"test","stream":true,"input":[]}`,
+			body:   responsesStreamRequest,
 			client: respond(http.StatusOK, eventStream, responsesEvents[0]+largeEvent+responsesEvents[len(responsesEvents)-1])},
 		{name: "row 21/anthropic provider error event", anthropic: true, body: anthropicStreamRequest,
 			client: respond(http.StatusOK, eventStream, anthropicEvents[0]+anthropicEvents[7]+anthropicFailure)},
@@ -750,13 +760,13 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 			client: respond(http.StatusOK, eventStream, anthropicStream)},
 		{name: "row 22/anthropic message_stop without message_delta", anthropic: true, body: anthropicStreamRequest,
 			client: respond(http.StatusOK, eventStream, strings.Join(anthropicEvents[:12], "")+anthropicEvents[len(anthropicEvents)-1])},
-		{name: "row 23/openai responses completed", path: testResponsesPath, body: `{"model":"test","stream":true,"input":[]}`,
+		{name: "row 23/openai responses completed", path: testResponsesPath, body: responsesStreamRequest,
 			client: respond(http.StatusOK, eventStream, responsesStream)},
-		{name: "row 23/openai responses failed", path: testResponsesPath, body: `{"model":"test","stream":true,"input":[]}`,
+		{name: "row 23/openai responses failed", path: testResponsesPath, body: responsesStreamRequest,
 			client: respond(http.StatusOK, eventStream, strings.Join(responsesEvents[:len(responsesEvents)-1], "")+responsesFailed)},
-		{name: "row 23/openai responses terminal without usage", path: testResponsesPath, body: `{"model":"test","stream":true,"input":[]}`,
+		{name: "row 23/openai responses terminal without usage", path: testResponsesPath, body: responsesStreamRequest,
 			client: respond(http.StatusOK, eventStream, strings.Join(responsesEvents[:len(responsesEvents)-1], "")+responsesNoUsage)},
-		{name: "row 24/openai stream cut at its reservation", path: testResponsesPath, body: `{"model":"test","stream":true,"input":[]}`,
+		{name: "row 24/openai stream cut at its reservation", path: testResponsesPath, body: responsesStreamRequest,
 			limits: budgetOf(100, 0),
 			client: respond(http.StatusOK, eventStream, strings.Repeat(`event: response.output_text.delta`+"\n"+
 				`data: {"type":"response.output_text.delta","delta":"`+strings.Repeat("z", 150)+`"}`+"\n\n", 3))},
@@ -766,11 +776,11 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 			client: respond(http.StatusOK, eventStream, anthropicEvents[0]+anthropicEvents[6]+strings.Repeat(
 				"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\""+
 					strings.Repeat("z", 400)+"\"}}\n\n", 3))},
-		{name: "row 25/openai idle timeout", path: testResponsesPath, body: `{"model":"test","stream":true,"input":[]}`,
-			client: pipeClient(eventStream, &pipe, nil),
+		{name: "row 25/openai idle timeout", path: testResponsesPath, body: responsesStreamRequest,
+			client: pipeClient(eventStream, &pipe),
 			config: func(_ *caseRun, c *model.HandlerConfig) { c.IdleTimeout = 50 * time.Millisecond }},
 		{name: "row 26/anthropic stream, workload left", anthropic: true, body: anthropicStreamRequest,
-			client: pipeClient(eventStream, &pipe, nil),
+			client: pipeClient(eventStream, &pipe),
 			drive: func(run *caseRun) {
 				send(run, anthropicEvents[0], anthropicEvents[7])
 				run.writer.waitFor(t, "I'll list it.")
@@ -778,21 +788,21 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 				run.cancel()
 			}},
 		{name: "row 26/anthropic whole JSON, workload left (provider usage)", anthropic: true, body: messagesBody,
-			client: pipeClient("application/json", &pipe, nil),
+			client: pipeClient("application/json", &pipe),
 			drive: func(run *caseRun) {
 				send(run, anthropicSuccess)
 				run.writer.waitFor(t, `"end_turn"`)
 				run.cancel()
 			}},
 		{name: "row 26/anthropic stream, gateway stopping", anthropic: true, body: anthropicStreamRequest, useDrain: true,
-			client: pipeClient(eventStream, &pipe, nil),
+			client: pipeClient(eventStream, &pipe),
 			drive: func(run *caseRun) {
 				send(run, anthropicEvents[0])
 				run.writer.waitFor(t, "message_start")
 				shutdown(run)
 			}},
 		{name: "row 26/anthropic stream, call deadline", anthropic: true, body: anthropicStreamRequest, grant: oneSecondCall,
-			client: pipeClient(eventStream, &pipe, nil),
+			client: pipeClient(eventStream, &pipe),
 			drive: func(run *caseRun) {
 				send(run, anthropicEvents[0])
 				run.writer.waitFor(t, "message_start")
@@ -800,7 +810,7 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 		{name: "row 27/openai body read error after headers", path: chatPath, body: chatBody,
 			client: respondFailing(http.StatusOK, `{"id":"chatcmpl-1",`)},
 		{name: "row 28/openai stream ended without its terminal event", path: testResponsesPath,
-			body:   `{"model":"test","stream":true,"input":[]}`,
+			body:   responsesStreamRequest,
 			client: respond(http.StatusOK, eventStream, strings.Join(responsesEvents[:len(responsesEvents)-1], ""))},
 		{name: "row 29/openai JSON over the parse bound", path: chatPath, body: chatBody,
 			client: respond(http.StatusOK, "application/json", largeJSON)},
@@ -837,13 +847,13 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 			}},
 		{name: "modifier/openai no budget, completed", path: chatPath, body: chatBody, noBudget: true},
 		{name: "modifier/openai no budget, idle timeout (estimate recorded, nothing charged)", path: testResponsesPath,
-			body: `{"model":"test","stream":true,"input":[]}`, noBudget: true,
-			client: pipeClient(eventStream, &pipe, nil),
+			body: responsesStreamRequest, noBudget: true,
+			client: pipeClient(eventStream, &pipe),
 			config: func(_ *caseRun, c *model.HandlerConfig) { c.IdleTimeout = 50 * time.Millisecond }},
 		{name: "modifier/openai no budget, over the parse bound", path: chatPath, body: chatBody, noBudget: true,
 			client: respond(http.StatusOK, "application/json", largeJSON)},
 	}
-	var lines []string
+	lines := make([]string, 0, len(cases))
 	for _, tc := range cases {
 		lines = append(lines, runModelCase(t, tc))
 	}
@@ -861,7 +871,7 @@ func TestRelayOutcomesAreRecorded(t *testing.T) {
 			_, _ = io.WriteString(w, body)
 		}
 	}
-	var lines []string
+	lines := make([]string, 0, 12)
 	for _, tc := range []struct {
 		name, method, url, body string
 		upstream                http.HandlerFunc

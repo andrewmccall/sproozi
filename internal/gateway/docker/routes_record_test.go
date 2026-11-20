@@ -88,6 +88,14 @@ func routeLines(prefix string, routes gateway.Dispatcher) []string {
 	return lines
 }
 
+// The credential mechanisms the route records and contract cover.
+const (
+	mechanismKey    = "key"
+	mechanismToken  = "token"
+	mechanismSignIn = "sign-in"
+	openAIOrigin    = "https://api.openai.com"
+)
+
 type fixtureTokens struct{}
 
 func (fixtureTokens) Token(context.Context) (string, error) { return "", errors.New("not served") }
@@ -104,7 +112,7 @@ func recordedRoutes(kind harness.NativeKind, auth modelauth.Authenticator) (gate
 		GitHub: &githubgateway.HandlerConfig{TokenProvider: fixtureTokens{}, HTTPClient: http.DefaultClient,
 			GitBaseURL: "https://github.com", APIBaseURL: "https://api.github.com"},
 		Kubernetes: &kubernetesgateway.HandlerConfig{Upstream: upstream, Client: http.DefaultClient},
-		Model:      modelgateway.HandlerConfig{UpstreamURL: "https://api.openai.com", ProviderAuth: auth, HTTPClient: http.DefaultClient}}
+		Model:      modelgateway.HandlerConfig{UpstreamURL: openAIOrigin, ProviderAuth: auth, HTTPClient: http.DefaultClient}}
 	return composeRoutes(owner, config, budget.NewTracker(), diagnose.NewJournal(config.AuditLogger, diagnose.Limits{}))
 }
 
@@ -117,10 +125,10 @@ func TestDockerRoutesAreRecorded(t *testing.T) {
 			name string
 			auth modelauth.Authenticator
 		}{
-			{"key", modelauth.APIKey{Key: "sk-fixture"}},
-			{"token", modelauth.Token{Value: "fixture-token"}},
+			{mechanismKey, modelauth.APIKey{Key: "sk-fixture"}},
+			{mechanismToken, modelauth.Token{Value: "fixture-token"}},
 			{"chatgpt", &modelauth.ChatGPT{}},
-			{"sign-in", modelauth.Workload{}},
+			{mechanismSignIn, modelauth.Workload{}},
 		} {
 			prefix := string(kind) + "/" + mechanism.name
 			routes, err := recordedRoutes(kind, mechanism.auth)

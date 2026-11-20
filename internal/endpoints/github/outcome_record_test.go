@@ -24,6 +24,17 @@ import (
 	"github.com/andrewmccall/sproozi/internal/gateway"
 )
 
+const headerContentType = "Content-Type"
+
+// The upstream requests a case can answer differently.
+const (
+	upstreamGit           = "git"
+	upstreamRESTCreate    = "rest.create"
+	upstreamRESTReadback  = "rest.readback"
+	upstreamGraphQLCreate = "graphql.create"
+	upstreamGraphQLRead   = "graphql.read"
+)
+
 var updateRecords = flag.Bool("update-records", false,
 	"rewrite testdata/outcomes.txt from the current code")
 
@@ -82,7 +93,7 @@ func (r *recordedEvents) taken() []audit.Event {
 func outcomeLine(t *testing.T, name string, response *httptest.ResponseRecorder, ledger string, events []audit.Event) string {
 	t.Helper()
 	var headers []string
-	for _, h := range []string{"Content-Type", "X-Content-Type-Options", "Cache-Control", "Connection"} {
+	for _, h := range []string{headerContentType, "X-Content-Type-Options", "Cache-Control", "Connection"} {
 		if v := response.Header().Get(h); v != "" {
 			headers = append(headers, strings.ToLower(h)+"="+v)
 		}
@@ -165,28 +176,32 @@ func recordResponse(r *http.Request, status int, header http.Header, body string
 	return &http.Response{StatusCode: status, Header: header, Body: io.NopCloser(strings.NewReader(body)), Request: r}
 }
 
+// reply answers an upstream request with a body of contentType.
+func reply(code int, contentType, body string) func(*http.Request) (*http.Response, error) {
+	return func(r *http.Request) (*http.Response, error) {
+		return recordResponse(r, code, http.Header{headerContentType: {contentType}}, body), nil
+	}
+}
+
+// status answers an upstream request with a JSON body.
+func status(code int, body string) func(*http.Request) (*http.Response, error) {
+	return reply(code, "application/json", body)
+}
+
 // recordedGitHubUpstream answers each upstream request by its kind; replies
 // replaces the default answer of a kind.
 func recordedGitHubUpstream(replies map[string]func(*http.Request) (*http.Response, error)) *http.Client {
 	const created = `{"number":42,"html_url":"https://github.com/andrewmccall/home-ops/pull/42",` +
 		`"head":{"ref":"sproozi/run-abc-uid/a","sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},` +
 		`"base":{"ref":"main","repo":{"full_name":"andrewmccall/home-ops"}}}`
-	jsonReply := func(status int, body string) func(*http.Request) (*http.Response, error) {
-		return func(r *http.Request) (*http.Response, error) {
-			return recordResponse(r, status, http.Header{"Content-Type": {"application/json"}}, body), nil
-		}
-	}
 	defaults := map[string]func(*http.Request) (*http.Response, error){
-		"git": func(r *http.Request) (*http.Response, error) {
-			return recordResponse(r, 200, http.Header{"Content-Type": {"application/x-git-upload-pack-advertisement"}},
-				"001e# service=git-upload-pack\n0000"), nil
-		},
-		"rest.create":      jsonReply(201, created),
-		"rest.readback":    jsonReply(200, created),
-		"graphql.resolve":  jsonReply(200, `{"data":{"node":{"nameWithOwner":"andrewmccall/home-ops"}}}`),
-		"graphql.create":   jsonReply(200, `{"data":{"createPullRequest":{"pullRequest":{"id":"PR_fixture","url":"https://github.com/andrewmccall/home-ops/pull/42"}}}}`),
-		"graphql.readback": jsonReply(200, `{"data":{"repository":{"pullRequest":{"number":42,"url":"https://github.com/andrewmccall/home-ops/pull/42","headRefName":"sproozi/run-abc-uid/a","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","baseRefName":"main","repository":{"nameWithOwner":"andrewmccall/home-ops"}}}}}`),
-		"graphql.read":     jsonReply(200, `{"data":{"repository":{"id":"R_fixture"}}}`),
+		upstreamGit:           reply(200, "application/x-git-upload-pack-advertisement", "001e# service=git-upload-pack\n0000"),
+		upstreamRESTCreate:    status(201, created),
+		upstreamRESTReadback:  status(200, created),
+		"graphql.resolve":     status(200, `{"data":{"node":{"nameWithOwner":"andrewmccall/home-ops"}}}`),
+		upstreamGraphQLCreate: status(200, `{"data":{"createPullRequest":{"pullRequest":{"id":"PR_fixture","url":"https://github.com/andrewmccall/home-ops/pull/42"}}}}`),
+		"graphql.readback":    status(200, `{"data":{"repository":{"pullRequest":{"number":42,"url":"https://github.com/andrewmccall/home-ops/pull/42","headRefName":"sproozi/run-abc-uid/a","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","baseRefName":"main","repository":{"nameWithOwner":"andrewmccall/home-ops"}}}}}`),
+		upstreamGraphQLRead:   status(200, `{"data":{"repository":{"id":"R_fixture"}}}`),
 	}
 	return &http.Client{Transport: recordTransport(func(r *http.Request) (*http.Response, error) {
 		var body []byte
@@ -196,19 +211,19 @@ func recordedGitHubUpstream(replies map[string]func(*http.Request) (*http.Respon
 		kind := "unknown"
 		switch {
 		case r.URL.Host == "git.test":
-			kind = "git"
+			kind = upstreamGit
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/pulls"):
-			kind = "rest.create"
+			kind = upstreamRESTCreate
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/pulls/"):
-			kind = "rest.readback"
+			kind = upstreamRESTReadback
 		case bytes.Contains(body, []byte("RepositoryByID")):
 			kind = "graphql.resolve"
 		case bytes.Contains(body, []byte("mutation PullRequestCreate")):
-			kind = "graphql.create"
+			kind = upstreamGraphQLCreate
 		case bytes.Contains(body, []byte("PullRequestByNumber")):
 			kind = "graphql.readback"
 		case bytes.Contains(body, []byte("RepositoryInfo")):
-			kind = "graphql.read"
+			kind = upstreamGraphQLRead
 		}
 		if reply, ok := replies[kind]; ok {
 			return reply(r)
@@ -241,11 +256,6 @@ func TestGitHubOutcomesAreRecorded(t *testing.T) {
 		return g
 	}
 	failed := func(*http.Request) (*http.Response, error) { return nil, errors.New("dial failed") }
-	status := func(code int, body string) func(*http.Request) (*http.Response, error) {
-		return func(r *http.Request) (*http.Response, error) {
-			return recordResponse(r, code, http.Header{"Content-Type": {"application/json"}}, body), nil
-		}
-	}
 	pkt := func(s string) string { return fmt.Sprintf("%04x%s", len(s)+4, s) }
 	zero := strings.Repeat("0", 40)
 	newOID := strings.Repeat("b", 40)
@@ -290,9 +300,9 @@ func TestGitHubOutcomesAreRecorded(t *testing.T) {
 		{name: "git/budget exhausted", method: http.MethodGet, target: git + "/info/refs?service=git-upload-pack", units: 1, spent: 1},
 		{name: "git/ledger unavailable", method: http.MethodGet, target: git + "/info/refs?service=git-upload-pack", units: 1, failingLedger: true},
 		{name: "git/upstream transport error", method: http.MethodGet, target: git + "/info/refs?service=git-upload-pack",
-			replies: map[string]func(*http.Request) (*http.Response, error){"git": failed}, units: 5},
+			replies: map[string]func(*http.Request) (*http.Response, error){upstreamGit: failed}, units: 5},
 		{name: "git/upstream non-2xx", method: http.MethodGet, target: git + "/info/refs?service=git-upload-pack",
-			replies: map[string]func(*http.Request) (*http.Response, error){"git": status(404, `{"message":"Not Found"}`)}, units: 5},
+			replies: map[string]func(*http.Request) (*http.Response, error){upstreamGit: status(404, `{"message":"Not Found"}`)}, units: 5},
 		{name: "rest/operation not permitted", method: http.MethodGet, target: "https://api.github.com/repos/andrewmccall/home-ops", units: 5},
 		{name: "rest/pull request served", method: http.MethodPost, target: pulls, body: restCreate, units: 5},
 		{name: "rest/pull request head outside the run", method: http.MethodPost, target: pulls,
@@ -304,11 +314,11 @@ func TestGitHubOutcomesAreRecorded(t *testing.T) {
 		{name: "rest/budget exhausted at read-back", method: http.MethodPost, target: pulls, body: restCreate, units: 1},
 		{name: "rest/ledger unavailable", method: http.MethodPost, target: pulls, body: restCreate, units: 1, failingLedger: true},
 		{name: "rest/upstream transport error", method: http.MethodPost, target: pulls, body: restCreate,
-			replies: map[string]func(*http.Request) (*http.Response, error){"rest.create": failed}, units: 5},
+			replies: map[string]func(*http.Request) (*http.Response, error){upstreamRESTCreate: failed}, units: 5},
 		{name: "rest/upstream non-2xx at create", method: http.MethodPost, target: pulls, body: restCreate,
-			replies: map[string]func(*http.Request) (*http.Response, error){"rest.create": status(422, `{"message":"Validation Failed"}`)}, units: 5},
+			replies: map[string]func(*http.Request) (*http.Response, error){upstreamRESTCreate: status(422, `{"message":"Validation Failed"}`)}, units: 5},
 		{name: "rest/read-back failed", method: http.MethodPost, target: pulls, body: restCreate,
-			replies: map[string]func(*http.Request) (*http.Response, error){"rest.readback": status(404, `{"message":"Not Found"}`)}, units: 5},
+			replies: map[string]func(*http.Request) (*http.Response, error){upstreamRESTReadback: status(404, `{"message":"Not Found"}`)}, units: 5},
 		{name: "graphql/read served", method: http.MethodPost, target: graphqlURL,
 			body: graphql(readDocument, readVariables("andrewmccall", "home-ops")), units: 5},
 		{name: "graphql/read repository not permitted", method: http.MethodPost, target: graphqlURL,
@@ -317,7 +327,7 @@ func TestGitHubOutcomesAreRecorded(t *testing.T) {
 			body: graphql(`query Viewer { viewer { login } }`, map[string]any{}), units: 5},
 		{name: "graphql/read upstream transport error", method: http.MethodPost, target: graphqlURL,
 			body:    graphql(readDocument, readVariables("andrewmccall", "home-ops")),
-			replies: map[string]func(*http.Request) (*http.Response, error){"graphql.read": failed}, units: 5},
+			replies: map[string]func(*http.Request) (*http.Response, error){upstreamGraphQLRead: failed}, units: 5},
 		{name: "graphql/read budget exhausted", method: http.MethodPost, target: graphqlURL,
 			body: graphql(readDocument, readVariables("andrewmccall", "home-ops")), units: 1, spent: 1},
 		{name: "graphql/create served", method: http.MethodPost, target: graphqlURL, body: graphql(createDocument, createInput), units: 5},
@@ -329,9 +339,9 @@ func TestGitHubOutcomesAreRecorded(t *testing.T) {
 			body: graphql(createDocument, createInput), units: 2},
 		{name: "graphql/create upstream non-2xx at create", method: http.MethodPost, target: graphqlURL,
 			body:    graphql(createDocument, createInput),
-			replies: map[string]func(*http.Request) (*http.Response, error){"graphql.create": status(502, `{"message":"Bad Gateway"}`)}, units: 5},
+			replies: map[string]func(*http.Request) (*http.Response, error){upstreamGraphQLCreate: status(502, `{"message":"Bad Gateway"}`)}, units: 5},
 	}
-	var lines []string
+	lines := make([]string, 0, len(cases))
 	for _, tc := range cases {
 		events := &recordedEvents{}
 		tracker := budget.NewTracker()

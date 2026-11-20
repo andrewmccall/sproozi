@@ -22,6 +22,12 @@ import (
 	mcpgateway "github.com/andrewmccall/sproozi/internal/endpoints/mcp"
 	packagesgateway "github.com/andrewmccall/sproozi/internal/endpoints/packages"
 	"github.com/andrewmccall/sproozi/internal/gateway"
+	"github.com/andrewmccall/sproozi/internal/modelauth"
+)
+
+const (
+	anthropicFixtureKey = "anthropic-fixture-key"
+	withoutEgress       = "kubernetes.read,model.inference,github.pull_request,packages.install"
 )
 
 var updateRecords = flag.Bool("update-records", false,
@@ -118,7 +124,8 @@ func composedRoutes(t *testing.T) gateway.Dispatcher {
 func TestComposedRoutesAreRecorded(t *testing.T) {
 	dir := t.TempDir()
 	registry := filepath.Join(dir, "servers.json")
-	if err := os.WriteFile(registry, []byte(`{"servers":{"docs":{"url":"https://docs.mcp.example/mcp"}}}`), 0o600); err != nil {
+	servers := []byte(`{"servers":{"docs":{"url":"https://docs.mcp.example/mcp"}}}`)
+	if err := os.WriteFile(registry, servers, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	profiles := filepath.Join(dir, "profiles.json")
@@ -132,20 +139,20 @@ func TestComposedRoutesAreRecorded(t *testing.T) {
 		env  map[string]string
 	}{
 		{"openai-key", nil},
-		{"openai-and-anthropic-keys", map[string]string{"ANTHROPIC_API_KEY": "anthropic-fixture-key"}},
-		{"anthropic-key-only", map[string]string{"OPENAI_API_KEY": "", "ANTHROPIC_API_KEY": "anthropic-fixture-key"}},
-		{"copilot-token", map[string]string{"COPILOT_SIGN_IN_TOKEN": "gho_fixture"}},
-		{"workload", map[string]string{"MODEL_AUTH_MODE": "workload", "OPENAI_API_KEY": ""}},
-		{"workload-with-openai-key", map[string]string{"MODEL_AUTH_MODE": "workload"}},
+		{"openai-and-anthropic-keys", map[string]string{anthropicKeyEnv: anthropicFixtureKey}},
+		{"anthropic-key-only", map[string]string{openAIKeyEnv: "", anthropicKeyEnv: anthropicFixtureKey}},
+		{"copilot-token", map[string]string{copilotTokenEnv: "gho_fixture"}},
+		{modelauth.WorkloadMode, map[string]string{modelAuthModeEnv: modelauth.WorkloadMode, openAIKeyEnv: ""}},
+		{"workload-with-openai-key", map[string]string{modelAuthModeEnv: modelauth.WorkloadMode}},
 		{"mcp-registry", map[string]string{"MCP_SERVERS_PATH": registry}},
 		{"egress-profile", map[string]string{"EGRESS_PROFILES_PATH": profiles}},
-		{"kubernetes-only", map[string]string{"SPROOZI_ENABLED_CAPABILITIES": "kubernetes.read", "OPENAI_API_KEY": "",
+		{"kubernetes-only", map[string]string{"SPROOZI_ENABLED_CAPABILITIES": "kubernetes.read", openAIKeyEnv: "",
 			"GITHUB_APP_ID": "", "GITHUB_APP_INSTALLATION_ID": "", "GITHUB_APP_PRIVATE_KEY_PATH": ""}},
-		{"no-egress", map[string]string{"SPROOZI_ENABLED_CAPABILITIES": "kubernetes.read,model.inference,github.pull_request,packages.install"}},
+		{"no-egress", map[string]string{"SPROOZI_ENABLED_CAPABILITIES": withoutEgress}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			validGatewayEnvironment(t)
-			t.Setenv("COPILOT_SIGN_IN_TOKEN", "")
+			t.Setenv(copilotTokenEnv, "")
 			for key, value := range tc.env {
 				t.Setenv(key, value)
 			}

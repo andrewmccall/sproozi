@@ -23,6 +23,13 @@ import (
 	"github.com/andrewmccall/sproozi/internal/gateway"
 )
 
+// Request targets and a path prefix the records and refusal tests share.
+const (
+	serviceTarget = "https://service.test/x"
+	uploadTarget  = "https://other.test/upload"
+	loginPrefix   = "/login/"
+)
+
 var updateRecords = flag.Bool("update-records", false,
 	"rewrite testdata/outcomes.txt from the current code")
 
@@ -237,70 +244,70 @@ func TestDispatcherAndLeakGuardOutcomesAreRecorded(t *testing.T) {
 	}
 	unmanagedKey := fixtureExecutionUID + "/" + string(capability)
 	cases := []dispatchCase{
-		{name: "dispatcher/no identity", routes: capabilityRoute(recordingHandler, true), target: "https://service.test/x"},
+		{name: "dispatcher/no identity", routes: capabilityRoute(recordingHandler, true), target: serviceTarget},
 		{name: "dispatcher/unknown authority", routes: capabilityRoute(recordingHandler, true),
 			grant: baseGrant(granted, granted, 0), target: "https://other.test/x"},
 		{name: "dispatcher/handler-less host beside a path route", grant: baseGrant(granted, granted, 0),
 			target: "https://service.test/repos/o/r",
 			routes: func(events *recordedEvents, tracker *budget.Tracker) gateway.Dispatcher {
-				return gateway.Dispatcher{fixtureAuthority: {Paths: []gateway.PathRoute{{Prefix: "/login/", Route: gateway.Route{
+				return gateway.Dispatcher{fixtureAuthority: {Paths: []gateway.PathRoute{{Prefix: loginPrefix, Route: gateway.Route{
 					Capability: capability, Tier: audit.TierSemantic, Handler: recording(events), AuditLogger: events}}}}}
 			}},
 		{name: "dispatcher/path route served", grant: baseGrant(granted, granted, 0), target: "https://service.test/login/device",
 			routes: func(events *recordedEvents, tracker *budget.Tracker) gateway.Dispatcher {
-				return gateway.Dispatcher{fixtureAuthority: {Paths: []gateway.PathRoute{{Prefix: "/login/", Route: gateway.Route{
+				return gateway.Dispatcher{fixtureAuthority: {Paths: []gateway.PathRoute{{Prefix: loginPrefix, Route: gateway.Route{
 					Capability: capability, Tier: audit.TierSemantic, Handler: recording(events), AuditLogger: events}}}}}
 			}},
 		{name: "dispatcher/capability not requested by the run", routes: capabilityRoute(recordingHandler, true),
-			grant: baseGrant(nil, granted, 0), target: "https://service.test/x"},
+			grant: baseGrant(nil, granted, 0), target: serviceTarget},
 		{name: "dispatcher/capability not allowed by policy", routes: capabilityRoute(recordingHandler, true),
-			grant: baseGrant(granted, nil, 0), target: "https://service.test/x"},
+			grant: baseGrant(granted, nil, 0), target: serviceTarget},
 		{name: "dispatcher/capability denied on a route without a writer", routes: capabilityRoute(recordingHandler, false),
-			grant: baseGrant(nil, granted, 0), target: "https://service.test/x"},
+			grant: baseGrant(nil, granted, 0), target: serviceTarget},
 		{name: "dispatcher/budget configured without a tracker", routes: capabilityRoute(recordingHandler, true),
-			grant: baseGrant(granted, granted, 1), target: "https://service.test/x"},
+			grant: baseGrant(granted, granted, 1), target: serviceTarget},
 		{name: "dispatcher/managed account missing", routes: capabilityRoute(recordingHandler, true),
 			grant:   managed(&gateway.Allocation{AccountKey: accountKey, Ceiling: ceiling}),
-			target:  "https://service.test/x",
+			target:  serviceTarget,
 			tracker: budget.NewTracker(), ledger: accountKey},
 		{name: "dispatcher/managed allocation exhausted", routes: capabilityRoute(recordingHandler, true),
 			grant:   managed(&gateway.Allocation{AccountKey: accountKey, Ceiling: ceiling, Exhausted: true}),
-			target:  "https://service.test/x",
+			target:  serviceTarget,
 			tracker: budget.NewTracker(), ledger: accountKey, prepare: initialized},
 		{name: "dispatcher/managed allocation absent from the grant", routes: capabilityRoute(recordingHandler, true),
-			grant: managed(nil), target: "https://service.test/x", tracker: budget.NewTracker()},
+			grant: managed(nil), target: serviceTarget, tracker: budget.NewTracker()},
 		{name: "dispatcher/managed ledger unavailable", routes: capabilityRoute(recordingHandler, true),
 			grant:   managed(&gateway.Allocation{AccountKey: accountKey, Ceiling: ceiling}),
-			target:  "https://service.test/x",
+			target:  serviceTarget,
 			tracker: budget.NewTrackerWithLedger(failingLedger{})},
 		{name: "dispatcher/managed allocation served", routes: capabilityRoute(recordingHandler, true),
 			grant:   managed(&gateway.Allocation{AccountKey: accountKey, Ceiling: ceiling}),
-			target:  "https://service.test/x",
+			target:  serviceTarget,
 			tracker: budget.NewTracker(), ledger: accountKey, prepare: initialized},
 		{name: "dispatcher/unmanaged budget served", routes: capabilityRoute(recordingHandler, true),
-			grant: baseGrant(granted, granted, 1), target: "https://service.test/x",
+			grant: baseGrant(granted, granted, 1), target: serviceTarget,
 			tracker: budget.NewTracker(), ledger: unmanagedKey},
 		{name: "dispatcher/unmanaged budget already spent", routes: capabilityRoute(recordingHandler, true),
-			grant: baseGrant(granted, granted, 1), target: "https://service.test/x",
+			grant: baseGrant(granted, granted, 1), target: serviceTarget,
 			tracker: budget.NewTracker(), ledger: unmanagedKey, prepare: func(tracker *budget.Tracker) {
 				if err := tracker.Meter(unmanagedKey, api.EndpointBudget{MaxUnits: 1}).SpendRequest(context.Background()); err != nil {
 					t.Fatal(err)
 				}
 			}},
 		{name: "dispatcher/no budget configured", routes: capabilityRoute(recordingHandler, true),
-			grant: baseGrant(granted, granted, 0), target: "https://service.test/x", tracker: budget.NewTracker()},
+			grant: baseGrant(granted, granted, 0), target: serviceTarget, tracker: budget.NewTracker()},
 		{name: "dispatcher/handler records nothing", routes: capabilityRoute(silentHandler, true),
-			grant: baseGrant(granted, granted, 0), target: "https://service.test/x"},
+			grant: baseGrant(granted, granted, 0), target: serviceTarget},
 		{name: "dispatcher/handler declares its request unrecorded", routes: capabilityRoute(declaredHandler, true),
-			grant: baseGrant(granted, granted, 0), target: "https://service.test/x"},
+			grant: baseGrant(granted, granted, 0), target: serviceTarget},
 		{name: "dispatcher/route without a capability, nothing granted", grant: baseGrant(nil, nil, 0),
-			target: "https://service.test/x", tracker: budget.NewTracker(),
+			target: serviceTarget, tracker: budget.NewTracker(),
 			routes: func(events *recordedEvents, tracker *budget.Tracker) gateway.Dispatcher {
 				return gateway.Dispatcher{fixtureAuthority: {Tier: audit.TierProtocol, Handler: recording(events),
 					Budgets: tracker, AuditLogger: events}}
 			}},
 	}
-	var lines []string
+	lines := make([]string, 0, len(cases)+6)
 	for _, tc := range cases {
 		events := &recordedEvents{}
 		if tc.prepare != nil {
@@ -330,11 +337,11 @@ func TestDispatcherAndLeakGuardOutcomesAreRecorded(t *testing.T) {
 	}{
 		{name: "leakguard/provider route remembers the credential", target: "https://provider.test/v1/messages",
 			prepare: func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+credential) }},
-		{name: "leakguard/other route without the credential", target: "https://other.test/upload", body: "ordinary"},
-		{name: "leakguard/credential in a header", target: "https://other.test/upload",
+		{name: "leakguard/other route without the credential", target: uploadTarget, body: "ordinary"},
+		{name: "leakguard/credential in a header", target: uploadTarget,
 			prepare: func(r *http.Request) { r.Header.Set("X-Note", "token="+credential) }},
 		{name: "leakguard/credential in the query", target: "https://other.test/upload?q=" + credential},
-		{name: "leakguard/credential in the body", target: "https://other.test/upload", body: "before " + credential + " after"},
+		{name: "leakguard/credential in the body", target: uploadTarget, body: "before " + credential + " after"},
 		{name: "leakguard/provider route again with the credential", target: "https://provider.test/v1/messages",
 			prepare: func(r *http.Request) { r.Header.Set("X-Api-Key", credential) }},
 	} {
