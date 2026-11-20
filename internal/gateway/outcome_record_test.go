@@ -201,7 +201,7 @@ func TestDispatcherAndLeakGuardOutcomesAreRecorded(t *testing.T) {
 			}
 			e := gateway.AuditEvent(r.Context(), "fixture.read")
 			e.Allowed = true
-			events.Log(e)
+			gateway.Record(r.Context(), events, e)
 			w.WriteHeader(http.StatusOK)
 			_, _ = io.WriteString(w, "served meter="+strconv.FormatBool(meter != nil)+" spend="+spent)
 		})
@@ -353,7 +353,7 @@ func TestDispatcherAndLeakGuardOutcomesAreRecorded(t *testing.T) {
 			if err != nil {
 				e.DenyReason = err.Error()
 			}
-			events.Log(e)
+			gateway.Record(r.Context(), events, e)
 			w.WriteHeader(http.StatusOK)
 			_, _ = fmt.Fprintf(w, "read error=%v", err)
 		})
@@ -387,7 +387,7 @@ func leakGuardFixture(t *testing.T, events *recordedEvents, other http.Handler) 
 		ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			e := gateway.AuditEvent(r.Context(), "fixture.model")
 			e.Allowed = true
-			f.events.Log(e)
+			gateway.Record(r.Context(), f.events, e)
 			w.WriteHeader(http.StatusNoContent)
 		})
 		forward := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { f.other.ServeHTTP(w, r) })
