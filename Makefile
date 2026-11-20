@@ -200,6 +200,10 @@ verify-protocol: protocol-tools ## Run the pinned gh/git protocol fixtures; zero
 protocol-tools: $(LOCALBIN) ## Install the checksum-pinned gh client used by the protocol fixtures.
 	bash hack/verify/install-gh.sh "$(LOCALBIN)/protocol"
 
+.PHONY: verify-dns-stall
+verify-dns-stall: ## Measure what lost and slow DNS answers cost the gateway's model dial through Go's resolver, against a loopback DNS fixture.
+	go test -tags dnsstall -ldflags=-checklinkname=0 -run '^TestDNS' -count=1 -v ./cmd/gateway/
+
 .PHONY: verify-live
 verify-live: ## Run opt-in live acceptance on a provisioned cluster; creates a real PR in SPROOZI_DEMO_REPO.
 	bash hack/verify/live.sh
