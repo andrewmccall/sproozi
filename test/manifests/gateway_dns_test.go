@@ -9,12 +9,18 @@ import (
 // The gateway dials providers by name with Go's resolver. A lost DNS query
 // costs one resolver timeout, 5 s by Kubernetes' default, so the gateway
 // sets 1 s with 3 attempts. It must not change which names resolve: no
-// ndots, search list, nameservers or DNS policy of its own
-// (cmd/gateway/upstream_dns_test.go measures each setting).
+// ndots, search list, nameservers, DNS policy or host network of its own, and
+// each option set once (cmd/gateway/upstream_dns_test.go measures each
+// setting).
 func TestGatewayResolverBoundsALostDNSDatagram(t *testing.T) {
 	for name, docs := range map[string][]map[string]any{"config/default": renderDefault(t),
 		"config/install": renderInstall(t)} {
 		spec := renderedGatewayDeployment(t, docs).Spec.Template.Spec
+		// With the host network, ClusterFirst gives the Pod the node's
+		// resolver, and the options no longer apply to the cluster's.
+		if spec.HostNetwork {
+			t.Errorf("%s: gateway uses the host network", name)
+		}
 		if spec.DNSPolicy != "" && spec.DNSPolicy != corev1.DNSClusterFirst {
 			t.Errorf("%s: gateway dnsPolicy %q, want the cluster's", name, spec.DNSPolicy)
 		}
@@ -31,6 +37,9 @@ func TestGatewayResolverBoundsALostDNSDatagram(t *testing.T) {
 			if option.Value == nil {
 				t.Errorf("%s: gateway resolver option %s has no value", name, option.Name)
 				continue
+			}
+			if _, seen := options[option.Name]; seen {
+				t.Errorf("%s: gateway resolver option %s is set more than once", name, option.Name)
 			}
 			options[option.Name] = *option.Value
 		}

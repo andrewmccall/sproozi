@@ -47,9 +47,14 @@ spec:
       # The gateway dials providers by name with Go's own resolver, which reads
       # these options from resolv.conf. A lost DNS query or reply costs one
       # timeout; Kubernetes' default of 5 s stalled model calls by 5 s on a
-      # loaded cluster. 1 s bounds that, and 3 attempts still let an answer
-      # that takes up to 3 s arrive. ndots and the search list stay as the
-      # cluster sets them, so every name resolves as before.
+      # loaded cluster. timeout 1 bounds that at about a second. Each attempt
+      # is a new query with its own one-second deadline, so a reply later than
+      # a second is never read: on a cluster whose DNS steadily answers more
+      # slowly than that, lookups that used to succeed now fail. There, raise
+      # timeout in a patch of this Deployment in your overlay (list both
+      # options; the patch replaces the list). ndots and the search list stay
+      # as the cluster sets them, so every name resolves as before. Reference:
+      # docs/reference/required-secrets-and-config.md#gateway-name-lookups.
       dnsConfig:
         options:
         - name: timeout
