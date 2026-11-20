@@ -23,8 +23,6 @@ import (
 )
 
 const NativeRolloutMaxBytes int64 = 64 << 20
-const nativeOpenAIKey = "OPENAI_API_KEY"
-const nativeAnthropicKey = "ANTHROPIC_API_KEY"
 
 // NativeLaunch is the trusted fixed native terminal launch contract. Portable
 // checkpoint contents do not supply these instructions, options or credentials.
@@ -248,10 +246,6 @@ const (
 // nativePlaceholder is the public value a workload sends where the gateway
 // supplies, or forwards, the real credential.
 const nativePlaceholder = "sproozi-worker-placeholder"
-
-// NativeCopilotTokenPlaceholder stands in for a GitHub token the gateway holds:
-// Copilot needs one to call its plan's service, and the gateway replaces it.
-const NativeCopilotTokenPlaceholder = "gho_sprooziworkerplaceholder0000000000"
 
 // NativeBaseEnvironment is the public, credential-free environment shared by
 // both backends. Each authority adds its own fresh proxy/token binding. A

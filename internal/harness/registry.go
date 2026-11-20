@@ -204,6 +204,17 @@ var codexKeyOptions = []string{
 // ChatGPT backend or the API to match its sign-in (ADR 0047).
 const codexTrust = `projects."/workspace/session/workspace".trust_level="trusted"`
 
+// The variables that carry the OpenAI and Anthropic placeholder keys, as the
+// entries below name them.
+const (
+	nativeOpenAIKey    = "OPENAI_API_KEY"
+	nativeAnthropicKey = "ANTHROPIC_API_KEY"
+)
+
+// NativeCopilotTokenPlaceholder stands in for a GitHub token the gateway holds:
+// Copilot needs one to call its plan's service, and the gateway replaces it.
+const NativeCopilotTokenPlaceholder = "gho_sprooziworkerplaceholder0000000000"
+
 // mcpServersField is Claude Code's MCP configuration key.
 const mcpServersField = "mcpServers"
 
