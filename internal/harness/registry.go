@@ -82,10 +82,14 @@ type Harness struct {
 	// (HOME, PWD, KUBECONFIG). A harness may declare none only with a reason in
 	// the guard test.
 	ReservedEnv []string
-	// RemoteExecutor reports that a remote executor may run this harness, for
-	// both tasks and interactive sessions. A Claude Code task's completion is
-	// bound to its prompt's turn by the supervisor's UserPromptSubmit hook (ADR
-	// 0057).
+	// RemoteExecutor reports that a remote executor configured for this
+	// harness may start work for it: tasks and interactive sessions the cluster
+	// owns. Its one reader is the executor's work catalogue
+	// (internal/work/owner.go). A session of any managed kind moved to an
+	// executor for its harness still runs there; the placement handler
+	// (internal/session/profile) accepts every managed kind. A Claude Code
+	// task's completion is bound to its prompt's turn by the supervisor's
+	// UserPromptSubmit hook (ADR 0057).
 	RemoteExecutor bool
 
 	// TakesTask: the supervisor submits a task as the launch's prompt and

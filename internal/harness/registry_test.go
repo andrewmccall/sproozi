@@ -364,21 +364,23 @@ func signInChoiceProblems(h Harness) []string {
 	return problems
 }
 
-// The configured-MCP reference names the managed harnesses that local
-// sessions run, and those a remote executor may run (RemoteExecutor).
+// The configured-MCP reference states two facts. Sessions of every managed
+// kind get the servers locally and when they run on a remote executor,
+// including a session moved there; an executor starts tasks and interactive
+// sessions itself only for the RemoteExecutor harnesses.
 func TestConfiguredMCPReferenceMatchesTheRegistry(t *testing.T) {
 	data, err := os.ReadFile("../../docs/reference/configured-mcp.md")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var local, remote []string
+	var managed, starts []string
 	for _, h := range registry {
 		if h.Native == "" {
 			continue
 		}
-		local = append(local, h.DisplayName)
+		managed = append(managed, h.DisplayName)
 		if h.RemoteExecutor {
-			remote = append(remote, h.DisplayName)
+			starts = append(starts, h.DisplayName)
 		}
 	}
 	and := func(names []string) string {
@@ -387,21 +389,31 @@ func TestConfiguredMCPReferenceMatchesTheRegistry(t *testing.T) {
 		}
 		return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 	}
+	lines := strings.Split(string(data), "\n")
 	for _, row := range []struct{ where, want string }{
-		{"Local sessions (`sproozi run`)", and(local)},
-		{"Sessions on a remote executor", and(remote)},
+		{"Local sessions (`sproozi run`)", and(managed)},
+		{"Sessions on a remote executor", and(managed)},
 	} {
 		prefix := "| " + row.where + " | "
-		line := ""
-		for l := range strings.SplitSeq(string(data), "\n") {
+		var got []string
+		for _, l := range lines {
 			if strings.HasPrefix(l, prefix) {
-				line = l
+				cell, _, _ := strings.Cut(strings.TrimPrefix(l, prefix), " |")
+				got = append(got, cell)
 			}
 		}
-		got, _, _ := strings.Cut(strings.TrimPrefix(line, prefix), " |")
-		if got != row.want {
-			t.Errorf("docs/reference/configured-mcp.md's %q row names %q; the registry in %s says %q", row.where, got,
-				registryFile, row.want)
+		if len(got) != 1 || got[0] != row.want {
+			t.Errorf("docs/reference/configured-mcp.md needs one %q row naming %q, the managed harnesses in %s; "+
+				"it has %q", row.where, row.want, registryFile, got)
 		}
+	}
+	const starter = "it starts tasks and interactive sessions itself only for "
+	text := strings.Join(strings.Fields(string(data)), " ")
+	_, rest, found := strings.Cut(text, starter)
+	got, _, _ := strings.Cut(rest, ".")
+	got, _, _ = strings.Cut(got, " (")
+	if !found || got != and(starts) {
+		t.Errorf("docs/reference/configured-mcp.md must say %q followed by %q, the RemoteExecutor harnesses in %s; "+
+			"it says %q", starter, and(starts), registryFile, got)
 	}
 }
