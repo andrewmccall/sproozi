@@ -159,6 +159,10 @@ tasks and
 an executor answers a task for another harness `unsupported`. Codex and Claude Code on one cluster are two executors in two
 namespaces, which the CLI chooses with `--namespace`
 ([Claude Code executor example](../../examples/portable-workflows/kubernetes/claude/kustomization.yaml)).
+An executor configured with `repositories` or `projects` for a harness it
+cannot start work for, such as Copilot, fails at start-up with
+`work: fixed owner configuration required`; configured without them, it still
+runs sessions of its harness moved to it.
 A Claude Code session started on the cluster starts Claude Code fresh, as a
 local Docker session does: the supervisor writes onboarding as complete and
 the workspace as trusted before launch, so no first-run or folder-trust

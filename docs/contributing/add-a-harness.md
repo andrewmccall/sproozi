@@ -159,19 +159,22 @@ fails, naming the file to change, unless:
   `internal/harness/registry_test.go`);
 - a tripwire for the common form of a fact kept outside the registry
   (`TestNoHarnessFactOutsideTheRegistry` in `internal/harness/sites_test.go`)
-  holds: Go code under `internal`, `cmd` and `api` compares nothing with a
-  `NativeKind` constant (`==` or `!=`), lists none in a `case` and keys no
-  composite literal by one, except in the behaviour scopes (file and
-  function) listed in `behaviourSites`, where a new harness adds its cases
-  without editing the list; and no string in `internal/harness` or
-  `cmd/native-session` outside the registry repeats a registered credential
-  variable, token placeholder, instructions file, executable, sign-in file or
-  MCP file name. It does not catch a comparison with a converted string such
-  as `string(kind) == "copilot"`, a map keyed by kind without a literal key, a
-  switch on another registry value such as `DisplayName`, prefix checks, or
-  values repeated in other packages; review those. Verifiers under `hack/`
-  are not scanned. Read a new fact from the registry entry, adding a field
-  when it has none;
+  holds: non-test Go code under `internal`, `cmd`, `api` and `test` compares
+  nothing with a `NativeKind` constant (`==` or `!=`), lists none in a
+  `case`, a `[]NativeKind` literal or as a composite literal key or map
+  index, and converts no string literal to a `NativeKind`, except in the
+  behaviour scopes (file and function) listed in `behaviourSites`, where a
+  new harness adds its cases without editing the list; and no string in
+  `internal/harness` or `cmd/native-session` outside the registry repeats a
+  registered credential variable, token placeholder, instructions file,
+  executable, sign-in file or MCP file name. It does not catch a comparison
+  with a converted string such as `string(kind) == "copilot"`, a local
+  constant or variable aliasing a kind, a map keyed or indexed by kind
+  without a kind constant, a switch on another registry value such as
+  `DisplayName`, prefix checks, values repeated in other packages, or
+  anything in `_test.go` files, `zz_generated*` files or outside those
+  directories, such as verifiers under `hack/`; review those. Read a new
+  fact from the registry entry, adding a field when it has none;
 - the [configured MCP reference](../reference/configured-mcp.md) names every
   managed harness in its local session and remote executor rows, and the
   `RemoteExecutor` harnesses as those an executor starts tasks and
@@ -309,6 +312,11 @@ Do the AgentRun steps first, then:
    `make verify-local-onboarding` and the session verifiers in
    [which command proves what](../../test/acceptance/running.md#which-command-proves-what).
 7. Document its managed behaviour in the harness reference's managed section.
+   Add its `DisplayName` to the local session and remote executor rows of the
+   [configured MCP reference](../reference/configured-mcp.md), and, when it
+   sets `RemoteExecutor`, to the sentence after them that names the
+   harnesses an executor starts tasks and interactive sessions for;
+   `TestConfiguredMCPReferenceMatchesTheRegistry` fails until they agree.
 
 ## Gates
 
