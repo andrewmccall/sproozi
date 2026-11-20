@@ -73,7 +73,8 @@ their harness's client reads its key from the Pod's environment: for
 command Sproozi can't inspect. Other harnesses get no key variable from the
 controller; their launch file or the runtime's command sets the placeholder
 the client reads (see [model providers](harnesses.md#model-providers)). A
-runtime with [`signIn`](#harness-sign-in) gets no key placeholder.
+runtime with [`signIn`](#harness-sign-in) gets no key placeholder. See
+[ADR 0071](../adr/0071-a-pod-gets-a-key-placeholder-only-for-a-client-that-reads-it.md).
 
 `spec.gatewayEndpoint` names the gateway as an `https` URL whose host the
 gateway's TLS certificate covers. Sandboxes resolve no names, so the controller

@@ -68,12 +68,10 @@ would have to be repeated for each new harness.
 | Gateway-held ChatGPT plan sign-in | `--chatgpt`: browser sign-in, stored in `credentials/chatgpt-session.json` | `MODEL_AUTH_MODE=chatgpt` | Placeholder key |
 | The harness's own sign-in | `--sign-in`: a persistent login volume per installation and placement | `MODEL_AUTH_MODE=workload` and no key or token for the provider | `clientConfig.signIn`: a Secret delivered as a file and, optionally, an environment variable; no placeholder |
 
-Corrected 2026-11-20: "Placeholder key" in the Kubernetes sandbox column
-meant `OPENAI_API_KEY` in every AgentRun Pod, whatever its harness. The
-controller now sets it only for a harness whose client reads it from the Pod
-(`RunKeyEnv` in the registry: Codex) and for a runtime that names no harness;
-other harnesses' launch helpers or commands set their own placeholder. See
-[AgentRuntime](../reference/agentruntime.md).
+Corrected 2026-11-20: "Placeholder key" in the Kubernetes sandbox column is
+the placeholder the harness's client sends, which the controller sets in the
+Pod only for some harnesses; see
+[ADR 0071](0071-a-pod-gets-a-key-placeholder-only-for-a-client-that-reads-it.md).
 
 A Kubernetes gateway chooses per provider: a key, then a token, then, in
 workload mode, forwarding. One gateway can hold an OpenAI key while Claude Code
