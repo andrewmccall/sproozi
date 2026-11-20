@@ -43,12 +43,12 @@ var harnessSites = map[string]struct {
 // registered credential variable, placeholder, instructions file or
 // executable.
 func harnessSitePatterns() []*regexp.Regexp {
-	patterns := []*regexp.Regexp{
+	patterns := make([]*regexp.Regexp, 0, 5)
+	patterns = append(patterns,
 		regexp.MustCompile(`(==|!=)\s*(harness\.)?Native(Codex|Claude|Copilot)\b`),
 		regexp.MustCompile(`\bNative(Codex|Claude|Copilot)\s*(==|!=)`),
 		regexp.MustCompile(`\bcase\s+(harness\.)?Native(Codex|Claude|Copilot)\b`),
-		regexp.MustCompile(`^\s*(harness\.)?Native(Codex|Claude|Copilot)\s*:`),
-	}
+		regexp.MustCompile(`^\s*(harness\.)?Native(Codex|Claude|Copilot)\s*:`))
 	literals := slices.Clone(Selectors())
 	for _, h := range registry {
 		for _, value := range []string{h.KeyEnv, h.TokenEnv, h.TokenPlaceholder, h.InstructionsFile, h.Executable} {

@@ -14,6 +14,12 @@ import (
 // and show the difference in that change.
 const outcomesFile = "testdata/registry-outcomes.json"
 
+// Keys of the recorded outcomes.
+const (
+	outcomeDefault = "default"
+	outcomeError   = "error"
+)
+
 // outcomeKinds are the kinds whose outcomes are recorded: every registered
 // selector, in registry order, then an unregistered kind and the empty one.
 func outcomeKinds() []NativeKind {
@@ -78,7 +84,7 @@ func recordedOutcomes() map[string]any {
 	for _, key := range reservedCandidates {
 		reserved[key] = reservedEnvironment(key)
 	}
-	perKind := []map[string]any{}
+	perKind := make([]map[string]any, 0, len(outcomeKinds()))
 	for _, kind := range outcomeKinds() {
 		o := map[string]any{"kind": string(kind)}
 		o["validate"] = errText(kind.Validate())
@@ -103,11 +109,11 @@ func recordedOutcomes() map[string]any {
 		o["signInFile"] = h.SignInFile
 		o["provider"] = []string{h.Provider(false), h.Provider(true)}
 		o["inspectionHost"] = h.Protocol.InspectionHost()
-		o["default"] = h.Default
+		o[outcomeDefault] = h.Default
 		env := map[string]any{}
 		for _, credential := range []NativeCredential{CredentialKey, CredentialToken, CredentialSignIn, "other"} {
 			values, err := NativeBaseEnvironment(kind, "uid", credential)
-			env[string(credential)] = map[string]any{"env": values, "error": errText(err)}
+			env[string(credential)] = map[string]any{"env": values, outcomeError: errText(err)}
 		}
 		o["baseEnvironment"] = env
 		refused := map[string]string{}
@@ -122,7 +128,7 @@ func recordedOutcomes() map[string]any {
 		perKind = append(perKind, o)
 	}
 	return map[string]any{
-		"default":         string(Default()),
+		outcomeDefault:    string(Default()),
 		"taskKindList":    TaskKindList(),
 		"managedKindList": ManagedKindList(),
 		"managedKinds":    ManagedKindNames(),
