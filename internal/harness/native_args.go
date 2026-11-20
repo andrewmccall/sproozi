@@ -19,8 +19,6 @@ const (
 	NativeArgsMax = 64
 	// NativeArgMaxBytes bounds one harness argument.
 	NativeArgMaxBytes = 4096
-	// nativeModelFlag is the model option every managed harness takes.
-	nativeModelFlag = "--model"
 	// remoteName is Codex's and Copilot's remote-session flag and OpenCode's
 	// remote MCP transport.
 	remoteName = "remote"
@@ -60,13 +58,38 @@ var codexControlled = []controlledFlag{
 	{long: []string{"no-alt-screen", "no-daemon"}, why: whySetting},
 }
 
-// codexControlledKeys are configuration keys a -c/--config override may not
-// set, with every key below them.
-var codexControlledKeys = []string{
-	"developer_instructions", "instructions", "model_instructions_file", "experimental_instructions_file",
-	"model_provider", "model_providers", "mcp_servers.sproozi", "projects", "sandbox_mode",
-	"sandbox_workspace_write", "approval_policy", "approvals_reviewer", "check_for_update_on_startup",
-	"profile", "profiles", "notice",
+// ConfigOverride is a harness's command-line option that sets one
+// configuration key, such as Codex's -c key=value. Its value is a dotted key,
+// whose parts may be TOML-quoted, then "=" and the key's value. The zero value
+// is a harness with no such option.
+type ConfigOverride struct {
+	// Flag is the option in each spelling; its value is the next argument,
+	// or follows "=" (or, for a short name, is joined to it).
+	Flag controlledFlag
+	// ControlledKeys are the keys Sproozi sets, each with every key below
+	// it; an override of one is refused (see ValidateNativeArgs).
+	ControlledKeys []string
+	// ModelKey is the key that chooses the model (see NativeArgsSelectModel).
+	ModelKey string
+}
+
+// modelFlag is the model option of a harness that spells it only --model.
+var modelFlag = controlledFlag{long: []string{"model"}, value: true}
+
+// codexModelFlag is Codex's model option, --model or -m.
+var codexModelFlag = controlledFlag{long: []string{"model"}, short: "m", value: true}
+
+// codexConfigOverride is Codex's -c/--config override and the keys Sproozi
+// sets.
+var codexConfigOverride = ConfigOverride{
+	Flag: controlledFlag{long: []string{"config"}, short: "c", value: true},
+	ControlledKeys: []string{
+		"developer_instructions", "instructions", "model_instructions_file", "experimental_instructions_file",
+		"model_provider", "model_providers", "mcp_servers.sproozi", "projects", "sandbox_mode",
+		"sandbox_workspace_write", "approval_policy", "approvals_reviewer", "check_for_update_on_startup",
+		"profile", "profiles", "notice",
+	},
+	ModelKey: "model",
 }
 
 var claudeControlled = []controlledFlag{
@@ -131,16 +154,13 @@ func ValidateNativeArgs(kind NativeKind, args []string) error {
 			return fmt.Errorf("harness argument %q is refused: Sproozi adds the conversation to resume after "+
 				"the harness arguments; remove it", arg)
 		}
-		if kind == NativeCodex {
-			key, consumed, ok := codexConfigKey(args, i)
-			if ok {
-				if refused := controlledKey(key); refused != "" {
-					return fmt.Errorf("harness argument %q is refused: Sproozi sets %q for %s sessions; remove it",
-						strings.Join(args[i:i+consumed+1], " "), refused, kind)
-				}
-				i += consumed
-				continue
+		if key, consumed, ok := h.ConfigOverride.key(args, i); ok {
+			if refused := h.ConfigOverride.controlled(key); refused != "" {
+				return fmt.Errorf("harness argument %q is refused: Sproozi sets %q for %s sessions; remove it",
+					strings.Join(args[i:i+consumed+1], " "), refused, kind)
 			}
+			i += consumed
+			continue
 		}
 		for _, f := range controlled {
 			if name, ok := f.matches(arg); ok {
@@ -154,15 +174,18 @@ func ValidateNativeArgs(kind NativeKind, args []string) error {
 // NativeArgsSelectModel reports that the user's harness arguments choose the
 // model, so the configured default model is left out of the launch.
 func NativeArgsSelectModel(kind NativeKind, args []string) bool {
+	h, err := Managed(kind)
+	if err != nil {
+		// No launch reaches a kind the registry does not hold; it reports
+		// --model, as it always has.
+		h.ModelFlag = modelFlag
+	}
 	for i, arg := range args {
-		if arg == nativeModelFlag || strings.HasPrefix(arg, nativeModelFlag+"=") ||
-			kind == NativeCodex && (arg == "-m" || strings.HasPrefix(arg, "-m")) {
+		if _, ok := h.ModelFlag.matches(arg); ok {
 			return true
 		}
-		if kind == NativeCodex {
-			if key, _, ok := codexConfigKey(args, i); ok && key == "model" {
-				return true
-			}
+		if key, _, ok := h.ConfigOverride.key(args, i); ok && key == h.ConfigOverride.ModelKey {
+			return true
 		}
 	}
 	return false
@@ -183,23 +206,36 @@ func (f controlledFlag) matches(arg string) (string, bool) {
 	return "", false
 }
 
-// codexConfigKey reads the key of a Codex -c/--config override at args[i]
-// and how many further arguments it consumed.
-func codexConfigKey(args []string, i int) (string, int, bool) {
+// valueAt reads the value of this option at args[i] and how many further
+// arguments it consumed. A bare spelling with no argument after it has none.
+func (f controlledFlag) valueAt(args []string, i int) (string, int, bool) {
 	arg := args[i]
-	var value string
-	consumed := 0
-	switch {
-	case arg == "-c" || arg == "--config":
+	bare := slices.ContainsFunc(f.long, func(name string) bool { return arg == "--"+name }) ||
+		f.short != "" && arg == "-"+f.short
+	if bare {
 		if i+1 >= len(args) {
 			return "", 0, false
 		}
-		value, consumed = args[i+1], 1
-	case strings.HasPrefix(arg, "--config="):
-		value = strings.TrimPrefix(arg, "--config=")
-	case strings.HasPrefix(arg, "-c") && !strings.HasPrefix(arg, "--"):
-		value = strings.TrimPrefix(arg, "-c")
-	default:
+		return args[i+1], 1, true
+	}
+	for _, name := range f.long {
+		if value, ok := strings.CutPrefix(arg, "--"+name+"="); ok {
+			return value, 0, true
+		}
+	}
+	if f.short != "" && !strings.HasPrefix(arg, "--") {
+		if value, ok := strings.CutPrefix(arg, "-"+f.short); ok {
+			return value, 0, true
+		}
+	}
+	return "", 0, false
+}
+
+// key reads the key of an override at args[i] and how many further
+// arguments it consumed.
+func (o ConfigOverride) key(args []string, i int) (string, int, bool) {
+	value, consumed, ok := o.Flag.valueAt(args, i)
+	if !ok {
 		return "", 0, false
 	}
 	key, _, _ := strings.Cut(value, "=")
@@ -216,11 +252,12 @@ func normalizeConfigKey(key string) string {
 	return strings.Join(parts, ".")
 }
 
-func controlledKey(key string) string {
-	if i := slices.IndexFunc(codexControlledKeys, func(c string) bool {
+// controlled is the controlled key that key is or is below, or "".
+func (o ConfigOverride) controlled(key string) string {
+	if i := slices.IndexFunc(o.ControlledKeys, func(c string) bool {
 		return key == c || strings.HasPrefix(key, c+".")
 	}); i >= 0 {
-		return codexControlledKeys[i]
+		return o.ControlledKeys[i]
 	}
 	return ""
 }

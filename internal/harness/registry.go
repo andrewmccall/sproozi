@@ -83,6 +83,14 @@ type Harness struct {
 	// RefusedFlags are the command-line options Sproozi controls; a user's
 	// harness arguments may not set them (see ValidateNativeArgs).
 	RefusedFlags []controlledFlag
+	// ModelFlag is the command-line option that chooses the model; a user's
+	// harness arguments that set it replace the configured model (see
+	// NativeArgsSelectModel).
+	ModelFlag controlledFlag
+	// ConfigOverride is the option that sets one configuration key, with
+	// the keys Sproozi sets, when the harness has one (Codex's -c); the zero
+	// value when it has none.
+	ConfigOverride ConfigOverride
 	// ReservedEnv are the variables the supervisor sets for this harness and a
 	// launch's explicit environment may not replace, besides the fixed ones
 	// (HOME, PWD, KUBECONFIG). A harness may declare none only with a reason in
@@ -246,6 +254,7 @@ var registry = []Harness{
 		SignInFile: "auth.json", StateProvesCompletion: true,
 		DisplayName: "Codex", Product: "OpenAI Codex CLI", Executable: "/usr/local/bin/codex", InstructionsFile: "AGENTS.md",
 		KeyEnv: nativeOpenAIKey, RunKeyEnv: nativeOpenAIKey, RefusedFlags: codexControlled, ReservedEnv: []string{"CODEX_HOME"},
+		ModelFlag: codexModelFlag, ConfigOverride: codexConfigOverride,
 		RemoteExecutor: true, TakesTask: true, Default: true, KeyOptions: codexKeyOptions, SignInOptions: []string{codexTrust},
 		CaptureState: captureCodex,
 		SignInChoices: []SignInChoice{
@@ -259,6 +268,7 @@ var registry = []Harness{
 		SignInFile:  ".credentials.json",
 		DisplayName: "Claude Code", Product: "Anthropic Claude Code", Executable: "/usr/local/bin/claude", InstructionsFile: "CLAUDE.md",
 		KeyEnv: nativeAnthropicKey, RefusedFlags: claudeControlled, RemoteExecutor: true, TakesTask: true,
+		ModelFlag: modelFlag,
 		ReservedEnv: []string{"CLAUDE_CONFIG_DIR", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_AUTOUPDATER",
 			"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"},
 		SignInChoices: []SignInChoice{
@@ -287,6 +297,7 @@ var registry = []Harness{
 			{Label: "An OpenAI API key, held by the gateway (no Copilot plan needed)", Answer: AnswerKey},
 		},
 		CaptureState: captureCopilot,
+		ModelFlag:    modelFlag,
 		RequestFiles: true, Loader: NativeMCP,
 		MCP: MCPFormat{File: "copilot-mcp.json", Field: mcpServersField, Entry: func(name, address string) (string, any) {
 			return name, map[string]any{connectionType: httpTransport, connectionURL: address, "tools": []string{"*"}}

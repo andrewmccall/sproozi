@@ -8,6 +8,9 @@ import (
 // fixtureModel is a model name the tests pass.
 const fixtureModel = "gpt-5.5"
 
+// nativeModelFlag is the model option every managed harness takes.
+const nativeModelFlag = "--model"
+
 // addDirFlag is a flag every managed harness takes and Sproozi leaves alone.
 const addDirFlag = "--add-dir"
 

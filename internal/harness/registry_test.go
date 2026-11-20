@@ -317,6 +317,9 @@ var reservedEnvExempt = map[NativeKind]string{
 // wrong: a managed harness supplies every one, so a new one never silently
 // takes another's value, and an AgentRun-only harness supplies none.
 func managedFactProblems(h Harness) []string {
+	if h.Native == "" && (h.ModelFlag.declared() || h.ConfigOverride.Flag.declared()) {
+		return []string{"has no Native kind, so it must not set ModelFlag or ConfigOverride"}
+	}
 	if h.Native == "" {
 		if h.DisplayName != "" || h.Product != "" || h.Executable != "" || h.InstructionsFile != "" || h.KeyEnv != "" ||
 			h.RefusedFlags != nil || h.ReservedEnv != nil || h.RemoteExecutor || h.TakesTask || h.Default ||
@@ -339,6 +342,7 @@ func managedFactProblems(h Harness) []string {
 		{"CaptureState", h.CaptureState == nil},
 		{"InstructionsFile", h.InstructionsFile == ""},
 		{"KeyEnv", h.KeyEnv == ""},
+		{"ModelFlag", !h.ModelFlag.declared() || !h.ModelFlag.value},
 		{"RefusedFlags", len(h.RefusedFlags) == 0},
 		{"ReservedEnv", len(h.ReservedEnv) == 0 && reservedEnvExempt[h.Native] == ""},
 		{"SignInChoices", len(h.SignInChoices) == 0},
@@ -350,6 +354,9 @@ func managedFactProblems(h Harness) []string {
 	}
 	if (h.TokenEnv == "") != (h.TokenPlaceholder == "") {
 		problems = append(problems, "must set TokenEnv and TokenPlaceholder together")
+	}
+	if o := h.ConfigOverride; o.Flag.declared() != (len(o.ControlledKeys) != 0) || o.Flag.declared() != (o.ModelKey != "") {
+		problems = append(problems, "must set ConfigOverride's Flag, ControlledKeys and ModelKey together")
 	}
 	return append(problems, signInChoiceProblems(h)...)
 }
