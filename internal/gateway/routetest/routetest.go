@@ -335,6 +335,69 @@ func refusedWithoutCapability(t *testing.T, name string, routes gateway.Dispatch
 	}
 }
 
+// edgeRequests are malformed or unusual requests a sandbox can send to any
+// route: none may leave the dispatcher to record an omission.
+var edgeRequests = []struct{ method, path, body string }{
+	{http.MethodGet, "/", ""},
+	{http.MethodPost, "/", "{"},
+	{http.MethodDelete, "/anything?x=1", ""},
+	{http.MethodPost, "/mcp/unregistered", `{"jsonrpc":"2.0","id":1,"method":"initialize"}`},
+	{http.MethodPost, "/mcp/" + MCPServer, "not json"},
+	{http.MethodPost, "/mcp/" + MCPServer, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18",` +
+		`"capabilities":{},"clientInfo":{"name":"edges","version":"1"}}}`},
+	{http.MethodGet, "/mcp/" + MCPServer, ""},
+	{http.MethodPost, "/mcp/sproozi", "not json"},
+	{http.MethodPost, "/mcp", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`},
+	{http.MethodPost, "/mcp", "not json"},
+	{http.MethodPost, "/mcp", `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"kubernetes_list_pods","arguments":{"namespace":"Bad_Name"}}}`},
+}
+
+// Edges sends edgeRequests, and a named MCP tool call without the Accept
+// header the protocol requires, to every route, and fails on any record the
+// dispatcher wrote because a handler wrote none. It returns the unrecorded
+// reasons the handlers declared.
+func Edges(t *testing.T, routes gateway.Dispatcher, events *Recorder) map[gateway.UnrecordedReason]bool {
+	t.Helper()
+	declared := map[gateway.UnrecordedReason]bool{}
+	observed := gateway.Dispatcher{}
+	observe := func(h http.Handler) http.Handler {
+		if h == nil {
+			return nil
+		}
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h.ServeHTTP(w, r)
+			if reason, ok, _ := gateway.DeclaredUnrecorded(r.Context()); ok {
+				declared[reason] = true
+			}
+		})
+	}
+	for authority, route := range routes {
+		route.Handler = observe(route.Handler)
+		route.Paths = slices.Clone(route.Paths)
+		for i := range route.Paths {
+			route.Paths[i].Route.Handler = observe(route.Paths[i].Route.Handler)
+		}
+		observed[authority] = route
+	}
+	grant := Grant("edges", "", "")
+	for _, authority := range slices.Sorted(maps.Keys(routes)) {
+		requests := slices.Clone(edgeRequests)
+		for _, p := range routes[authority].Paths {
+			requests = append(requests, struct{ method, path, body string }{http.MethodGet, p.Prefix + "x?y=1", "{"})
+		}
+		for _, e := range requests {
+			serve(observed, authority, request{method: e.method, path: e.path, body: e.body}, grant)
+			noOmission(t, authority+" "+e.method+" "+e.path, events.Take())
+		}
+		noAccept := httptest.NewRequest(http.MethodPost, "https://"+strings.TrimSuffix(authority, ":443")+"/mcp/"+MCPServer,
+			strings.NewReader(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"`+mcpTool+`","arguments":{}}}`))
+		noAccept.Header.Set("Content-Type", "application/json")
+		observed.ServeHTTP(httptest.NewRecorder(), noAccept.WithContext(gateway.WithIdentity(noAccept.Context(), grant)))
+		noOmission(t, authority+" tools/call without Accept", events.Take())
+	}
+	return declared
+}
+
 // noOmission fails when the dispatcher had to record a request its handler
 // neither recorded nor declared unrecorded.
 func noOmission(t *testing.T, name string, recorded []audit.Event) {

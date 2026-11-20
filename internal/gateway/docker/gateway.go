@@ -83,7 +83,14 @@ func composeRoutes(owner *Owner, config GatewayConfig, tracker *budget.Tracker, 
 	if _, covered := config.Certificates[host]; err != nil || host == "" || port != "443" || reserved || !covered {
 		return nil, errors.New("docker gateway: exact certified MCP authority on port 443 required")
 	}
-	var named = http.NotFoundHandler()
+	// Without a registry every other path on the MCP authority is refused
+	// with the standard 404, and the refusal is recorded without the path.
+	var named http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		e := gateway.AuditEvent(r.Context(), "mcp.request")
+		e.Service, e.DenyReason, e.Outcome = "mcp", "no MCP server is registered at this gateway", audit.RefusedPolicy
+		gateway.Record(r.Context(), journal, e)
+		http.NotFound(w, r)
+	})
 	if config.MCPRegistry != nil {
 		named = mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: config.MCPRegistry, HTTPClient: config.MCPClient, Budgets: tracker, AuditLogger: journal})
 	}

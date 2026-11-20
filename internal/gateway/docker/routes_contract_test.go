@@ -55,10 +55,32 @@ func TestEveryComposedRouteKeepsTheRouteContract(t *testing.T) {
 					t.Fatal(err)
 				}
 				routetest.Check(t, routes, events, tracker)
+				routetest.Edges(t, routes, events)
 				if strays := routetest.ModelAuthorities(routes); len(strays) != 0 {
 					t.Errorf("model.inference routes outside the provider table: %v", strays)
 				}
 			})
 		}
+	}
+}
+
+// A Docker gateway without an MCP registry, GitHub or Kubernetes leaves no
+// request unrecorded by omission either.
+func TestMinimalDockerRoutesRecordEveryEdgeRequest(t *testing.T) {
+	for _, kind := range harness.ManagedKinds() {
+		t.Run(string(kind), func(t *testing.T) {
+			events := &routetest.Recorder{}
+			owner := &Owner{policy: gateway.PolicySnapshot{Spec: api.AgentPolicySpec{
+				AllowedCapabilities: []api.CapabilityKind{api.CapabilityModelInference}}}}
+			config := GatewayConfig{Harness: kind, AuditLogger: events,
+				Certificates: map[string]tls.Certificate{"gateway.fixture": {}}, MCPAuthority: "gateway.fixture:443",
+				Model: modelgateway.HandlerConfig{UpstreamURL: openAIOrigin, ProviderAuth: modelauth.Workload{},
+					HTTPClient: routetest.Client(t)}}
+			routes, err := composeRoutes(owner, config, budget.NewTracker(), diagnose.NewJournal(events, diagnose.Limits{}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			routetest.Edges(t, routes, events)
+		})
 	}
 }

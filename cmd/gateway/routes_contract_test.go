@@ -91,6 +91,12 @@ func TestEveryComposedRouteKeepsTheRouteContract(t *testing.T) {
 			events := &routetest.Recorder{}
 			routes, budgets := servingRoutes(t, events)
 			routetest.Check(t, routes, events, budgets)
+			declared := routetest.Edges(t, routes, events)
+			for _, reason := range gateway.UnrecordedReasons() {
+				if !declared[reason] {
+					t.Errorf("no request declared %q unrecorded", reason)
+				}
+			}
 			if strays := routetest.ModelAuthorities(routes); len(strays) != 0 {
 				t.Errorf("model.inference routes outside the provider table: %v", strays)
 			}
