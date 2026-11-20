@@ -273,6 +273,10 @@ func (h *Handler) prepare(ctx context.Context, upstream *sdk.ClientSession,
 					result, err := upstream.CallTool(workCtx, &sdk.CallToolParams{Name: name, Arguments: value})
 					if err != nil {
 						callEvent.DenyReason, callEvent.Outcome = "MCP upstream call failed", audit.UpstreamFailed
+						if workCtx.Err() != nil {
+							// The workload left while the tool ran.
+							callEvent.Outcome = audit.Cancelled
+						}
 						return nil, fmt.Errorf("MCP upstream call failed")
 					}
 					if result.IsError {

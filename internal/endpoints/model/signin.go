@@ -72,6 +72,14 @@ func (h *Relay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.MethodDelete, http.MethodConnect, http.MethodOptions, http.MethodTrace, http.MethodPatch}, r.Method) {
 			method = r.Method
 		}
+		// A path the relay serves, with the wrong method or a query, is a
+		// malformed request; any other path is not relayed by decision.
+		e.Outcome = audit.RefusedPolicy
+		if slices.ContainsFunc(h.Routes, func(route RelayRoute) bool {
+			return route.Path == r.URL.Path || route.Prefix && strings.HasPrefix(r.URL.Path, route.Path)
+		}) {
+			e.Outcome = audit.RefusedRequest
+		}
 		h.refuse(r.Context(), w, e, http.StatusForbidden, fmt.Sprintf(
 			"the gateway relays only the provider's sign-in and account requests (method %s; query parameters present: %t)",
 			method, r.URL.RawQuery != ""))
@@ -124,7 +132,10 @@ func (h *Relay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Relay) refuse(ctx context.Context, w http.ResponseWriter, e audit.Event, status int, reason string) {
-	e.DenyReason, e.Outcome = reason, gateway.RefusalOutcome(status)
+	e.DenyReason = reason
+	if e.Outcome == "" {
+		e.Outcome = gateway.RefusalOutcome(status)
+	}
 	h.log(ctx, e)
 	http.Error(w, reason, status)
 }

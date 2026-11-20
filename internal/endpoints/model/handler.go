@@ -254,6 +254,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if providerAuth.Mode() == modelauth.ChatGPTMode {
 		if err := validateChatGPTRequest(r, bodyBytes, limits.MaxCostMicros); err != nil {
+			if limits.MaxCostMicros > 0 {
+				// A dollar cap cannot apply to plan usage, as pricing cannot.
+				e.Outcome = audit.RefusedBudget
+			}
 			h.deny(r.Context(), w, e, http.StatusForbidden, err.Error(), "permission_error", "chatgpt_request_not_supported")
 			return
 		}
@@ -650,10 +654,24 @@ func (h *Handler) deny(ctx context.Context, w http.ResponseWriter, e audit.Event
 	e.Allowed = false
 	e.DenyReason = message
 	if e.Outcome == "" {
-		e.Outcome = gateway.RefusalOutcome(status)
+		e.Outcome = refusalOutcome(status, code)
 	}
 	gateway.Record(ctx, h.Config.AuditLogger, e)
 	h.writeError(w, status, message, errType, code)
+}
+
+// refusalOutcome is the outcome of a refusal by its cause: an operation,
+// option or protocol the gateway does not support is a malformed request,
+// a model without administrator pricing under a cost cap is a budget
+// refusal, and the rest follow the status.
+func refusalOutcome(status int, code string) audit.Outcome {
+	switch code {
+	case "path_not_allowed", "unsupported_operation", "streaming_not_supported", "chatgpt_request_not_supported":
+		return audit.RefusedRequest
+	case "pricing_unavailable":
+		return audit.RefusedBudget
+	}
+	return gateway.RefusalOutcome(status)
 }
 
 // writeError writes the protocol's error body.

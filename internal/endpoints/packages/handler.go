@@ -47,6 +47,7 @@ func (h *Handler) handlePackage(w http.ResponseWriter, r *http.Request, e audit.
 	}
 	upstreamURL, err := packageUpstreamURL("https://pypi.org", r.URL.Hostname(), r.URL.Path)
 	if err != nil || r.URL.RawQuery != "" {
+		e.Outcome = audit.RefusedRequest
 		h.deny(r.Context(), w, e, http.StatusForbidden, "package URL is not canonical")
 		return
 	}

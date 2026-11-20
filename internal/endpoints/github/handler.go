@@ -99,6 +99,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case isGraphQL(r):
 		h.handleGraphQL(w, r, e, identity)
 	default:
+		e.Outcome = audit.RefusedRequest
 		h.deny(r.Context(), w, e, http.StatusForbidden, "operation not permitted")
 	}
 }
@@ -194,11 +195,13 @@ func (h *Handler) handleGit(w http.ResponseWriter, r *http.Request, e audit.Even
 		query := r.URL.Query()
 		service := query.Get("service")
 		if r.Method != http.MethodGet || len(query) != 1 || (service != uploadPackEndpoint && service != receivePackEndpoint) {
+			e.Outcome = audit.RefusedRequest
 			h.deny(r.Context(), w, e, http.StatusForbidden, "git discovery request is not permitted")
 			return
 		}
 	case uploadPackEndpoint, receivePackEndpoint:
 		if r.Method != http.MethodPost || r.URL.RawQuery != "" {
+			e.Outcome = audit.RefusedRequest
 			h.deny(r.Context(), w, e, http.StatusForbidden, "git service request is not permitted")
 			return
 		}
@@ -243,6 +246,7 @@ func (h *Handler) handlePRCreate(w http.ResponseWriter, r *http.Request, e audit
 	// Query parameters are not part of pull request creation, and forwarding
 	// them would pass sandbox input that no check has read.
 	if r.URL.RawQuery != "" {
+		e.Outcome = audit.RefusedRequest
 		h.deny(r.Context(), w, e, http.StatusForbidden, "pull request query parameters are not permitted")
 		return
 	}
