@@ -349,7 +349,7 @@ func TestGitHubOutcomesAreRecorded(t *testing.T) {
 		}
 		handler := &githubgateway.Handler{Config: githubgateway.HandlerConfig{TokenProvider: tokens, AuditLogger: events,
 			GitBaseURL: "https://git.test", APIBaseURL: "https://api.test", HTTPClient: recordedGitHubUpstream(tc.replies)}}
-		route := gateway.Route{Capability: string(capability), Tier: audit.TierSemantic, Handler: handler,
+		route := gateway.Route{Capability: capability, Tier: audit.TierSemantic, Handler: handler,
 			Budgets: tracker, AuditLogger: events}
 		routes := gateway.Dispatcher{githubgateway.GitAuthority: route, githubgateway.APIAuthority: route}
 		before := ledgerReading(tracker, key)

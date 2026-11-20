@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"path"
 	"slices"
+	"sort"
 	"strings"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -15,12 +17,33 @@ import (
 	"github.com/andrewmccall/sproozi/internal/audit"
 )
 
+// Admission says who admits a route's requests (ADR 0070).
+type Admission uint8
+
+const (
+	// AdmitCapability, the zero value: the dispatcher checks and meters the
+	// route's Capability, which must be set.
+	AdmitCapability Admission = iota
+	// AdmitSelected: the handler selects a capability from the request and
+	// checks it before any other work, as named MCP does. Reason names the
+	// handler's check.
+	AdmitSelected
+	// AdmitOpen: the route needs no capability by decision. Reason names the
+	// record that decided it.
+	AdmitOpen
+)
+
 // Route declares the guarantee and capability of an exact upstream authority.
 // It is the single source of both: the Dispatcher enforces the capability and
 // AuditEvent copies both into every handler's record. Authentication belongs
 // to proxytransport; handlers authorize the operation.
 type Route struct {
-	Capability  string
+	Capability sprooziv1alpha1.CapabilityKind
+	// Admission says who admits a request; Validate refuses a route with a
+	// handler and no valid declaration.
+	Admission Admission
+	// Reason names the check or record behind AdmitSelected or AdmitOpen.
+	Reason      string
 	Tier        audit.EnforcementTier
 	Handler     http.Handler
 	Budgets     *budget.Tracker
@@ -60,6 +83,51 @@ func (d Dispatcher) Select(authority, requestPath string) (Route, string, bool) 
 
 type Dispatcher map[string]Route
 
+// Validate refuses a route or path route that has a handler and no valid
+// admission: a capability for AdmitCapability, or no capability and a Reason
+// for AdmitSelected and AdmitOpen. A route without a handler is a reserved,
+// closed authority. Compositions call it before serving.
+func (d Dispatcher) Validate() error {
+	var problems []string
+	for authority, route := range d {
+		if err := route.validate(); err != nil {
+			problems = append(problems, authority+": "+err.Error())
+		}
+		for _, p := range route.Paths {
+			if err := p.Route.validate(); err != nil {
+				problems = append(problems, authority+p.Prefix+": "+err.Error())
+			}
+		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	sort.Strings(problems)
+	return fmt.Errorf("gateway: routes without a valid admission: %s", strings.Join(problems, "; "))
+}
+
+func (r Route) validate() error {
+	if r.Handler == nil {
+		return nil
+	}
+	switch r.Admission {
+	case AdmitCapability:
+		if r.Capability == "" {
+			return errors.New("serves without a capability; set Capability, or declare AdmitSelected or AdmitOpen with a Reason")
+		}
+	case AdmitSelected, AdmitOpen:
+		if r.Capability != "" {
+			return fmt.Errorf("declares capability %s, which the dispatcher would not check", r.Capability)
+		}
+		if strings.TrimSpace(r.Reason) == "" {
+			return errors.New("needs a Reason naming who admits its requests")
+		}
+	default:
+		return fmt.Errorf("has unknown admission %d", r.Admission)
+	}
+	return nil
+}
+
 type routeContextKey struct{}
 
 func (d Dispatcher) Allows(authority string) bool {
@@ -85,17 +153,17 @@ func (d Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := context.WithValue(r.Context(), routeContextKey{}, route)
 	// Named MCP routes select their capability after parsing the server name
 	// and check it with the same Permits.
-	if route.Capability != "" {
-		capability := sprooziv1alpha1.CapabilityKind(route.Capability)
+	if route.Admission == AdmitCapability && route.Capability != "" {
+		capability := route.Capability
 		if !identity.Permits(capability) {
-			reason := "the run does not request capability " + route.Capability +
+			reason := "the run does not request capability " + string(capability) +
 				"; add it to the run's capabilities"
 			if slices.Contains(identity.Capabilities, capability) {
-				reason = "policy " + identity.Policy.Name + " does not allow capability " + route.Capability +
+				reason = "policy " + identity.Policy.Name + " does not allow capability " + string(capability) +
 					"; add it to the policy's allowedCapabilities"
 			}
 			if route.AuditLogger != nil {
-				event := AuditEvent(ctx, route.Capability)
+				event := AuditEvent(ctx, string(capability))
 				event.DenyReason = reason
 				route.AuditLogger.Log(event)
 			}
@@ -105,12 +173,12 @@ func (d Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		meter, err := identity.Meter(ctx, route.Budgets, capability)
 		if errors.Is(err, ErrBudgetUnavailable) {
 			writeDenial(w, http.StatusServiceUnavailable, "api_error", "budget_unavailable",
-				"budget accounting for "+route.Capability+" is unavailable; retry later")
+				"budget accounting for "+string(capability)+" is unavailable; retry later")
 			return
 		}
 		if err != nil {
 			writeDenial(w, http.StatusForbidden, "permission_error", "allocation_denied",
-				"the "+route.Capability+" allocation for this run is missing or exhausted")
+				"the "+string(capability)+" allocation for this run is missing or exhausted")
 			return
 		}
 		ctx = budget.WithMeter(ctx, meter)

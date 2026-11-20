@@ -14,7 +14,7 @@ func AuditEvent(ctx context.Context, operation string) audit.Event {
 	identity, _ := IdentityFromContext(ctx)
 	event := identity.auditEvent(operation)
 	if route, ok := ctx.Value(routeContextKey{}).(Route); ok {
-		event.Capability, event.SemanticLevel = route.Capability, route.Tier
+		event.Capability, event.SemanticLevel = string(route.Capability), route.Tier
 	}
 	return event
 }

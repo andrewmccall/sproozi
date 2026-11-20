@@ -316,7 +316,7 @@ func serveModel(anthropic bool, config model.HandlerConfig, tracker *budget.Trac
 	if anthropic {
 		handler, authority = model.NewAnthropicHandler(config), model.AnthropicAuthority
 	}
-	routes := gateway.Dispatcher{authority: {Capability: string(api.CapabilityModelInference), Tier: audit.TierSemantic,
+	routes := gateway.Dispatcher{authority: {Capability: api.CapabilityModelInference, Tier: audit.TierSemantic,
 		Handler: handler, Budgets: tracker, AuditLogger: config.AuditLogger}}
 	routes.ServeHTTP(w, r)
 }
@@ -925,7 +925,7 @@ func TestRelayOutcomesAreRecorded(t *testing.T) {
 		if strings.HasPrefix(tc.url, account) {
 			authority = "api.github.com:443"
 		}
-		routes := gateway.Dispatcher{authority: {Capability: string(api.CapabilityModelInference), Tier: audit.TierSemantic,
+		routes := gateway.Dispatcher{authority: {Capability: api.CapabilityModelInference, Tier: audit.TierSemantic,
 			Handler: relay, Budgets: tracker, AuditLogger: events}}
 		before := ledgerReading(tracker)
 		req := httptest.NewRequest(tc.method, tc.url, strings.NewReader(tc.body))

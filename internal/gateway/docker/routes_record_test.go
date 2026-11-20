@@ -105,21 +105,7 @@ func recordedRoutes(kind harness.NativeKind, auth modelauth.Authenticator) (gate
 			GitBaseURL: "https://github.com", APIBaseURL: "https://api.github.com"},
 		Kubernetes: &kubernetesgateway.HandlerConfig{Upstream: upstream, Client: http.DefaultClient},
 		Model:      modelgateway.HandlerConfig{UpstreamURL: "https://api.openai.com", ProviderAuth: auth, HTTPClient: http.DefaultClient}}
-	tracker := budget.NewTracker()
-	journal := diagnose.NewJournal(config.AuditLogger, diagnose.Limits{})
-	config.AuditLogger = journal
-	modelConfig := config.Model
-	modelConfig.AuditLogger = journal
-	dispatch, err := modelRoutes(config, modelConfig, tracker)
-	if err != nil {
-		return nil, err
-	}
-	if err := addNativeRoutes(owner, config, dispatch, tracker); err != nil {
-		return nil, err
-	}
-	// NewGateway adds the MCP authority's route last.
-	dispatch[config.MCPAuthority] = gateway.Route{Tier: audit.TierProtocol, Handler: diagnose.NewControl(journal, http.NotFoundHandler())}
-	return dispatch, nil
+	return composeRoutes(owner, config, budget.NewTracker(), diagnose.NewJournal(config.AuditLogger, diagnose.Limits{}))
 }
 
 // TestDockerRoutesAreRecorded records the Docker composition's route table

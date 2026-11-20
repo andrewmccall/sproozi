@@ -235,7 +235,7 @@ func TestPackageOutcomesAreRecorded(t *testing.T) {
 	for _, tc := range cases {
 		events := &recordedEvents{}
 		handler := &packages.Handler{Config: packages.HandlerConfig{HTTPClient: tc.client, AuditLogger: events}}
-		route := gateway.Route{Capability: string(capability), Tier: audit.TierSemantic, Handler: handler,
+		route := gateway.Route{Capability: capability, Tier: audit.TierSemantic, Handler: handler,
 			Budgets: tc.tracker, AuditLogger: events}
 		routes := gateway.Dispatcher{packages.IndexAuthority: route, packages.FilesAuthority: route}
 		ledgerKey := ""

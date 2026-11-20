@@ -80,7 +80,7 @@ func TestDispatcherEnforcesRouteCapabilityAndAuditsRouteTier(t *testing.T) {
 			var events bytes.Buffer
 			logger := audit.NewLogger(&events)
 			called := false
-			d := gateway.Dispatcher{fixtureAuthority: {Capability: string(capability), Tier: audit.TierSemantic,
+			d := gateway.Dispatcher{fixtureAuthority: {Capability: capability, Tier: audit.TierSemantic,
 				AuditLogger: logger, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					called = true
 					event := gateway.AuditEvent(r.Context(), "read")
@@ -124,7 +124,7 @@ func TestDispatcherDeniesUnknownDestinationAndUnavailableBudgetAsJSON(t *testing
 		Template:     gateway.TemplateSnapshot{Name: fixtureTemplateName},
 		Capabilities: []api.CapabilityKind{capability}}
 	// A configured budget without its tracker cannot be accounted.
-	d := gateway.Dispatcher{fixtureAuthority: {Capability: string(capability), Handler: http.NotFoundHandler()}}
+	d := gateway.Dispatcher{fixtureAuthority: {Capability: capability, Handler: http.NotFoundHandler()}}
 	for _, tc := range []struct {
 		target, errorType, code string
 		status                  int
@@ -203,5 +203,33 @@ func TestDispatcherServesAPathRouteWithItsOwnCapability(t *testing.T) {
 	}
 	if !d.Allows(fixtureAuthority) {
 		t.Fatal("a host with only a path route isn't allowed")
+	}
+}
+
+// A route with a handler declares who admits it; a reserved route without a
+// handler needs no declaration.
+func TestValidateRefusesRoutesWithoutAValidAdmission(t *testing.T) {
+	h := http.NotFoundHandler()
+	for _, tc := range []struct {
+		name  string
+		route gateway.Route
+		valid bool
+	}{
+		{"capability", gateway.Route{Capability: api.CapabilityKubernetesRead, Handler: h}, true},
+		{"reserved without a handler", gateway.Route{}, true},
+		{"zero route with a handler", gateway.Route{Handler: h}, false},
+		{"selected with a reason", gateway.Route{Admission: gateway.AdmitSelected, Reason: "handler selects", Handler: h}, true},
+		{"selected without a reason", gateway.Route{Admission: gateway.AdmitSelected, Handler: h}, false},
+		{"selected with a capability", gateway.Route{Admission: gateway.AdmitSelected, Reason: "x",
+			Capability: api.CapabilityKubernetesRead, Handler: h}, false},
+		{"open with a record", gateway.Route{Admission: gateway.AdmitOpen, Reason: "ADR 0025", Handler: h}, true},
+		{"open without a record", gateway.Route{Admission: gateway.AdmitOpen, Handler: h}, false},
+		{"unknown admission", gateway.Route{Admission: 9, Reason: "x", Handler: h}, false},
+		{"undeclared path route", gateway.Route{Paths: []gateway.PathRoute{{Prefix: "/login/", Route: gateway.Route{Handler: h}}}}, false},
+	} {
+		err := gateway.Dispatcher{fixtureAuthority: tc.route}.Validate()
+		if (err == nil) != tc.valid {
+			t.Errorf("%s: Validate() = %v", tc.name, err)
+		}
 	}
 }

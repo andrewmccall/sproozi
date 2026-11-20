@@ -41,7 +41,7 @@ func TestDispatchCompositionReachesModelUpstream(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "https://api.openai.com:443/v1/chat/completions", strings.NewReader(`{"model":"test","messages":[]}`))
 	req.Header.Set("Proxy-Authorization", "Bearer run-token")
 	response := httptest.NewRecorder()
-	gateway.Dispatcher{"api.openai.com:443": gateway.Route{Handler: h, Capability: string(sprooziv1alpha1.CapabilityModelInference), Budgets: budget.NewTracker()}}.ServeHTTP(response, req.WithContext(gateway.WithIdentity(req.Context(), id)))
+	gateway.Dispatcher{"api.openai.com:443": gateway.Route{Handler: h, Capability: sprooziv1alpha1.CapabilityModelInference, Budgets: budget.NewTracker()}}.ServeHTTP(response, req.WithContext(gateway.WithIdentity(req.Context(), id)))
 	if response.Code != http.StatusOK || calls.Load() != 1 {
 		t.Fatalf("response=%v calls=%d", response, calls.Load())
 	}
@@ -60,7 +60,7 @@ func TestEndpointBudgetStopsUpstreamAndKeepsCapabilitiesSeparate(t *testing.T) {
 	id.Policy.Spec.Budgets = map[sprooziv1alpha1.CapabilityKind]sprooziv1alpha1.EndpointBudget{
 		sprooziv1alpha1.CapabilityKubernetesRead: {MaxUnits: 1},
 	}
-	d := gateway.Dispatcher{kubernetesgateway.Authority: {Handler: handler, Capability: string(sprooziv1alpha1.CapabilityKubernetesRead), Budgets: tracker}}
+	d := gateway.Dispatcher{kubernetesgateway.Authority: {Handler: handler, Capability: sprooziv1alpha1.CapabilityKubernetesRead, Budgets: tracker}}
 	request := func() int {
 		req := httptest.NewRequest(http.MethodGet, "https://kubernetes.default.svc/api/v1/namespaces/demo/pods", nil)
 		response := httptest.NewRecorder()

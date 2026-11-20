@@ -60,6 +60,11 @@ type Result struct {
 	Note      string     `json:"note,omitempty"`
 }
 
+// Admission is the Reason of the gateway authority's route, which NewControl
+// serves with named MCP behind it: the route is gateway.AdmitSelected.
+const Admission = "named MCP selects and checks mcp.<name> from the path; " +
+	"the control connection needs no capability (ADR 0025)"
+
 // NewControl serves the Sproozi control connection at ControlPath and passes
 // every other request to next. It needs no capability: an execution can read
 // only its own retained denials, selected by its authenticated identity.

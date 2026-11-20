@@ -106,13 +106,9 @@ func composedRoutes(t *testing.T) gateway.Dispatcher {
 	handlers[api.CapabilityNetworkEgress] = &destination.Handler{}
 	named := mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: cfg.mcpRegistry, AuditLogger: journal})
 	dispatcher := composeDispatcher(cfg, handlers, diagnose.NewControl(journal, named), anthropic, signedIn)
-	budgets := budget.NewTracker()
-	for authority, route := range dispatcher {
-		route.Budgets, route.AuditLogger = budgets, journal
-		for i := range route.Paths {
-			route.Paths[i].Route.Budgets, route.Paths[i].Route.AuditLogger = budgets, journal
-		}
-		dispatcher[authority] = route
+	attachAccounting(dispatcher, budget.NewTracker(), journal)
+	if err := dispatcher.Validate(); err != nil {
+		t.Fatal(err)
 	}
 	return dispatcher
 }

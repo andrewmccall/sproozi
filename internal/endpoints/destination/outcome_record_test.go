@@ -220,7 +220,7 @@ func TestDestinationOutcomesAreRecorded(t *testing.T) {
 	for _, tc := range cases {
 		events := &recordedEvents{}
 		handler := &destination.Handler{Config: destination.HandlerConfig{Profiles: profiles, AuditLogger: events, HTTPClient: tc.client}}
-		route := gateway.Route{Capability: string(capability), Tier: audit.TierDestination, Handler: handler,
+		route := gateway.Route{Capability: capability, Tier: audit.TierDestination, Handler: handler,
 			Budgets: tc.tracker, AuditLogger: events}
 		routes := gateway.Dispatcher{authority: route, "evil.example:8443": route, "127.0.0.1:8443": route}
 		ledgerKey := ""

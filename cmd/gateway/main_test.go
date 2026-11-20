@@ -943,11 +943,11 @@ func TestCopilotHostsServeAForwardedSignInOrAGatewayToken(t *testing.T) {
 		// Copilot's own sign-in runs GitHub's device flow on github.com as a
 		// path route; the rest of github.com stays the GitHub capability's.
 		login, _, _ := routes.Select("github.com:443", "/login/device/code")
-		if (login.Handler != nil && login.Capability == string(api.CapabilityModelInference)) != tc.forwards {
+		if (login.Handler != nil && login.Capability == api.CapabilityModelInference) != tc.forwards {
 			t.Fatalf("%s mode: Copilot's sign-in route %+v", tc.mode, login)
 		}
 		repository, _, _ := routes.Select("github.com:443", "/owner/repo.git/info/refs")
-		if routes["github.com:443"].Handler != nil && repository.Capability == string(api.CapabilityModelInference) {
+		if routes["github.com:443"].Handler != nil && repository.Capability == api.CapabilityModelInference {
 			t.Fatalf("%s mode: Copilot's sign-in took github.com's Git route", tc.mode)
 		}
 		for _, authority := range []string{"api.individual.githubcopilot.com:443", "api.business.githubcopilot.com:443"} {
@@ -959,7 +959,7 @@ func TestCopilotHostsServeAForwardedSignInOrAGatewayToken(t *testing.T) {
 		for _, path := range []string{"/copilot_internal/user", "/copilot/mcp_registry", "/copilot/future/account"} {
 			account, _, _ := routes.Select("api.github.com:443", path)
 			if account.Handler == nil || account.ProviderCredential != tc.forwards ||
-				account.Capability != string(api.CapabilityModelInference) {
+				account.Capability != api.CapabilityModelInference {
 				t.Fatalf("%s mode: Copilot's account route %s: %+v", tc.mode, path, account)
 			}
 		}
@@ -1006,7 +1006,7 @@ func TestCopilotHostsServeAForwardedSignInOrAGatewayToken(t *testing.T) {
 		t.Fatal("Copilot's host opened without a credential")
 	}
 	account, _, _ := routes.Select("api.github.com:443", "/copilot/mcp_registry")
-	if account.Capability == string(api.CapabilityModelInference) && account.Handler != nil {
+	if account.Capability == api.CapabilityModelInference && account.Handler != nil {
 		t.Fatal("Copilot account route opened without a GitHub credential mechanism")
 	}
 }

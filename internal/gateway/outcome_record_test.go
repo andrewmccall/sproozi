@@ -215,7 +215,7 @@ func TestDispatcherAndLeakGuardOutcomesAreRecorded(t *testing.T) {
 	}
 	capabilityRoute := func(handler func(*recordedEvents) http.Handler, logged bool) func(*recordedEvents, *budget.Tracker) gateway.Dispatcher {
 		return func(events *recordedEvents, tracker *budget.Tracker) gateway.Dispatcher {
-			route := gateway.Route{Capability: string(capability), Tier: audit.TierSemantic, Handler: handler(events), Budgets: tracker}
+			route := gateway.Route{Capability: capability, Tier: audit.TierSemantic, Handler: handler(events), Budgets: tracker}
 			if logged {
 				route.AuditLogger = events
 			}
@@ -238,12 +238,12 @@ func TestDispatcherAndLeakGuardOutcomesAreRecorded(t *testing.T) {
 			target: "https://service.test/repos/o/r",
 			routes: func(events *recordedEvents, tracker *budget.Tracker) gateway.Dispatcher {
 				return gateway.Dispatcher{fixtureAuthority: {Paths: []gateway.PathRoute{{Prefix: "/login/", Route: gateway.Route{
-					Capability: string(capability), Tier: audit.TierSemantic, Handler: recording(events), AuditLogger: events}}}}}
+					Capability: capability, Tier: audit.TierSemantic, Handler: recording(events), AuditLogger: events}}}}}
 			}},
 		{name: "dispatcher/path route served", grant: baseGrant(granted, granted, 0), target: "https://service.test/login/device",
 			routes: func(events *recordedEvents, tracker *budget.Tracker) gateway.Dispatcher {
 				return gateway.Dispatcher{fixtureAuthority: {Paths: []gateway.PathRoute{{Prefix: "/login/", Route: gateway.Route{
-					Capability: string(capability), Tier: audit.TierSemantic, Handler: recording(events), AuditLogger: events}}}}}
+					Capability: capability, Tier: audit.TierSemantic, Handler: recording(events), AuditLogger: events}}}}}
 			}},
 		{name: "dispatcher/capability not requested by the run", routes: capabilityRoute(recordingHandler, true),
 			grant: baseGrant(nil, granted, 0), target: "https://service.test/x"},
@@ -377,9 +377,9 @@ func leakGuardFixture(t *testing.T, events *recordedEvents, other http.Handler) 
 		})
 		forward := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { f.other.ServeHTTP(w, r) })
 		f.guard = gateway.NewLeakGuard(gateway.Dispatcher{
-			providerAuthority: {Capability: string(api.CapabilityModelInference), Tier: audit.TierSemantic,
+			providerAuthority: {Capability: api.CapabilityModelInference, Tier: audit.TierSemantic,
 				Handler: ok, ProviderCredential: true, AuditLogger: logTo(f)},
-			otherAuthority: {Capability: string(api.CapabilityNetworkEgress), Tier: audit.TierDestination,
+			otherAuthority: {Capability: api.CapabilityNetworkEgress, Tier: audit.TierDestination,
 				Handler: forward, AuditLogger: logTo(f)},
 		}, nil)
 		leakGuardFixtures[t] = f

@@ -260,7 +260,7 @@ func TestKubernetesOutcomesAreRecorded(t *testing.T) {
 		if tc.noUpstream {
 			config.Upstream, config.Client = nil, served(200, podList)
 		}
-		routes := gateway.Dispatcher{kubernetes.Authority: {Capability: string(capability), Tier: audit.TierSemantic,
+		routes := gateway.Dispatcher{kubernetes.Authority: {Capability: capability, Tier: audit.TierSemantic,
 			Handler: kubernetes.NewHandler(config), Budgets: tc.tracker, AuditLogger: events}}
 		ledgerKey := ""
 		if tc.tracker != nil {

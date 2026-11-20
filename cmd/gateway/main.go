@@ -639,7 +639,8 @@ func composeDispatcher(
 	// gateway's own authority. The module chooses the exact account only after
 	// authenticating the requested path.
 	for _, port := range []string{"443", "8443"} {
-		routes[net.JoinHostPort(host, port)] = gateway.Route{Tier: audit.TierProtocol, Handler: mcpHandler}
+		routes[net.JoinHostPort(host, port)] = gateway.Route{Admission: gateway.AdmitSelected,
+			Reason: diagnose.Admission, Tier: audit.TierProtocol, Handler: mcpHandler}
 	}
 	if cfg.mcpRegistry != nil {
 		for _, authority := range cfg.mcpRegistry.Authorities() {
@@ -649,7 +650,7 @@ func composeDispatcher(
 	for authority, cap := range endpoints.SemanticAuthorities {
 		// Reserve semantic authorities even when a module is disabled. Generic
 		// egress must never become a weaker fallback for a semantic service.
-		route := gateway.Route{Capability: string(cap), Tier: audit.TierSemantic}
+		route := gateway.Route{Capability: cap, Tier: audit.TierSemantic}
 		if cfg.enabled[cap] {
 			route.Handler = handlers[cap]
 		}
@@ -699,7 +700,7 @@ func composeDispatcher(
 			if len(served.prefixes) > 0 {
 				for _, prefix := range served.prefixes {
 					route.Paths = append(route.Paths, gateway.PathRoute{Prefix: prefix, Route: gateway.Route{
-						Capability: string(sprooziv1alpha1.CapabilityModelInference), Tier: audit.TierSemantic,
+						Capability: sprooziv1alpha1.CapabilityModelInference, Tier: audit.TierSemantic,
 						Handler: served.handler, ProviderCredential: served.forwards}})
 				}
 			} else {
@@ -714,12 +715,24 @@ func composeDispatcher(
 			if _, semantic := routes[authority]; semantic {
 				continue
 			}
-			routes[authority] = gateway.Route{Capability: string(sprooziv1alpha1.CapabilityNetworkEgress),
+			routes[authority] = gateway.Route{Capability: sprooziv1alpha1.CapabilityNetworkEgress,
 				Tier:    audit.TierDestination,
 				Handler: handlers[sprooziv1alpha1.CapabilityNetworkEgress]}
 		}
 	}
 	return routes
+}
+
+// attachAccounting gives every route and path route the shared budget tracker
+// and audit writer.
+func attachAccounting(dispatcher gateway.Dispatcher, budgets *budget.Tracker, auditLogger audit.Writer) {
+	for authority, route := range dispatcher {
+		route.Budgets, route.AuditLogger = budgets, auditLogger
+		for i := range route.Paths {
+			route.Paths[i].Route.Budgets, route.Paths[i].Route.AuditLogger = budgets, auditLogger
+		}
+		dispatcher[authority] = route
+	}
 }
 
 func init() {
@@ -837,12 +850,9 @@ func main() {
 		Budgets: budgets, AuditLogger: auditLogger})
 	mcpHandler := diagnose.NewControl(auditLogger, named)
 	dispatcher := composeDispatcher(cfg, handlers, mcpHandler, anthropicHandler, signedIn)
-	for authority, route := range dispatcher {
-		route.Budgets, route.AuditLogger = budgets, auditLogger
-		for i := range route.Paths {
-			route.Paths[i].Route.Budgets, route.Paths[i].Route.AuditLogger = budgets, auditLogger
-		}
-		dispatcher[authority] = route
+	attachAccounting(dispatcher, budgets, auditLogger)
+	if err := dispatcher.Validate(); err != nil {
+		log.Fatal(err)
 	}
 	guard := gateway.NewLeakGuard(dispatcher, nil)
 	serving, err := startCertificateReloader(cfg, host)

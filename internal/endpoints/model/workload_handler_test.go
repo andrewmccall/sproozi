@@ -24,7 +24,7 @@ const (
 
 // workloadRoutes serves one model handler in workload mode behind a Dispatcher.
 func workloadRoutes(authority string, handler http.Handler, tracker *budget.Tracker) gateway.Dispatcher {
-	return gateway.Dispatcher{authority: {Capability: string(api.CapabilityModelInference), Handler: handler,
+	return gateway.Dispatcher{authority: {Capability: api.CapabilityModelInference, Handler: handler,
 		Budgets: tracker, ProviderCredential: true}}
 }
 
