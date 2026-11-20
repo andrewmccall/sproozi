@@ -33,6 +33,12 @@ type Harness struct {
 	// RequestFiles adds instructions.txt and request.json to the contract for
 	// launch commands that read the request from files.
 	RequestFiles bool
+	// RunKeyEnv is the variable in which an AgentRun Pod's workload
+	// containers get the public key placeholder, for a client that reads its
+	// key from the Pod's environment. Empty when the harness's launch file or
+	// runtime command sets its own placeholder: the Pod then gets none. A
+	// runtime with the harness's own sign-in gets none either way (ADR 0047).
+	RunKeyEnv string
 	// Native is the managed-session kind, or empty when the harness runs only
 	// as an AgentRun.
 	Native NativeKind
@@ -235,7 +241,7 @@ var registry = []Harness{
 	{Selector: string(NativeCodex), Native: NativeCodex, NativeDirectory: string(NativeCodex), Protocol: ProtocolOpenAI,
 		SignInFile: "auth.json", StateProvesCompletion: true,
 		DisplayName: "Codex", Product: "OpenAI Codex CLI", Executable: "/usr/local/bin/codex", InstructionsFile: "AGENTS.md",
-		KeyEnv: nativeOpenAIKey, RefusedFlags: codexControlled, ReservedEnv: []string{"CODEX_HOME"},
+		KeyEnv: nativeOpenAIKey, RunKeyEnv: nativeOpenAIKey, RefusedFlags: codexControlled, ReservedEnv: []string{"CODEX_HOME"},
 		RemoteExecutor: true, TakesTask: true, Default: true, KeyOptions: codexKeyOptions, SignInOptions: []string{codexTrust},
 		SignInChoices: []SignInChoice{
 			{Label: "An OpenAI API key, held by the gateway", Answer: AnswerKey},

@@ -68,7 +68,9 @@ refuses mid-turn is untested.
    [`internal/harness/registry.go`](../../internal/harness/registry.go): the
    selector, its MCP file, field and the function that renders each
    connection (`Entry`), its `Loader`, any launch files, and whether its
-   launch reads `instructions.txt` and `request.json`. Put every launch file
+   launch reads `instructions.txt` and `request.json`. Set `RunKeyEnv` only
+   when the client reads its key placeholder from the Pod's environment
+   rather than from its launch file or command. Put every launch file
    in [`internal/harness/launchfiles`](../../internal/harness/launchfiles) and
    list it with `launchFilesNamed`: that directory is embedded in the binary
    and is the one `.dockerignore` ships to image builds, so a launch file

@@ -67,6 +67,14 @@ workload containers. Every capability uses that identity and HTTPS proxy
 endpoint. Client-specific destination URLs belong in ordinary client settings.
 No additional egress token or local proxy process is injected.
 
+Workload containers get `OPENAI_API_KEY=sproozi-local-placeholder` only when
+their harness's client reads its key from the Pod's environment: for
+`harness: codex`, and for a runtime that names no harness, whose own launch
+command Sproozi can't inspect. Other harnesses get no key variable from the
+controller; their launch file or the runtime's command sets the placeholder
+the client reads (see [model providers](harnesses.md#model-providers)). A
+runtime with [`signIn`](#harness-sign-in) gets no key placeholder.
+
 `spec.gatewayEndpoint` names the gateway as an `https` URL whose host the
 gateway's TLS certificate covers. Sandboxes resolve no names, so the controller
 resolves that host itself when it creates each Pod and writes the address into
@@ -229,7 +237,8 @@ write, for example through the Pod's `fsGroup`; the supervisor creates the
 login file in an empty claim.
 
 With `signIn`, workload containers don't receive the `OPENAI_API_KEY`
-placeholder, which most clients would prefer over their own sign-in. A client
+placeholder, even for Codex, because most clients would prefer it over their
+own sign-in. A client
 that needs a writable credential file, such as Codex's `auth.json`, copies the
 mounted file into its home in the runtime's command. The gateway still
 inspects and counts every model call, and refuses the forwarded credential on

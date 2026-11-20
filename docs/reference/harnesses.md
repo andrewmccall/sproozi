@@ -244,6 +244,15 @@ see [ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md),
 [AgentRuntime sign-in](agentruntime.md#harness-sign-in). The rest of this
 section describes gateway-held credentials.
 
+With a gateway-held credential, each client sends a public placeholder key,
+which the gateway replaces. In an AgentRun Pod, the controller sets
+`OPENAI_API_KEY` only for `codex`, whose provider configuration reads it
+(`env_key`), and for a runtime that names no harness. `claude-launch.py` sets
+Claude Code's `ANTHROPIC_API_KEY`, `hermes-launch.py` sets Hermes's
+`OPENAI_API_KEY`, and the OpenCode and Copilot examples set their key in the
+launch command (`apiKey`, `COPILOT_PROVIDER_API_KEY`). A managed session's
+supervisor gives its harness the placeholder in the launch environment.
+
 Codex, Hermes and the OpenCode and Copilot examples use the existing OpenAI
 Responses route. Copilot runs in its bring-your-own-key mode
 (`COPILOT_PROVIDER_BASE_URL`, `COPILOT_PROVIDER_WIRE_API=responses`), so it

@@ -23,10 +23,10 @@ const (
 var podCredentialEnvironment = map[string]struct{ key, signIn []string }{
 	"":            {key: []string{podOpenAIKey, podOpenAIBaseURL, podGitHubToken}, signIn: []string{podOpenAIBaseURL, podGitHubToken}},
 	"codex":       {key: []string{podOpenAIKey, podOpenAIBaseURL, podGitHubToken}, signIn: []string{podOpenAIBaseURL, podGitHubToken}},
-	"claude-code": {key: []string{podOpenAIKey, podOpenAIBaseURL, podGitHubToken}, signIn: []string{podOpenAIBaseURL, podGitHubToken}},
-	"opencode":    {key: []string{podOpenAIKey, podOpenAIBaseURL, podGitHubToken}, signIn: []string{podOpenAIBaseURL, podGitHubToken}},
-	"copilot":     {key: []string{podOpenAIKey, podOpenAIBaseURL, podGitHubToken}, signIn: []string{podOpenAIBaseURL, podGitHubToken}},
-	"hermes":      {key: []string{podOpenAIKey, podOpenAIBaseURL, podGitHubToken}, signIn: []string{podOpenAIBaseURL, podGitHubToken}},
+	"claude-code": {key: []string{podOpenAIBaseURL, podGitHubToken}, signIn: []string{podOpenAIBaseURL, podGitHubToken}},
+	"opencode":    {key: []string{podOpenAIBaseURL, podGitHubToken}, signIn: []string{podOpenAIBaseURL, podGitHubToken}},
+	"copilot":     {key: []string{podOpenAIBaseURL, podGitHubToken}, signIn: []string{podOpenAIBaseURL, podGitHubToken}},
+	"hermes":      {key: []string{podOpenAIBaseURL, podGitHubToken}, signIn: []string{podOpenAIBaseURL, podGitHubToken}},
 }
 
 func TestBuildPodSpecCredentialEnvironmentPerHarness(t *testing.T) {

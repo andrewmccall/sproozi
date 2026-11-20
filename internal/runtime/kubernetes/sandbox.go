@@ -574,10 +574,13 @@ func BuildPodSpec(run *sprooziv1alpha1.AgentRun, rt *sprooziv1alpha1.AgentRuntim
 		}
 		c := &pod.Spec.Containers[i]
 		c.Env = append(c.Env, corev1.EnvVar{Name: "SPROOZI_GATEWAY", Value: rt.Spec.GatewayEndpoint})
-		// A harness with its own sign-in gets no key placeholder, which most
+		// Only a client that reads its key from the Pod's environment gets the
+		// placeholder, and a harness with its own sign-in gets none, which most
 		// clients would prefer over that sign-in (ADR 0047).
 		if signIn == nil {
-			c.Env = append(c.Env, corev1.EnvVar{Name: openAIAPIKey, Value: clientAuthPlaceholder})
+			if key := harness.RunKeyEnvironment(rt.Spec.ClientConfig.Harness); key != "" {
+				c.Env = append(c.Env, corev1.EnvVar{Name: key, Value: clientAuthPlaceholder})
+			}
 		} else {
 			c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "sign-in", MountPath: sprooziv1alpha1.SignInDirectory,
 				ReadOnly: signIn.Claims == nil})
