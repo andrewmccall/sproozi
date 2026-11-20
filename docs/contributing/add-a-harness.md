@@ -152,8 +152,28 @@ fails, naming the file to change, unless:
   by `nativeconfig`, and has a supervisor adapter and a checkpoint format;
 - every managed kind supplies every managed fact listed in the managed
   harness steps (an AgentRun-only harness supplies none), exactly one is the
-  default, its supervisor adapter launches the registry's `Executable`, and
-  the file names a Python launch file repeats equal the registry's.
+  default, each sign-in choice is worded and names a mechanism the harness
+  has, its supervisor adapter launches the registry's `Executable`, and
+  the file names a Python launch file repeats equal the registry's
+  (`TestManagedKindsSupplyEveryFact` and the tests beside it in
+  `internal/harness/registry_test.go`);
+- no Go file under `internal`, `cmd` or `api` outside the registry branches on
+  a managed kind (`==`, `!=`, `case` or a map literal key), names a selector,
+  or repeats a registered credential variable, token placeholder,
+  instructions file or executable, except the behaviour files listed, with a
+  count and a reason, in `harnessSites` (`TestNoHarnessFactOutsideTheRegistry`
+  in `internal/harness/sites_test.go`). Read a new fact from the registry
+  entry, adding a field when it has none; only behaviour, such as a
+  supervisor adapter or a checkpoint format, belongs in that list. Verifiers
+  under `hack/` are not scanned;
+- the local session and remote executor rows of the
+  [configured MCP reference](../reference/configured-mcp.md) name the managed
+  harnesses and the `RemoteExecutor` ones;
+- what each fact's readers return, for every registered selector and an
+  unregistered kind, is unchanged: `internal/harness/testdata/registry-outcomes.json`
+  and `cmd/sproozi/testdata/wizard-outcomes.json` record it. A new harness
+  adds its rows: regenerate both with `SPROOZI_UPDATE_OUTCOMES=1` and review
+  the difference, which should be only the new harness.
 
 They don't prove that a stock client loads its MCP file, that it shows the
 MCP tools to the model (pi, for example, hides them behind its `codemode`
@@ -237,7 +257,15 @@ Do the AgentRun steps first, then:
    - `ReservedEnv`, the variables its supervisor sets and a launch may not;
    - `TakesTask`, `RemoteExecutor` and `Default`, when each applies;
    - `KeyOptions` and `SignInOptions`, any native options a local installation
-     gives it; and `SignInFile` and `SignInProvider` when it signs in itself.
+     gives it; and `SignInFile` and `SignInProvider` when it signs in itself;
+   - `SignInChoices`, the answers the setup wizard offers for how it reaches
+     its provider, most common first, each with its wording and the
+     `NativeCredential` it selects (`ChatGPT` for a ChatGPT plan the gateway
+     holds).
+
+   Every reader of these facts takes them from the registry, so this entry
+   is the only place to set them; `TestNoHarnessFactOutsideTheRegistry` fails
+   on code elsewhere that branches on a kind instead.
 2. Accept it in `nativeconfig.ValidateHarness`
    ([`internal/nativeconfig/claude.go`](../../internal/nativeconfig/claude.go)).
 3. Add a supervisor adapter to `nativeAdapters` in
@@ -245,7 +273,9 @@ Do the AgentRun steps first, then:
    arguments, completed-turn observation and controlled stop. Its `executable`
    is the registry's `Executable`; add a variable for it and for its native
    home to `cmd/native-session/homes.go`, and add its graceful-stop wait text
-   to `waitingFor` in `cmd/native-session/main.go`.
+   to `waitingFor` in `cmd/native-session/main.go`: it has branches for
+   Copilot and Claude Code only, and any other kind gets Codex's, which checks
+   for Codex's journal.
    If the client reports turns through hooks that run a `native-session`
    command, as Claude Code's `observe-claude` does, that command must report
    once its payload is whole, not wait for the end of its input: the client
@@ -254,10 +284,12 @@ Do the AgentRun steps first, then:
    open, as `TestClaudeHookReportsACompletePayloadWithoutEndOfInput` does.
 4. Add its native state capture, validation and restore in
    [`internal/checkpoint/artifact.go`](../../internal/checkpoint/artifact.go)
-   and `internal/harness`, with captured transcript fixtures.
+   and `internal/harness`, with captured transcript fixtures, and read its
+   final answer from that state in `FinalText`
+   ([`internal/checkpoint/result.go`](../../internal/checkpoint/result.go)),
+   which otherwise returns no result for it.
 5. If its protocol is new, add the gateway model handler and the provider in
-   `internal/localsetup`, and add its sign-in choices to `signInChoices` in
-   [`cmd/sproozi/wizard.go`](../../cmd/sproozi/wizard.go) (a guard test requires them).
+   `internal/localsetup`.
 6. Run `go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/`;
    the guards name each missing piece. Then prove a real round trip with
    `make verify-local-onboarding` and the session verifiers in
