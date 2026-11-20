@@ -20,6 +20,7 @@ limitations under the License.
 package destination
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -68,7 +69,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	identity, ok := gateway.IdentityFromContext(ctx)
 	if !ok {
-		h.deny(w, e, http.StatusUnauthorized, "gateway identity required")
+		h.deny(r.Context(), w, e, http.StatusUnauthorized, "gateway identity required")
 		return
 	}
 	e = gateway.AuditEvent(ctx, r.Method+" "+r.Host)
@@ -80,7 +81,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if r.Method == http.MethodConnect || r.URL == nil || r.URL.Scheme != httpsScheme || r.URL.Host == "" {
-		h.deny(w, e, http.StatusForbidden, "inspected HTTPS request required")
+		h.deny(r.Context(), w, e, http.StatusForbidden, "inspected HTTPS request required")
 		return
 	}
 	h.handleHTTP(w, r, e, dests)
@@ -89,14 +90,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleHTTP(w http.ResponseWriter, r *http.Request, e audit.Event, dests []Destination) {
 	host, port, err := parseAuthority(r.URL.Host, "443")
 	if err != nil {
-		h.deny(w, e, http.StatusBadRequest, err.Error())
+		h.deny(r.Context(), w, e, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	e.Operation = fmt.Sprintf("egress.http %s://%s:%d", r.URL.Scheme, host, port)
 
 	if !isApproved(r.URL.Scheme, host, port, dests) {
-		h.deny(w, e, http.StatusForbidden,
+		h.deny(r.Context(), w, e, http.StatusForbidden,
 			fmt.Sprintf("destination %s://%s:%d not in approved egress profiles", r.URL.Scheme, host, port))
 		return
 	}
@@ -106,7 +107,7 @@ func (h *Handler) handleHTTP(w http.ResponseWriter, r *http.Request, e audit.Eve
 
 	upstream, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL.String(), r.Body)
 	if err != nil {
-		h.deny(w, e, http.StatusInternalServerError, "failed to build upstream request")
+		h.deny(r.Context(), w, e, http.StatusInternalServerError, "failed to build upstream request")
 		return
 	}
 	copyNonHopHeaders(upstream.Header, r.Header)
@@ -119,12 +120,12 @@ func (h *Handler) handleHTTP(w http.ResponseWriter, r *http.Request, e audit.Eve
 		return http.ErrUseLastResponse
 	}
 	if err := budget.FromContext(r.Context()).SpendRequest(r.Context()); err != nil {
-		h.deny(w, e, http.StatusTooManyRequests, err.Error())
+		h.deny(r.Context(), w, e, http.StatusTooManyRequests, err.Error())
 		return
 	}
 	resp, err := client.Do(upstream)
 	if err != nil {
-		h.deny(w, e, http.StatusBadGateway, "upstream request failed")
+		h.deny(r.Context(), w, e, http.StatusBadGateway, "upstream request failed")
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -139,7 +140,7 @@ func (h *Handler) handleHTTP(w http.ResponseWriter, r *http.Request, e audit.Eve
 
 	e.Allowed = true
 	e.UpstreamStatus = resp.StatusCode
-	h.Config.AuditLogger.Log(e)
+	gateway.Record(r.Context(), h.Config.AuditLogger, e)
 }
 
 func copyNonHopHeaders(dst, src http.Header) {
@@ -162,9 +163,9 @@ func copyNonHopHeaders(dst, src http.Header) {
 	}
 }
 
-func (h *Handler) deny(w http.ResponseWriter, e audit.Event, status int, reason string) {
+func (h *Handler) deny(ctx context.Context, w http.ResponseWriter, e audit.Event, status int, reason string) {
 	e.Allowed = false
 	e.DenyReason = reason
-	h.Config.AuditLogger.Log(e)
+	gateway.Record(ctx, h.Config.AuditLogger, e)
 	http.Error(w, reason, status)
 }

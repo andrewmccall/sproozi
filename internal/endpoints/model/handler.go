@@ -180,7 +180,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	identity, ok := gateway.IdentityFromContext(ctx)
 	if !ok {
-		h.deny(w, e, http.StatusUnauthorized, "gateway identity required", "auth_error", "missing_gateway_identity")
+		h.deny(r.Context(), w, e, http.StatusUnauthorized, "gateway identity required", "auth_error", "missing_gateway_identity")
 		return
 	}
 	e = gateway.AuditEvent(ctx, r.URL.Path)
@@ -191,14 +191,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	limits, _, limitErr := identity.BudgetLimits(sprooziv1alpha1.CapabilityModelInference)
 	if limitErr != nil {
-		h.deny(w, e, http.StatusForbidden, "model allocation denied", "permission_error", "allocation_denied")
+		h.deny(r.Context(), w, e, http.StatusForbidden, "model allocation denied", "permission_error", "allocation_denied")
 		return
 	}
 	e.TokenBudget = limits.MaxUnits
 
 	// Resolve the supported operation before admission or provider credentials.
 	if h.protocol == openAIProtocol && !validOpenAIOperation(r) {
-		h.deny(w, e, http.StatusForbidden,
+		h.deny(r.Context(), w, e, http.StatusForbidden,
 			"unsupported OpenAI operation", "permission_error", "path_not_allowed")
 		return
 	}
@@ -213,7 +213,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if len(bodyBytes) != 0 {
 		if err := unambiguousJSON(bodyBytes); err != nil {
 			message, code := jsonRefusal(err)
-			h.deny(w, e, http.StatusBadRequest, message, "invalid_request_error", code)
+			h.deny(r.Context(), w, e, http.StatusBadRequest, message, "invalid_request_error", code)
 			return
 		}
 	}
@@ -221,46 +221,46 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.protocol == anthropicProtocol {
 		bodyBytes, err = h.prepareAnthropic(r, bodyBytes, limits)
 		if err != nil {
-			h.deny(w, e, http.StatusForbidden, err.Error(), "permission_error", refusalCode(err))
+			h.deny(r.Context(), w, e, http.StatusForbidden, err.Error(), "permission_error", refusalCode(err))
 			return
 		}
 	}
 	if len(bodyBytes) != 0 && json.Unmarshal(bodyBytes, &check) != nil {
-		h.deny(w, e, http.StatusBadRequest, "request body field stream must be a boolean",
+		h.deny(r.Context(), w, e, http.StatusBadRequest, "request body field stream must be a boolean",
 			"invalid_request_error", "invalid_field")
 		return
 	}
 	if check.Stream && r.URL.Path != responsesPath && h.protocol != anthropicProtocol {
-		h.deny(w, e, http.StatusForbidden,
+		h.deny(r.Context(), w, e, http.StatusForbidden,
 			"streaming responses are not supported by the model gateway",
 			"permission_error", "streaming_not_supported")
 		return
 	}
 	if err := detachedWork(bodyBytes); err != nil {
-		h.deny(w, e, http.StatusBadRequest, err.Error(), "invalid_request_error", "unsupported_request")
+		h.deny(r.Context(), w, e, http.StatusBadRequest, err.Error(), "invalid_request_error", "unsupported_request")
 		return
 	}
 	providerAuth := h.Config.ProviderAuth
 	if providerAuth == nil {
-		h.deny(w, e, http.StatusServiceUnavailable, "provider authentication is unavailable", "server_error", "provider_auth_unavailable")
+		h.deny(r.Context(), w, e, http.StatusServiceUnavailable, "provider authentication is unavailable", "server_error", "provider_auth_unavailable")
 		return
 	}
 	e.ProviderAuthMode = providerAuth.Mode()
 	if providerAuth.Mode() == modelauth.WorkloadMode && !modelauth.HasWorkloadCredential(r.Header) {
-		h.deny(w, e, http.StatusUnauthorized,
+		h.deny(r.Context(), w, e, http.StatusUnauthorized,
 			"the harness sent no provider credential; sign the harness in to its model provider",
 			"authentication_error", "provider_credential_missing")
 		return
 	}
 	if providerAuth.Mode() == modelauth.ChatGPTMode {
 		if err := validateChatGPTRequest(r, bodyBytes, limits.MaxCostMicros); err != nil {
-			h.deny(w, e, http.StatusForbidden, err.Error(), "permission_error", "chatgpt_request_not_supported")
+			h.deny(r.Context(), w, e, http.StatusForbidden, err.Error(), "permission_error", "chatgpt_request_not_supported")
 			return
 		}
 	} else if h.protocol == openAIProtocol {
 		bodyBytes, err = h.prepareOpenAI(r, bodyBytes, limits)
 		if err != nil {
-			h.deny(w, e, http.StatusForbidden, err.Error(), "permission_error", refusalCode(err))
+			h.deny(r.Context(), w, e, http.StatusForbidden, err.Error(), "permission_error", refusalCode(err))
 			return
 		}
 	}
@@ -280,7 +280,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// A stopping gateway refuses new calls and settles the ones in flight.
 	leave, open := h.Config.Drain.enter()
 	if !open {
-		h.deny(w, e, http.StatusServiceUnavailable, gatewayStoppingMessage, "server_error", gatewayStoppingCode)
+		h.deny(r.Context(), w, e, http.StatusServiceUnavailable, gatewayStoppingMessage, "server_error", gatewayStoppingCode)
 		return
 	}
 	defer leave()
@@ -323,7 +323,7 @@ func (h *Handler) refuseReservation(w http.ResponseWriter, e audit.Event, call *
 		if stopping {
 			e.EndReason = endGatewayRestart
 		}
-		h.Config.AuditLogger.Log(e)
+		gateway.Record(call.r.Context(), h.Config.AuditLogger, e)
 		if e.EndReason == endGatewayRestart {
 			h.writeError(w, http.StatusServiceUnavailable, gatewayStoppingMessage, "server_error", gatewayStoppingCode)
 			return
@@ -333,10 +333,10 @@ func (h *Handler) refuseReservation(w http.ResponseWriter, e audit.Event, call *
 		return
 	}
 	if errors.Is(err, budget.ErrTooManyPending) {
-		h.deny(w, e, http.StatusTooManyRequests, err.Error(), "rate_limit_error", "too_many_pending_calls")
+		h.deny(call.r.Context(), w, e, http.StatusTooManyRequests, err.Error(), "rate_limit_error", "too_many_pending_calls")
 		return
 	}
-	h.deny(w, e, http.StatusTooManyRequests, err.Error(), "budget_error", "budget_exhausted")
+	h.deny(call.r.Context(), w, e, http.StatusTooManyRequests, err.Error(), "budget_error", "budget_exhausted")
 }
 
 // forward sends the request upstream. Without a model call, as for model
@@ -364,7 +364,7 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 	)
 	if err != nil {
 		release()
-		h.deny(w, e, http.StatusInternalServerError,
+		h.deny(r.Context(), w, e, http.StatusInternalServerError,
 			"failed to build upstream request", "server_error", "upstream_error")
 		return
 	}
@@ -377,7 +377,7 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 		if refreshErr := (*modelauth.RefreshError)(nil); errors.As(err, &refreshErr) {
 			message += ": " + refreshErr.Error()
 		}
-		h.deny(w, e, http.StatusServiceUnavailable, message, "server_error", "provider_auth_unavailable")
+		h.deny(r.Context(), w, e, http.StatusServiceUnavailable, message, "server_error", "provider_auth_unavailable")
 		return
 	}
 	// Let the trusted Go transport negotiate and decode compression. Forwarding
@@ -416,10 +416,10 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 				return
 			}
 			if reason == endGatewayRestart {
-				h.deny(w, call.e, http.StatusServiceUnavailable, gatewayStoppingMessage, "server_error", gatewayStoppingCode)
+				h.deny(r.Context(), w, call.e, http.StatusServiceUnavailable, gatewayStoppingMessage, "server_error", gatewayStoppingCode)
 				return
 			}
-			h.deny(w, call.e, http.StatusBadGateway,
+			h.deny(r.Context(), w, call.e, http.StatusBadGateway,
 				"upstream request failed", "server_error", "upstream_error")
 			return
 		}
@@ -434,10 +434,10 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 		}
 		if call != nil && call.cancelReason() == endGatewayRestart && call.ctx.Err() != nil {
 			call.e.EndReason = endGatewayRestart
-			h.deny(w, call.e, http.StatusServiceUnavailable, gatewayStoppingMessage, "server_error", gatewayStoppingCode)
+			h.deny(r.Context(), w, call.e, http.StatusServiceUnavailable, gatewayStoppingMessage, "server_error", gatewayStoppingCode)
 			return
 		}
-		h.deny(w, e, http.StatusBadGateway,
+		h.deny(r.Context(), w, e, http.StatusBadGateway,
 			"upstream request failed", "server_error", "upstream_error")
 		return
 	}
@@ -474,12 +474,12 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 		if diagnostic != nil {
 			diagnostic.ValidationError = "response read failed or exceeded body limit"
 		}
-		h.deny(w, e, http.StatusBadGateway,
+		h.deny(r.Context(), w, e, http.StatusBadGateway,
 			"failed to read upstream response", "server_error", "upstream_error")
 		return
 	}
 	if h.protocol == anthropicProtocol {
-		h.deny(w, e, resp.StatusCode, "provider rejected request", "api_error", "provider_rejected")
+		h.deny(r.Context(), w, e, resp.StatusCode, "provider rejected request", "api_error", "provider_rejected")
 		return
 	}
 	h.copyResponseHeaders(w.Header(), resp.Header)
@@ -634,10 +634,10 @@ func readBounded(reader io.Reader, limit int64) ([]byte, error) {
 
 // deny writes an OpenAI-compatible JSON error response, sets the HTTP status, and logs
 // a denied audit event.
-func (h *Handler) deny(w http.ResponseWriter, e audit.Event, status int, message, errType, code string) {
+func (h *Handler) deny(ctx context.Context, w http.ResponseWriter, e audit.Event, status int, message, errType, code string) {
 	e.Allowed = false
 	e.DenyReason = message
-	h.Config.AuditLogger.Log(e)
+	gateway.Record(ctx, h.Config.AuditLogger, e)
 	h.writeError(w, status, message, errType, code)
 }
 
@@ -683,12 +683,12 @@ func (h *Handler) readBody(w http.ResponseWriter, r *http.Request, e audit.Event
 	body, err := decodedBody(r, maxModelBodyBytes)
 	switch {
 	case errors.Is(err, errUnsupportedEncoding):
-		h.deny(w, e, http.StatusUnsupportedMediaType,
+		h.deny(r.Context(), w, e, http.StatusUnsupportedMediaType,
 			"request body uses an unsupported content encoding", "invalid_request_error", "unsupported_encoding")
 	case errors.Is(err, errUndecodableBody):
-		h.deny(w, e, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_encoding")
+		h.deny(r.Context(), w, e, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_encoding")
 	case err != nil:
-		h.deny(w, e, http.StatusRequestEntityTooLarge,
+		h.deny(r.Context(), w, e, http.StatusRequestEntityTooLarge,
 			"request body exceeds gateway limit", "invalid_request_error", "request_too_large")
 	default:
 		return body, true
@@ -894,5 +894,5 @@ func (h *Handler) auditModelSuccess(ctx context.Context, e audit.Event, upstream
 		h.Config.Diagnostics(ResponseDiagnostic{Kind: "model-budget-observation", RunUID: e.RunUID,
 			ErrorCode: "budget_state_unavailable", ValidationError: "remaining model budget is unavailable"})
 	}
-	h.Config.AuditLogger.Log(e)
+	gateway.Record(ctx, h.Config.AuditLogger, e)
 }

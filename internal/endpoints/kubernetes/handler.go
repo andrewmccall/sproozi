@@ -92,7 +92,7 @@ func (h *Handler) authorizeAndForward(ctx context.Context, identity *gateway.Exe
 			event.Allowed = true
 			event.UpstreamStatus = response.StatusCode
 		}
-		h.Config.AuditLogger.Log(event)
+		gateway.Record(ctx, h.Config.AuditLogger, event)
 	}()
 	op, err := ParseOperation(req)
 	if err != nil {

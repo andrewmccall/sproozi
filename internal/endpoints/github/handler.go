@@ -23,6 +23,7 @@ package github
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -85,7 +86,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	identity, ok := gateway.IdentityFromContext(ctx)
 	if !ok {
-		h.deny(w, e, http.StatusUnauthorized, "gateway identity required")
+		h.deny(r.Context(), w, e, http.StatusUnauthorized, "gateway identity required")
 		return
 	}
 	e = gateway.AuditEvent(ctx, r.Method+" "+r.URL.Path)
@@ -100,7 +101,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case isGraphQL(r):
 		h.handleGraphQL(w, r, e, identity)
 	default:
-		h.deny(w, e, http.StatusForbidden, "operation not permitted")
+		h.deny(r.Context(), w, e, http.StatusForbidden, "operation not permitted")
 	}
 }
 
@@ -180,13 +181,13 @@ func (h *Handler) handleGit(w http.ResponseWriter, r *http.Request, e audit.Even
 
 	repo, ok := parseGitRepo(r.URL.Path)
 	if !ok {
-		h.deny(w, e, http.StatusBadRequest, "invalid git URL")
+		h.deny(r.Context(), w, e, http.StatusBadRequest, "invalid git URL")
 		return
 	}
 
 	e.Resource = repo
 	if !slices.Contains(identity.Policy.Spec.GitHubPullRequest.Repositories, repo) {
-		h.deny(w, e, http.StatusForbidden, "repository not permitted by policy")
+		h.deny(r.Context(), w, e, http.StatusForbidden, "repository not permitted by policy")
 		return
 	}
 	endpoint := gitEndpoint(r.URL.Path)
@@ -195,12 +196,12 @@ func (h *Handler) handleGit(w http.ResponseWriter, r *http.Request, e audit.Even
 		query := r.URL.Query()
 		service := query.Get("service")
 		if r.Method != http.MethodGet || len(query) != 1 || (service != uploadPackEndpoint && service != receivePackEndpoint) {
-			h.deny(w, e, http.StatusForbidden, "git discovery request is not permitted")
+			h.deny(r.Context(), w, e, http.StatusForbidden, "git discovery request is not permitted")
 			return
 		}
 	case uploadPackEndpoint, receivePackEndpoint:
 		if r.Method != http.MethodPost || r.URL.RawQuery != "" {
-			h.deny(w, e, http.StatusForbidden, "git service request is not permitted")
+			h.deny(r.Context(), w, e, http.StatusForbidden, "git service request is not permitted")
 			return
 		}
 	}
@@ -211,14 +212,14 @@ func (h *Handler) handleGit(w http.ResponseWriter, r *http.Request, e audit.Even
 		inspectedBody, err := inspectReceivePack(r.Body, identity.Execution.UID)
 		r.Body = inspectedBody
 		if err != nil {
-			h.deny(w, e, http.StatusForbidden, "push not permitted: "+err.Error())
+			h.deny(r.Context(), w, e, http.StatusForbidden, "push not permitted: "+err.Error())
 			return
 		}
 	}
 
 	ghToken, err := h.Config.TokenProvider.Token(ctx)
 	if err != nil {
-		h.deny(w, e, http.StatusInternalServerError, "failed to obtain GitHub credentials")
+		h.deny(r.Context(), w, e, http.StatusInternalServerError, "failed to obtain GitHub credentials")
 		return
 	}
 
@@ -232,39 +233,39 @@ func (h *Handler) handlePRCreate(w http.ResponseWriter, r *http.Request, e audit
 
 	repo, ok := parseAPIRepo(r.URL.Path)
 	if !ok {
-		h.deny(w, e, http.StatusBadRequest, "invalid repository path")
+		h.deny(r.Context(), w, e, http.StatusBadRequest, "invalid repository path")
 		return
 	}
 
 	e.Resource = repo
 	if !slices.Contains(identity.Policy.Spec.GitHubPullRequest.Repositories, repo) {
-		h.deny(w, e, http.StatusForbidden, "repository not permitted by policy")
+		h.deny(r.Context(), w, e, http.StatusForbidden, "repository not permitted by policy")
 		return
 	}
 	// Query parameters are not part of pull request creation, and forwarding
 	// them would pass sandbox input that no check has read.
 	if r.URL.RawQuery != "" {
-		h.deny(w, e, http.StatusForbidden, "pull request query parameters are not permitted")
+		h.deny(r.Context(), w, e, http.StatusForbidden, "pull request query parameters are not permitted")
 		return
 	}
 	// Validate requested head/base before contacting GitHub. A denied request
 	// must not create an out-of-scope PR and only be rejected after read-back.
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxPRCreateBody+1))
 	if err != nil || len(body) == 0 || len(body) > maxPRCreateBody {
-		h.deny(w, e, http.StatusBadRequest, "pull request body is invalid")
+		h.deny(r.Context(), w, e, http.StatusBadRequest, "pull request body is invalid")
 		return
 	}
 	requested, err := decodePRCreate(body)
 	if err != nil || !runOwnedBranch(requested.Head, identity.Execution.UID) ||
 		!policyBranch(requested.Base, identity.Policy.Spec.GitHubPullRequest.AllowedBaseBranches) {
-		h.deny(w, e, http.StatusForbidden, "pull request head or base is not permitted by policy")
+		h.deny(r.Context(), w, e, http.StatusForbidden, "pull request head or base is not permitted by policy")
 		return
 	}
 	// Forward only the validated values, as the GraphQL path does. GitHub must
 	// not read a field, case variant or duplicate key that the gateway did not.
 	payload, err := json.Marshal(requested)
 	if err != nil {
-		h.deny(w, e, http.StatusBadRequest, "pull request body is invalid")
+		h.deny(r.Context(), w, e, http.StatusBadRequest, "pull request body is invalid")
 		return
 	}
 	forwarded := r.Clone(ctx)
@@ -273,13 +274,13 @@ func (h *Handler) handlePRCreate(w http.ResponseWriter, r *http.Request, e audit
 
 	ghToken, err := h.Config.TokenProvider.Token(ctx)
 	if err != nil {
-		h.deny(w, e, http.StatusInternalServerError, "failed to obtain GitHub credentials")
+		h.deny(r.Context(), w, e, http.StatusInternalServerError, "failed to obtain GitHub credentials")
 		return
 	}
 
 	upstream, err := url.JoinPath(h.Config.APIBaseURL, r.URL.Path)
 	if err != nil {
-		h.deny(w, e, http.StatusInternalServerError, "failed to build upstream URL")
+		h.deny(r.Context(), w, e, http.StatusInternalServerError, "failed to build upstream URL")
 		return
 	}
 	h.forwardPRCreate(w, forwarded, e, upstream, ghToken, identity, repo)
@@ -394,28 +395,28 @@ type upstreamPullRequest struct {
 func (h *Handler) forwardPRCreate(w http.ResponseWriter, r *http.Request, e audit.Event, upstreamURL, token string, identity *gateway.ExecutionGrant, repo string) {
 	response, err := h.doUpstream(r, upstreamURL, token)
 	if err != nil {
-		h.deny(w, e, http.StatusBadGateway, "upstream request failed")
+		h.deny(r.Context(), w, e, http.StatusBadGateway, "upstream request failed")
 		return
 	}
 	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if err != nil {
-		h.deny(w, e, http.StatusBadGateway, "could not read upstream response")
+		h.deny(r.Context(), w, e, http.StatusBadGateway, "could not read upstream response")
 		return
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		h.copyResponse(w, response, body)
-		h.auditAllowed(e, response.StatusCode)
+		h.auditAllowed(r.Context(), e, response.StatusCode)
 		return
 	}
 	var created upstreamPullRequest
 	if err := json.Unmarshal(body, &created); err != nil || created.Number <= 0 {
-		h.deny(w, e, http.StatusBadGateway, "upstream pull request response was invalid")
+		h.deny(r.Context(), w, e, http.StatusBadGateway, "upstream pull request response was invalid")
 		return
 	}
 	readbackURL, err := url.JoinPath(h.Config.APIBaseURL, "repos", strings.Split(repo, "/")[0], strings.Split(repo, "/")[1], "pulls", fmt.Sprint(created.Number))
 	if err != nil {
-		h.deny(w, e, http.StatusInternalServerError, "failed to build pull request read-back URL")
+		h.deny(r.Context(), w, e, http.StatusInternalServerError, "failed to build pull request read-back URL")
 		return
 	}
 	readbackReq, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, readbackURL, nil)
@@ -424,7 +425,7 @@ func (h *Handler) forwardPRCreate(w http.ResponseWriter, r *http.Request, e audi
 		if readback != nil {
 			_ = readback.Body.Close()
 		}
-		h.deny(w, e, http.StatusBadGateway, "pull request read-back failed")
+		h.deny(r.Context(), w, e, http.StatusBadGateway, "pull request read-back failed")
 		return
 	}
 	readbackBody, err := io.ReadAll(io.LimitReader(readback.Body, 1<<20))
@@ -432,20 +433,20 @@ func (h *Handler) forwardPRCreate(w http.ResponseWriter, r *http.Request, e audi
 	var verified upstreamPullRequest
 	expectedURL := fmt.Sprintf("https://github.com/%s/pull/%d", repo, created.Number)
 	if err != nil || json.Unmarshal(readbackBody, &verified) != nil || verified.Number != created.Number || verified.HTMLURL != expectedURL || verified.Head.Ref == "" || !graphqlHexSHA.MatchString(verified.Head.SHA) || verified.Base.Ref == "" || verified.Base.Repo.FullName != repo {
-		h.deny(w, e, http.StatusBadGateway, "pull request read-back was invalid")
+		h.deny(r.Context(), w, e, http.StatusBadGateway, "pull request read-back was invalid")
 		return
 	}
 	if !policyBranch(verified.Base.Ref, identity.Policy.Spec.GitHubPullRequest.AllowedBaseBranches) {
-		h.deny(w, e, http.StatusForbidden, "pull request base branch not permitted by policy")
+		h.deny(r.Context(), w, e, http.StatusForbidden, "pull request base branch not permitted by policy")
 		return
 	}
 	if !runOwnedBranch(verified.Head.Ref, identity.Execution.UID) {
-		h.deny(w, e, http.StatusForbidden, "pull request head branch is not owned by this run")
+		h.deny(r.Context(), w, e, http.StatusForbidden, "pull request head branch is not owned by this run")
 		return
 	}
 	e.ArtifactURL = verified.HTMLURL
 	h.copyResponse(w, response, body)
-	h.auditAllowed(e, response.StatusCode)
+	h.auditAllowed(r.Context(), e, response.StatusCode)
 }
 
 func runOwnedBranch(branch, runUID string) bool {
@@ -506,10 +507,10 @@ func (h *Handler) copyResponse(w http.ResponseWriter, response *http.Response, b
 	w.WriteHeader(response.StatusCode)
 	_, _ = w.Write(body)
 }
-func (h *Handler) auditAllowed(e audit.Event, status int) {
+func (h *Handler) auditAllowed(ctx context.Context, e audit.Event, status int) {
 	e.Allowed = true
 	e.UpstreamStatus = status
-	h.Config.AuditLogger.Log(e)
+	gateway.Record(ctx, h.Config.AuditLogger, e)
 }
 
 // forward proxies the request to upstreamURL, injecting GitHub App credentials
@@ -518,7 +519,7 @@ func (h *Handler) auditAllowed(e audit.Event, status int) {
 func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event, upstreamURL, authStyle, token string) {
 	upstream, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, r.Body)
 	if err != nil {
-		h.deny(w, e, http.StatusInternalServerError, "failed to build upstream request")
+		h.deny(r.Context(), w, e, http.StatusInternalServerError, "failed to build upstream request")
 		return
 	}
 	upstream.ContentLength = r.ContentLength
@@ -537,7 +538,7 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 
 	resp, err := h.doHTTP(upstream)
 	if err != nil {
-		h.deny(w, e, http.StatusBadGateway, "upstream request failed")
+		h.deny(r.Context(), w, e, http.StatusBadGateway, "upstream request failed")
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -552,13 +553,13 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 
 	e.Allowed = true
 	e.UpstreamStatus = resp.StatusCode
-	h.Config.AuditLogger.Log(e)
+	gateway.Record(r.Context(), h.Config.AuditLogger, e)
 }
 
 // deny writes a plain-text HTTP error and logs a denied audit event.
-func (h *Handler) deny(w http.ResponseWriter, e audit.Event, status int, reason string) {
+func (h *Handler) deny(ctx context.Context, w http.ResponseWriter, e audit.Event, status int, reason string) {
 	e.Allowed = false
 	e.DenyReason = reason
-	h.Config.AuditLogger.Log(e)
+	gateway.Record(ctx, h.Config.AuditLogger, e)
 	http.Error(w, reason, status)
 }

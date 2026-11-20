@@ -149,7 +149,7 @@ func (d Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"destination "+r.Host+" is not enabled at this gateway")
 		return
 	}
-	ctx := context.WithValue(r.Context(), routeContextKey{}, route)
+	ctx, _ := withDecision(context.WithValue(r.Context(), routeContextKey{}, route))
 	// Named MCP routes select their capability after parsing the server name
 	// and check it with the same Permits. A route that declares no capability
 	// is refused by Validate before the gateway serves.

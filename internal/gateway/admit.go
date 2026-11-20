@@ -50,10 +50,10 @@ func Admit(ctx context.Context, capability api.CapabilityKind) (context.Context,
 // Refuse records r through the route in ctx and writes the JSON body.
 func Refuse(ctx context.Context, w http.ResponseWriter, r *Refusal) {
 	route, _ := ctx.Value(routeContextKey{}).(Route)
-	if r.recorded && route.AuditLogger != nil {
+	if r.recorded {
 		event := AuditEvent(ctx, string(route.Capability))
 		event.DenyReason = r.Message
-		route.AuditLogger.Log(event)
+		Record(ctx, route.AuditLogger, event)
 	}
 	writeDenial(w, r.Status, r.Type, r.Code, r.Message)
 }

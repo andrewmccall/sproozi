@@ -68,57 +68,57 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.URL.RawPath != "" || r.URL.RawQuery != "" || r.URL.ForceQuery || len(r.Header.Values("Origin")) != 0 {
 		// Do not audit unvalidated path data, which might contain a secret.
 		event.Capability = ""
-		h.deny(w, event, http.StatusForbidden, "unsupported MCP request")
+		h.deny(r.Context(), w, event, http.StatusForbidden, "unsupported MCP request")
 		return
 	}
 	registration, registered := h.config.Registry.servers[name]
 	if !registered {
 		event.Capability = ""
-		h.deny(w, event, http.StatusForbidden, fmt.Sprintf("MCP server %q is not registered in the gateway's MCP "+
+		h.deny(r.Context(), w, event, http.StatusForbidden, fmt.Sprintf("MCP server %q is not registered in the gateway's MCP "+
 			"registry; add it to servers.json and restart the gateway", name))
 		return
 	}
 	if !identity.Permits(capability) {
-		h.deny(w, event, http.StatusForbidden, "MCP capability denied")
+		h.deny(r.Context(), w, event, http.StatusForbidden, "MCP capability denied")
 		return
 	}
 	if r.Method != http.MethodPost {
-		h.deny(w, event, http.StatusMethodNotAllowed, "MCP POST required")
+		h.deny(r.Context(), w, event, http.StatusMethodNotAllowed, "MCP POST required")
 		return
 	}
 	rules, err := mcppolicy.CompileScope(identity.Policy.Spec.MCPServers[name])
 	if err != nil {
-		h.deny(w, event, http.StatusForbidden, "invalid MCP tool scope")
+		h.deny(r.Context(), w, event, http.StatusForbidden, "invalid MCP tool scope")
 		return
 	}
 	// Parse the bounded envelope once for ambiguity checks; the SDK still owns
 	// JSON-RPC validation and method dispatch.
 	body, err := io.ReadAll(io.LimitReader(r.Body, (64<<10)+1))
 	if err != nil || len(body) > 64<<10 {
-		h.deny(w, event, http.StatusRequestEntityTooLarge, "MCP request exceeded bounds")
+		h.deny(r.Context(), w, event, http.StatusRequestEntityTooLarge, "MCP request exceeded bounds")
 		return
 	}
 	if _, err := mcppolicy.DecodeObject(body); err != nil {
-		h.deny(w, event, http.StatusBadRequest, "invalid MCP request JSON")
+		h.deny(r.Context(), w, event, http.StatusBadRequest, "invalid MCP request JSON")
 		return
 	}
 	message, err := jsonrpc.DecodeMessage(body)
 	request, supported := message.(*jsonrpc.Request)
 	if err != nil || !supported || !supportedRequest(request) {
-		h.deny(w, event, http.StatusBadRequest, "unsupported MCP request envelope")
+		h.deny(r.Context(), w, event, http.StatusBadRequest, "unsupported MCP request envelope")
 		return
 	}
 	var params struct {
 		Name string `json:"name"`
 	}
 	if len(request.Params) != 0 && json.Unmarshal(request.Params, &params) != nil {
-		h.deny(w, event, http.StatusBadRequest, "invalid MCP request envelope")
+		h.deny(r.Context(), w, event, http.StatusBadRequest, "invalid MCP request envelope")
 		return
 	}
 	if request.Method == "tools/call" {
 		if _, permitted := rules[params.Name]; !permitted {
 			event.Operation = "mcp.tools.call"
-			h.deny(w, event, http.StatusForbidden, "MCP tool denied")
+			h.deny(r.Context(), w, event, http.StatusForbidden, "MCP tool denied")
 			return
 		}
 	}
@@ -127,21 +127,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	limits, _, err := identity.BudgetLimits(capability)
 	if err != nil {
-		h.deny(w, event, http.StatusForbidden, "MCP allocation denied")
+		h.deny(r.Context(), w, event, http.StatusForbidden, "MCP allocation denied")
 		return
 	}
 	if limits.MaxCostMicros > 0 {
-		h.deny(w, event, http.StatusServiceUnavailable, "MCP budget accounting unavailable")
+		h.deny(r.Context(), w, event, http.StatusServiceUnavailable, "MCP budget accounting unavailable")
 		return
 	}
 	meter, err := identity.Meter(r.Context(), h.config.Budgets, capability)
 	if err != nil {
-		h.deny(w, event, http.StatusServiceUnavailable, "MCP budget accounting unavailable")
+		h.deny(r.Context(), w, event, http.StatusServiceUnavailable, "MCP budget accounting unavailable")
 		return
 	}
 	session, err := h.connect(ctx, registration)
 	if err != nil {
-		h.deny(w, event, http.StatusBadGateway, "MCP upstream connection failed")
+		h.deny(r.Context(), w, event, http.StatusBadGateway, "MCP upstream connection failed")
 		return
 	}
 	defer func() { _ = session.Close() }()
@@ -149,7 +149,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// prepare's errors are fixed text or upstream tool names, quoted and
 		// bounded, so they can name the fix without echoing upstream content.
-		h.deny(w, event, http.StatusBadGateway, fmt.Sprintf("MCP server %q tools unavailable or unsupported: %v", name, err))
+		h.deny(r.Context(), w, event, http.StatusBadGateway, fmt.Sprintf("MCP server %q tools unavailable or unsupported: %v", name, err))
 		return
 	}
 	sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return server }, &sdk.StreamableHTTPOptions{
@@ -217,7 +217,7 @@ func (h *Handler) prepare(ctx context.Context, upstream *sdk.ClientSession,
 					callEvent.Operation, callEvent.Resource = "mcp.tools.call", name
 					defer func() {
 						if h.config.AuditLogger != nil {
-							h.config.AuditLogger.Log(callEvent)
+							gateway.Record(ctx, h.config.AuditLogger, callEvent)
 						}
 					}()
 					arguments := req.Params.Arguments
@@ -381,10 +381,10 @@ func (b *boundedBody) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func (h *Handler) deny(w http.ResponseWriter, event audit.Event, status int, reason string) {
+func (h *Handler) deny(ctx context.Context, w http.ResponseWriter, event audit.Event, status int, reason string) {
 	event.DenyReason = reason
 	if h.config.AuditLogger != nil {
-		h.config.AuditLogger.Log(event)
+		gateway.Record(ctx, h.config.AuditLogger, event)
 	}
 	http.Error(w, reason, status)
 }
