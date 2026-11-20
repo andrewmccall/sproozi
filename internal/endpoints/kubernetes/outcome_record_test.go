@@ -233,6 +233,8 @@ func TestKubernetesOutcomesAreRecorded(t *testing.T) {
 		{name: "rest/policy: resource", method: http.MethodGet, target: "https://kubernetes.default.svc/api/v1/namespaces/demo/secrets", client: served(200, podList)},
 		{name: "rest/upstream not configured", method: http.MethodGet, target: podsURL, noUpstream: true},
 		{name: "rest/budget exhausted", method: http.MethodGet, target: podsURL, client: served(200, podList), units: 1, tracker: budget.NewTracker(), spent: true},
+		{name: "rest/watch budget exhausted", method: http.MethodGet, target: podsURL + "?watch=true&timeoutSeconds=5",
+			client: served(200, `{"type":"ADDED"}`), units: 1, tracker: budget.NewTracker(), spent: true},
 		{name: "rest/ledger unavailable", method: http.MethodGet, target: podsURL, client: served(200, podList), units: 1,
 			tracker: budget.NewTrackerWithLedger(failingLedger{})},
 		{name: "rest/upstream transport error", method: http.MethodGet, target: podsURL, client: failing, units: 5, tracker: budget.NewTracker()},

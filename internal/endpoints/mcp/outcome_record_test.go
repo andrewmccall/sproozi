@@ -12,10 +12,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -293,6 +295,8 @@ func TestNamedMCPOutcomesAreRecorded(t *testing.T) {
 		{name: "tools/call arguments denied", method: http.MethodPost, target: docsURL, body: search("private")},
 		{name: "tools/call budget exhausted", method: http.MethodPost, target: docsURL, body: search("operations"), spent: 5},
 		{name: "tools/call upstream tool failed", method: http.MethodPost, target: docsURL, body: call(3, "tools/call", `{"name":"fail","arguments":{}}`)},
+		{name: "tools/call without an Accept header", method: http.MethodPost, target: docsURL, body: search("operations"),
+			header: map[string]string{"Accept": ""}},
 	}
 	lines := make([]string, 0, len(cases))
 	for _, tc := range cases {
@@ -331,5 +335,72 @@ func TestNamedMCPOutcomesAreRecorded(t *testing.T) {
 		routes.ServeHTTP(response, req.WithContext(gateway.WithIdentity(req.Context(), grant(tc.change))))
 		lines = append(lines, outcomeLine(t, tc.name, response, before+" -> "+ledgerReading(tracker, ledgerKey), events.taken()))
 	}
+	lines = append(lines, abandonedToolCall(t))
 	compareRecorded(t, filepath.Join("testdata", "outcomes.txt"), lines)
+}
+
+// abandonedToolCall records a tool call the workload leaves while the
+// upstream tool runs. It waits for the tool to see the cancellation and for
+// every record the call writes, which are sorted, since the handler's own and
+// any the dispatcher writes for it may land in either order.
+func abandonedToolCall(t *testing.T) string {
+	t.Helper()
+	const name, tool = "slowdocs", "slow"
+	const capability = api.CapabilityKind("mcp." + name)
+	started, stopped := make(chan struct{}, 1), make(chan struct{}, 1)
+	server := sdk.NewServer(&sdk.Implementation{Name: name, Version: "test"}, nil)
+	sdk.AddTool(server, &sdk.Tool{Name: tool, Description: "Waits until it is cancelled"},
+		func(ctx context.Context, _ *sdk.CallToolRequest, _ struct{}) (*sdk.CallToolResult, any, error) {
+			started <- struct{}{}
+			<-ctx.Done()
+			stopped <- struct{}{}
+			return nil, nil, ctx.Err()
+		})
+	upstream := httptest.NewTLSServer(sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return server },
+		&sdk.StreamableHTTPOptions{JSONResponse: true}))
+	t.Cleanup(upstream.Close)
+	data, err := json.Marshal(map[string]any{"servers": map[string]any{name: map[string]string{"url": upstream.URL + "/mcp"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := remote.LoadRegistry(data, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := &recordedEvents{}
+	tracker := budget.NewTracker()
+	handler := remote.NewHandler(remote.HandlerConfig{Registry: registry, HTTPClient: upstream.Client(), Budgets: tracker, AuditLogger: events})
+	routes := gateway.Dispatcher{"gateway.test:443": {Tier: audit.TierProtocol, Handler: handler, Budgets: tracker, AuditLogger: events}}
+	grant := &gateway.ExecutionGrant{Execution: gateway.Reference{Backend: gateway.BackendKubernetes, Namespace: "agents", Name: "run", UID: "test-execution"},
+		Policy: gateway.PolicySnapshot{Name: "test-policy", Spec: api.AgentPolicySpec{AllowedCapabilities: []api.CapabilityKind{capability},
+			MCPServers: map[string]api.MCPServerScope{name: {Tools: map[string]api.MCPToolScope{tool: {}}}},
+			Budgets:    map[api.CapabilityKind]api.EndpointBudget{capability: {MaxUnits: 5}}}},
+		Template:     gateway.TemplateSnapshot{Name: "test-template"},
+		Capabilities: []api.CapabilityKind{capability}}
+	key := "test-execution/" + string(capability)
+	before := ledgerReading(tracker, key)
+	ctx, cancel := context.WithCancel(gateway.WithIdentity(context.Background(), grant))
+	defer cancel()
+	req := httptest.NewRequest(http.MethodPost, "https://gateway.test/mcp/"+name,
+		strings.NewReader(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"`+tool+`","arguments":{}}}`)).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	response := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() { routes.ServeHTTP(response, req); close(done) }()
+	<-started
+	cancel()
+	<-stopped
+	<-done
+	var recorded []audit.Event
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		recorded = append(recorded, events.taken()...)
+		if slices.ContainsFunc(recorded, func(e audit.Event) bool { return e.Operation == "mcp.tools.call" }) {
+			break
+		}
+	}
+	slices.SortFunc(recorded, func(a, b audit.Event) int { return strings.Compare(string(a.Outcome), string(b.Outcome)) })
+	// The response is written to a client that has left, so only what was
+	// charged and recorded is meaningful.
+	return outcomeLine(t, "tools/call the workload abandons", httptest.NewRecorder(), before+" -> "+ledgerReading(tracker, key), recorded)
 }
