@@ -22,7 +22,6 @@ var behaviourSites = map[string]string{
 	"internal/harness/native_args.go: ValidateNativeArgs":    "parses Codex's -c/--config overrides",
 	"internal/harness/native_args.go: NativeArgsSelectModel": "parses Codex's -m and -c model=",
 	"cmd/native-session/launch.go: nativeAdapters":           "the supervisor adapter of each managed kind",
-	"cmd/native-session/main.go: server.waitingFor":          "graceful-stop wait text from each kind's turn observation",
 	"cmd/native-session/claude.go: server.claudeHook":        "Claude Code's lifecycle hooks",
 }
 

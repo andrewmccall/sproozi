@@ -816,14 +816,20 @@ func recordWorld(t *testing.T, w world) (string, int) {
 	return b.String(), steps
 }
 
-// recordedWorlds are Codex's four, with and without a deadline, Claude
-// Code's and Copilot's with one, and a Codex world whose deadline passes.
-var recordedWorlds = []world{
-	{kind: harness.NativeCodex}, {kind: harness.NativeCodex, deadline: true},
-	{kind: harness.NativeCodex, first: true}, {kind: harness.NativeCodex, first: true, deadline: true},
-	{kind: harness.NativeClaude, deadline: true}, {kind: harness.NativeClaude, first: true, deadline: true},
-	{kind: harness.NativeCopilot, deadline: true}, {kind: harness.NativeCopilot, first: true, deadline: true},
-	{kind: harness.NativeCodex, deadline: true, late: true},
+// recordedWorlds are, for each managed kind in registry order, its first and
+// resumed visits with a deadline, and for the default kind (Codex) also
+// without one; then a default-kind world whose deadline passes.
+func recordedWorlds() []world {
+	var worlds []world
+	for _, kind := range harness.ManagedKinds() {
+		if kind == harness.Default() {
+			worlds = append(worlds, world{kind: kind}, world{kind: kind, deadline: true}, world{kind: kind, first: true},
+				world{kind: kind, first: true, deadline: true})
+			continue
+		}
+		worlds = append(worlds, world{kind: kind, deadline: true}, world{kind: kind, first: true, deadline: true})
+	}
+	return append(worlds, world{kind: harness.Default(), deadline: true, late: true})
 }
 
 // The supervisor's behaviour, for every event in every state it reaches, is
@@ -836,7 +842,7 @@ func TestSupervisorLifecycleRecord(t *testing.T) {
 	if codexJournalExists(codexHome) {
 		t.Skip("a real Codex home is present")
 	}
-	for _, kind := range []harness.NativeKind{harness.NativeCodex, harness.NativeClaude, harness.NativeCopilot} {
+	for _, kind := range harness.ManagedKinds() {
 		recordedFinishes[kind] = nativeAdapters[kind].finish
 		withAdapter(t, kind, func(a *nativeAdapter) {
 			a.observe = func(s *server) (string, string, error) { return recordingOf(s).observe() }
@@ -858,10 +864,11 @@ func TestSupervisorLifecycleRecord(t *testing.T) {
 	quiesceWait, inputSettle = 2*time.Second, time.Hour
 	t.Cleanup(func() { quiesceWait, inputSettle = previousWait, previousSettle })
 
-	records := make([]string, len(recordedWorlds))
-	counts := make([]int, len(recordedWorlds))
+	worlds := recordedWorlds()
+	records := make([]string, len(worlds))
+	counts := make([]int, len(worlds))
 	t.Run("worlds", func(t *testing.T) {
-		for i, w := range recordedWorlds {
+		for i, w := range worlds {
 			t.Run(w.String(), func(t *testing.T) {
 				t.Parallel()
 				records[i], counts[i] = recordWorld(t, w)

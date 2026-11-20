@@ -19,7 +19,10 @@ import (
 )
 
 // nativeAdapter holds what differs between supported harnesses inside the
-// supervisor. The lifecycle around it (gate, observe, stop) is shared.
+// supervisor. The lifecycle around it (gate, observe, stop) is shared. Every
+// function is required for a managed kind, except those named in
+// optionalAdapterFields (TestEveryAdapterSetsEveryRequiredFunction), so a
+// partly filled adapter fails a test rather than panicking in a sandbox.
 type nativeAdapter struct {
 	executable string
 	// prepare installs launch-generated files for a native process resuming
@@ -31,7 +34,15 @@ type nativeAdapter struct {
 	// turnless reports that a gated first visit has no native conversation
 	// to keep: none started, or its only turn ended without completing.
 	turnless func(s *server) bool
-	// completion reports lifecycle diagnostics when the harness has them.
+	// waiting describes, in fixed words, what a graceful stop that has not
+	// yet observed a completed turn waits for.
+	waiting func(s *server) string
+	// taskBaseline, optional, reports the resumed conversation's completed
+	// turn before a task launch starts it, so that only a new turn completes
+	// the task. The caller holds s.mu.
+	taskBaseline func(s *server) (string, error)
+	// completion, optional, reports lifecycle diagnostics when the harness
+	// has them.
 	completion func(s *server) *harness.NativeCompletion
 	// finish ends the process once its turn completed.
 	finish func(n *nativepty.Supervisor, ctx context.Context) (nativepty.Exit, error)
@@ -47,10 +58,12 @@ type nativeAdapter struct {
 
 var nativeAdapters = map[harness.NativeKind]nativeAdapter{
 	harness.NativeCodex: {
-		executable: codexExecutable,
-		prepare:    prepareCodexLaunch,
-		observe:    (*server).observeCodexTurn,
-		turnless:   func(*server) bool { return !codexJournalExists(codexHome) },
+		executable:   codexExecutable,
+		prepare:      prepareCodexLaunch,
+		observe:      (*server).observeCodexTurn,
+		turnless:     (*server).codexTurnless,
+		waiting:      (*server).codexWaiting,
+		taskBaseline: (*server).codexTaskBaseline,
 		// Codex quits itself after the completed turn and must exit cleanly.
 		finish: (*nativepty.Supervisor).QuitAfterCompletedTurn,
 		quits:  true,
@@ -70,6 +83,7 @@ var nativeAdapters = map[harness.NativeKind]nativeAdapter{
 		prepare:    prepareClaudeLaunch,
 		observe:    (*server).observeClaudeTurn,
 		turnless:   (*server).claudeTurnless,
+		waiting:    (*server).claudeWaiting,
 		completion: (*server).claudeCompletion,
 		// The observed lifecycle hooks proved completion; the supervisor
 		// stops Claude itself.
@@ -86,6 +100,7 @@ var nativeAdapters = map[harness.NativeKind]nativeAdapter{
 		prepare:      prepareCopilotLaunch,
 		observe:      (*server).observeCopilotTurn,
 		turnless:     (*server).copilotTurnless,
+		waiting:      (*server).copilotWaiting,
 		namesSession: true,
 		// The journal proved completion; the supervisor stops Copilot itself.
 		finish: (*nativepty.Supervisor).Stop,
@@ -228,13 +243,14 @@ func (s *server) observeNativeTurn() (string, string, error) {
 	return adapter.observe(s)
 }
 
-func (s *server) observeCodexTurn() (string, string, error) {
-	s.mu.Lock()
-	c := s.config
-	id := s.threadID
-	baseline := s.taskBaseline
-	s.mu.Unlock()
-	return observeTaskTurn(codexHome, id, c.InstructionDigest, c.RolloutMaxBytes, c.Task, baseline)
+// turnWaiting is the wait text of a harness whose journal shows whether its
+// first turn has started, as Codex's and Copilot's do.
+func turnWaiting(kind harness.NativeKind, started bool) string {
+	name := harness.NativeDisplayName(kind)
+	if !started {
+		return name + " to start its first turn"
+	}
+	return "the current " + name + " turn to complete"
 }
 func (s *server) writeInput(a *nativepty.Attachment, data []byte) (int, error) {
 	s.mu.Lock()

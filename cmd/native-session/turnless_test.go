@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -329,6 +330,56 @@ func TestEveryManagedKindHasAnAdapter(t *testing.T) {
 			t.Errorf("managed harness %q has no supervisor adapter; add one to nativeAdapters in "+
 				"cmd/native-session/launch.go", kind)
 		}
+	}
+}
+
+// optionalAdapterFields are the nativeAdapter functions a managed kind may
+// leave unset, each with what leaving it unset means. Every other function
+// field is required, including one added later unless it is named here.
+var optionalAdapterFields = map[string]string{
+	"completion": "the harness reports no lifecycle diagnostics in status; only Claude Code's hooks give any",
+	"taskBaseline": "a task launch that resumes a conversation takes no baseline: the harness takes no task, " +
+		"or binds completion to the task's own prompt, as Claude Code's UserPromptSubmit hook does",
+}
+
+// adapterProblems names each required function a supervisor adapter leaves
+// unset.
+func adapterProblems(adapter nativeAdapter) []string {
+	var missing []string
+	fields, values := reflect.TypeFor[nativeAdapter](), reflect.ValueOf(adapter)
+	for i := range fields.NumField() {
+		f := fields.Field(i)
+		if f.Type.Kind() == reflect.Func && values.Field(i).IsNil() && optionalAdapterFields[f.Name] == "" {
+			missing = append(missing, f.Name)
+		}
+	}
+	return missing
+}
+
+// Every managed kind's supervisor adapter sets every function the supervisor
+// calls without checking, so a partly filled adapter fails here rather than
+// panicking at activation or stop in a sandbox.
+func TestEveryAdapterSetsEveryRequiredFunction(t *testing.T) {
+	fields := reflect.TypeFor[nativeAdapter]()
+	for name := range optionalAdapterFields {
+		if f, ok := fields.FieldByName(name); !ok || f.Type.Kind() != reflect.Func {
+			t.Errorf("optionalAdapterFields names %q, which is not a function of nativeAdapter; remove it", name)
+		}
+	}
+	for _, kind := range harness.ManagedKinds() {
+		adapter, err := adapterFor(kind)
+		if err != nil {
+			continue // TestEveryManagedKindHasAnAdapter reports it.
+		}
+		for _, name := range adapterProblems(adapter) {
+			t.Errorf("managed harness %q's supervisor adapter has no %s; set it in nativeAdapters in "+
+				"cmd/native-session/launch.go, or, if leaving it unset has a meaning, name it with that meaning in "+
+				"optionalAdapterFields", kind, name)
+		}
+	}
+	want := []string{"prepare", "observe", "turnless", "waiting", "finish", "settle"}
+	if got := adapterProblems(nativeAdapter{}); !slices.Equal(got, want) {
+		t.Errorf("an empty adapter misses %v; want the required functions %v", got, want)
 	}
 }
 

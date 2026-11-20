@@ -415,7 +415,13 @@ func (s *server) activate() response {
 	}
 	env = append(env, "HOME="+agentHome)
 	if s.config.Task != "" && s.threadID != "" {
-		_, baseline, err := observeTurn(codexHome, s.threadID, s.config.InstructionDigest, s.config.RolloutMaxBytes)
+		taskBaseline := adapter.taskBaseline
+		if taskBaseline == nil {
+			// A kind without its own baseline takes Codex's, as it always
+			// has.
+			taskBaseline = (*server).codexTaskBaseline
+		}
+		baseline, err := taskBaseline(s)
 		if err != nil {
 			r.Error = "initial task baseline is unavailable: " + err.Error()
 			return r
@@ -747,37 +753,19 @@ func (s *server) endGracefully(exit nativepty.Exit, code int, thread string) (ov
 	return ""
 }
 
-// waitingFor describes, in fixed words, what a graceful stop waits for.
+// waitingFor describes, in fixed words, what a graceful stop waits for: its
+// harness adapter's wait text.
 func (s *server) waitingFor() string {
 	s.mu.Lock()
 	kind := s.config.Harness
 	s.mu.Unlock()
-	name := harness.NativeDisplayName(kind)
-	if kind == harness.NativeCopilot {
-		if _, _, err := s.observeCopilotTurn(); errors.Is(err, os.ErrNotExist) {
-			return name + " to start its first turn"
-		}
-		return "the current " + name + " turn to complete"
+	adapter, err := adapterFor(kind)
+	if err != nil {
+		// A kind without an adapter gets Codex's journal check, as it
+		// always has.
+		return turnWaiting(kind, codexJournalExists(codexHome))
 	}
-	if kind != harness.NativeClaude {
-		if !codexJournalExists(codexHome) {
-			return name + " to start its first turn"
-		}
-		return "the current " + name + " turn to complete"
-	}
-	switch s.claudeCompletion().Observation {
-	case pendingTools:
-		return "a running Claude Code tool to finish"
-	case inputChanged:
-		return "terminal input sent after the last Claude Code turn to settle"
-	case "identity_unavailable":
-		return "Claude Code to report its conversation"
-	case "lifecycle_incomplete":
-		return "the current Claude Code turn to finish"
-	case "settled":
-		return "Claude Code to stop"
-	}
-	return "Claude Code's transcript to settle"
+	return adapter.waiting(s)
 }
 
 // inputSettled reports that gated input has been quiet long enough for any
@@ -821,7 +809,7 @@ func (s *server) isTurnless() bool {
 		return latched
 	}
 	adapter, err := adapterFor(kind)
-	if err != nil || adapter.turnless == nil || !adapter.turnless(s) {
+	if err != nil || !adapter.turnless(s) {
 		return false
 	}
 	s.mu.Lock()
