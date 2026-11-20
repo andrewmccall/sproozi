@@ -11,7 +11,7 @@ registration uses the shared gateway and named run grants.
 | --- | --- | --- |
 | Kubernetes AgentRuns | Every [harness selector](harnesses.md#harness-selectors) | The gateway's registry ConfigMap, the AgentPolicy and the AgentRun. |
 | Local sessions (`sproozi run`) | Codex, Claude Code and Copilot | `config.json`; see [local sessions](#local-sessions). |
-| Sessions on a remote executor | Codex, Claude Code and Copilot | The executor's allowances and the cluster's policy. |
+| Sessions on a remote executor | Codex and Claude Code | The executor's allowances and the cluster's policy. |
 
 This path enforces the [Protocol tier](../../GLOSSARY.md#protocol-tier).
 Tool names, descriptions and schemas cannot establish read-only behaviour or

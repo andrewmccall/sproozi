@@ -363,3 +363,45 @@ func signInChoiceProblems(h Harness) []string {
 	}
 	return problems
 }
+
+// The configured-MCP reference names the managed harnesses that local
+// sessions run, and those a remote executor may run (RemoteExecutor).
+func TestConfiguredMCPReferenceMatchesTheRegistry(t *testing.T) {
+	data, err := os.ReadFile("../../docs/reference/configured-mcp.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var local, remote []string
+	for _, h := range registry {
+		if h.Native == "" {
+			continue
+		}
+		local = append(local, h.DisplayName)
+		if h.RemoteExecutor {
+			remote = append(remote, h.DisplayName)
+		}
+	}
+	and := func(names []string) string {
+		if len(names) < 2 {
+			return strings.Join(names, "")
+		}
+		return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+	}
+	for _, row := range []struct{ where, want string }{
+		{"Local sessions (`sproozi run`)", and(local)},
+		{"Sessions on a remote executor", and(remote)},
+	} {
+		prefix := "| " + row.where + " | "
+		line := ""
+		for l := range strings.SplitSeq(string(data), "\n") {
+			if strings.HasPrefix(l, prefix) {
+				line = l
+			}
+		}
+		got, _, _ := strings.Cut(strings.TrimPrefix(line, prefix), " |")
+		if got != row.want {
+			t.Errorf("docs/reference/configured-mcp.md's %q row names %q; the registry in %s says %q", row.where, got,
+				registryFile, row.want)
+		}
+	}
+}
