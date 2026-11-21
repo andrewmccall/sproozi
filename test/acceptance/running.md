@@ -68,6 +68,26 @@ only inside GitHub Actions; leave it unset locally. See the
 [CI caching amendment](../../docs/adr/0021-pinned-ci-inputs-and-latest-client-canary.md#amendment-ci-caching)
 to ADR 0021.
 
+## Tests that write host-private files
+
+A test package whose tests write host-private files through
+`internal/privatefs` calls `privatefstest.SkipSync()` from its `TestMain`,
+before `m.Run()`. `privatefs.Replace` and `privatefs.SyncDir` then skip only
+their file and directory syncs; every name, ownership, mode and symbolic-link
+check, the exclusive temporary file and the rename still run. On macOS a sync
+is `F_FULLFSYNC`, which waits for the drive to write everything every process
+has written, so while other builds or tests write, a package making thousands
+of replacements can take minutes and reach the 10-minute test timeout. A sync
+matters only if power is lost, which no test observes. `internal/work`,
+`internal/session`, `internal/session/home`, `internal/certificates`,
+`internal/runtime/docker`, `internal/gateway/docker` and `internal/pki` do
+this.
+
+`privatefs`'s own tests do not, so they keep exercising real syncs.
+`SkipSync` panics outside a test binary. Tests in
+`internal/privatefs/privatefstest` fail if any non-test file imports it, or if
+any binary under `cmd/` or `hack/` depends on it or on `testing`.
+
 ## Investigation-to-PR demo guide
 
 The repository includes the
