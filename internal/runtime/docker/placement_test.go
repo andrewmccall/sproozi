@@ -979,14 +979,17 @@ func TestNativeAcknowledgementIsNotAWriterFence(t *testing.T) {
 	}
 }
 
+// A task is a fresh launch's first prompt: it reaches the native contract,
+// with no conversation to resume, beside the observer's own bound.
 func TestPreparedNativeLaunchCarriesTaskAndIndependentRolloutLimit(t *testing.T) {
 	t.Parallel()
 	data := fixtureArtifact(t)
 	engine := newFakeDocker()
 	p := openFixture(t, testutil.PrivateDir(t), engine, &fakeAuthority{engine: engine})
 	launch := fixtureLaunch(t, data)
+	launch.ThreadID, launch.CheckpointDigest = "", ""
 	launch.Task = "Inspect the workspace and report the result."
-	if _, err := p.Prepare(context.Background(), launch, data); err != nil {
+	if _, err := p.Prepare(context.Background(), launch, []byte("workspace-continuity")); err != nil {
 		t.Fatal(err)
 	}
 	var configured harness.NativeLaunch
@@ -997,7 +1000,7 @@ func TestPreparedNativeLaunchCarriesTaskAndIndependentRolloutLimit(t *testing.T)
 			}
 		}
 	}
-	if configured.Task != launch.Task || configured.ThreadID != fixtureThread || configured.RolloutMaxBytes != 64<<20 || configured.RolloutMaxBytes == p.config.MaxCheckpointBytes {
+	if configured.Task != launch.Task || configured.ThreadID != "" || configured.RolloutMaxBytes != 64<<20 || configured.RolloutMaxBytes == p.config.MaxCheckpointBytes {
 		t.Fatalf("native task/thread/observer bound lost: %+v", configured)
 	}
 }
