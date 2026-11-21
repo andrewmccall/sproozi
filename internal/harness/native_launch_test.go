@@ -59,6 +59,31 @@ func TestNativeBaseEnvironmentSelectsOnlyTheApprovedHarnessPlaceholder(t *testin
 	}
 }
 
+// A task launch starts a new conversation: the contract refuses one that
+// also resumes a conversation, for every kind that takes a task, since its
+// task's completion would otherwise depend on that conversation's last turn.
+func TestATaskLaunchResumesNoConversation(t *testing.T) {
+	for _, kind := range ManagedKinds() {
+		if !kind.TakesTask() {
+			continue
+		}
+		launch := NativeLaunch{Harness: kind, Deadline: time.Now().Add(time.Hour), Env: []string{}, Task: "Fix it",
+			Instructions: "approved", InstructionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte("approved"))),
+			RolloutMaxBytes: NativeRolloutMaxBytes, ClientConfig: &NativeClientConfig{MCPGateway: "https://gateway.test"}}
+		if err := launch.Validate(time.Now()); err != nil {
+			t.Fatalf("%s: a new task launch: %v", kind, err)
+		}
+		launch.ThreadID = "01234567-89ab-cdef-0123-456789abcdef"
+		if err := launch.Validate(time.Now()); err == nil || !strings.Contains(err.Error(), "resume") {
+			t.Errorf("%s: a task launch that resumes a conversation: %v; want a refusal naming the resume", kind, err)
+		}
+		launch.Task = ""
+		if err := launch.Validate(time.Now()); err != nil {
+			t.Errorf("%s: a resumed launch without a task: %v", kind, err)
+		}
+	}
+}
+
 // A Docker launch carries the profile in its configuration, so the configure
 // bound must fit the largest archive beside large approved instructions.
 func TestConfigureBoundFitsTheLargestProfile(t *testing.T) {

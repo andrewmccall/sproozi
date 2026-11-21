@@ -6,7 +6,7 @@
       "kind": "codex",
       "state": "prepared",
       "taskBaseline": "",
-      "validate": ""
+      "validate": "native task launch cannot resume a conversation"
     },
     {
       "error": "the recorded terminal does not start",
@@ -14,7 +14,7 @@
       "kind": "codex",
       "state": "prepared",
       "taskBaseline": "turn-one",
-      "validate": ""
+      "validate": "native task launch cannot resume a conversation"
     },
     {
       "error": "the recorded terminal does not start",
@@ -22,7 +22,7 @@
       "kind": "claude-code",
       "state": "prepared",
       "taskBaseline": "",
-      "validate": ""
+      "validate": "native task launch cannot resume a conversation"
     },
     {
       "error": "the recorded terminal does not start",
@@ -30,7 +30,7 @@
       "kind": "claude-code",
       "state": "prepared",
       "taskBaseline": "",
-      "validate": ""
+      "validate": "native task launch cannot resume a conversation"
     },
     {
       "error": "the recorded terminal does not start",

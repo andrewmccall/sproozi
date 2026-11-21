@@ -205,6 +205,11 @@ func (c NativeLaunch) Validate(now time.Time) error {
 		c.Task != "" && (strings.TrimSpace(c.Task) == "" || !c.Harness.TakesTask()) {
 		return fmt.Errorf("native task requires bounded nonempty %s input", TaskKindList())
 	}
+	if c.Task != "" && c.ThreadID != "" {
+		// A task is a session's first launch, which starts a new
+		// conversation; its completion must be its own turn.
+		return errors.New("native task launch cannot resume a conversation")
+	}
 	if err := ValidateNativeArgs(c.Harness, c.Args); err != nil {
 		return err
 	}
