@@ -132,7 +132,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if request.Method != toolsCallMethod {
 		// Discovery and notifications have no audit record, pending a
 		// decision (ADR 0070). Each tool call records its own.
-		gateway.Unrecorded(r.Context(), gateway.UnrecordedMCPDiscovery)
+		gateway.Unrecorded(r.Context(), gateway.UnrecordedMCPDiscovery())
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)

@@ -233,7 +233,7 @@ func TestDispatcherAndLeakGuardOutcomesAreRecorded(t *testing.T) {
 	silentHandler := func(*recordedEvents) http.Handler { return silent }
 	declaredHandler := func(*recordedEvents) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			gateway.Unrecorded(r.Context(), gateway.UnrecordedControl)
+			gateway.Unrecorded(r.Context(), gateway.UnrecordedControl())
 			silent.ServeHTTP(w, r)
 		})
 	}

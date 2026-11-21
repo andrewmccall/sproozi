@@ -44,6 +44,12 @@ func TestRecordWithoutAWriterLeavesTheRequestToTheFallback(t *testing.T) {
 // Only the listed reasons declare a request unrecorded; the decision keeps
 // the reason, and a zero reason declares nothing.
 func TestOnlyListedReasonsDeclareARequestUnrecorded(t *testing.T) {
+	listed := gateway.UnrecordedReasons()
+	if len(listed) != 3 || listed[0] == listed[1] || listed[1] == listed[2] || listed[0] == listed[2] ||
+		listed[0] != gateway.UnrecordedMCPDiscovery() || listed[1] != gateway.UnrecordedKubernetesMCP() ||
+		listed[2] != gateway.UnrecordedControl() {
+		t.Fatalf("the reasons are not three distinct listed values: %v", listed)
+	}
 	for _, want := range gateway.UnrecordedReasons() {
 		events, reason, declared, _ := dispatchWith(t, func(r *http.Request) { gateway.Unrecorded(r.Context(), want) })
 		if !declared || reason != want || len(events) != 0 {

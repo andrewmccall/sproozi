@@ -93,7 +93,7 @@ func NewControl(journal *Journal, next http.Handler) http.Handler {
 		}
 		// The control connection and its diagnose calls have no audit
 		// record, pending a decision (ADR 0070).
-		gateway.Unrecorded(r.Context(), gateway.UnrecordedControl)
+		gateway.Unrecorded(r.Context(), gateway.UnrecordedControl())
 		if identity, ok := gateway.IdentityFromContext(r.Context()); !ok || identity.Execution.UID == "" {
 			http.Error(w, "gateway identity required", http.StatusUnauthorized)
 			return

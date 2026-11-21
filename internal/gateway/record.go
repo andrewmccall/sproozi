@@ -47,26 +47,34 @@ func Record(ctx context.Context, w audit.Writer, e audit.Event) {
 
 // UnrecordedReason names a kind of request that has no audit record by
 // design. Each is pending an owner decision on whether to audit it
-// (ADR 0070). Only the values below exist: the zero value declares nothing.
+// (ADR 0070). Code outside this package can neither construct nor alter one:
+// it can only take the values the functions below return, and the zero value
+// declares nothing.
 type UnrecordedReason struct{ name string }
 
 func (r UnrecordedReason) String() string { return r.name }
 
 var (
-	// UnrecordedMCPDiscovery: named MCP initialize, tools/list, ping,
-	// server/discover and notifications.
-	UnrecordedMCPDiscovery = UnrecordedReason{"named MCP discovery"}
-	// UnrecordedKubernetesMCP: Kubernetes /mcp discovery, and the shape and
-	// argument refusals that end before a pod list is authorized.
-	UnrecordedKubernetesMCP = UnrecordedReason{"Kubernetes MCP discovery and refusals before authorization"}
-	// UnrecordedControl: the control connection, its refusals and its
-	// diagnose calls.
-	UnrecordedControl = UnrecordedReason{"control connection"}
+	unrecordedMCPDiscovery  = UnrecordedReason{"named MCP discovery"}
+	unrecordedKubernetesMCP = UnrecordedReason{"Kubernetes MCP discovery and refusals before authorization"}
+	unrecordedControl       = UnrecordedReason{"control connection"}
 )
+
+// UnrecordedMCPDiscovery: named MCP initialize, tools/list, ping,
+// server/discover and notifications.
+func UnrecordedMCPDiscovery() UnrecordedReason { return unrecordedMCPDiscovery }
+
+// UnrecordedKubernetesMCP: Kubernetes /mcp discovery, and the shape and
+// argument refusals that end before a pod list is authorized.
+func UnrecordedKubernetesMCP() UnrecordedReason { return unrecordedKubernetesMCP }
+
+// UnrecordedControl: the control connection, its refusals and its diagnose
+// calls.
+func UnrecordedControl() UnrecordedReason { return unrecordedControl }
 
 // UnrecordedReasons lists every reason a request may go unrecorded.
 func UnrecordedReasons() []UnrecordedReason {
-	return []UnrecordedReason{UnrecordedMCPDiscovery, UnrecordedKubernetesMCP, UnrecordedControl}
+	return []UnrecordedReason{unrecordedMCPDiscovery, unrecordedKubernetesMCP, unrecordedControl}
 }
 
 // Unrecorded declares that the request in ctx has no audit record by design,
