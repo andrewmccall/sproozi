@@ -280,10 +280,11 @@ func normalizeConfigKey(key string) string {
 	return strings.Join(parts, ".")
 }
 
-// controlled is the controlled key that key is or is below, or "".
+// controlled is the controlled key that key is, is below, or holds as a
+// table that an override of key would replace, or "".
 func (o ConfigOverride) controlled(key string) string {
 	if i := slices.IndexFunc(o.ControlledKeys, func(c string) bool {
-		return key == c || strings.HasPrefix(key, c+".")
+		return key == c || strings.HasPrefix(key, c+".") || strings.HasPrefix(c, key+".")
 	}); i >= 0 {
 		return o.ControlledKeys[i]
 	}
