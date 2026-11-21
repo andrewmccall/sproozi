@@ -12,7 +12,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -162,9 +161,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = session.Close() }()
-	var calls sync.WaitGroup
 	called := &atomic.Bool{}
-	server, err := h.prepare(ctx, session, rules, event, meter, called, &calls)
+	server, err := h.prepare(ctx, session, rules, event, meter, called)
 	if err != nil {
 		// prepare's errors are fixed text or upstream tool names, quoted and
 		// bounded, so they can name the fix without echoing upstream content.
@@ -174,7 +172,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return server }, &sdk.StreamableHTTPOptions{
 		Stateless: true, JSONResponse: true, MaxRequestBodyBytes: 64 << 10, DisableLocalhostProtection: true,
 	}).ServeHTTP(w, r.WithContext(ctx))
-	calls.Wait()
 	if request.Method == toolsCallMethod && !called.Load() {
 		h.recordProtocolRefusal(r, event, params.Name)
 	}
@@ -208,7 +205,7 @@ func supportedRequest(request *jsonrpc.Request) bool {
 
 func (h *Handler) prepare(ctx context.Context, upstream *sdk.ClientSession,
 	rules map[string]*mcppolicy.Constraint, event audit.Event, meter *budget.Meter,
-	called *atomic.Bool, calls *sync.WaitGroup,
+	called *atomic.Bool,
 ) (*sdk.Server, error) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	server := sdk.NewServer(&sdk.Implementation{Name: "sproozi-mcp", Version: "v0.1.0"}, &sdk.ServerOptions{
@@ -245,8 +242,6 @@ func (h *Handler) prepare(ctx context.Context, upstream *sdk.ClientSession,
 			}
 			server.AddTool(&sdk.Tool{Name: name, Description: description, InputSchema: schema},
 				func(callCtx context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
-					calls.Add(1)
-					defer calls.Done()
 					called.Store(true)
 					workCtx, cancel := context.WithCancel(ctx)
 					stop := context.AfterFunc(callCtx, cancel)
