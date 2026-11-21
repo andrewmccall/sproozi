@@ -342,7 +342,7 @@ func TestNamedMCPOutcomesAreRecorded(t *testing.T) {
 		routes.ServeHTTP(response, req.WithContext(gateway.WithIdentity(req.Context(), grant(tc.change))))
 		lines = append(lines, outcomeLine(t, tc.name, response, before+" -> "+ledgerReading(tracker, ledgerKey), events.taken()))
 	}
-	lines = append(lines, abandonedToolCall(t))
+	lines = append(lines, abandonedToolCall(t), abandonedDuringConnection(t))
 	compareRecorded(t, filepath.Join("testdata", "outcomes.txt"), lines)
 }
 
@@ -350,6 +350,58 @@ func TestNamedMCPOutcomesAreRecorded(t *testing.T) {
 // upstream tool runs. It waits for the tool to see the cancellation and for
 // every record the call writes, which are sorted, since the handler's own and
 // any the dispatcher writes for it may land in either order.
+// abandonedDuringConnection records a tool call the workload leaves while
+// the gateway is still connecting to the upstream server: the upstream
+// answers its initialize only after the workload has gone, so the order is
+// fixed.
+func abandonedDuringConnection(t *testing.T) string {
+	t.Helper()
+	const name = "stalled"
+	const capability = api.CapabilityKind("mcp." + name)
+	reached, left := make(chan struct{}), make(chan struct{})
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case reached <- struct{}{}:
+		default:
+		}
+		<-left
+		http.Error(w, "gone", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(upstream.Close)
+	data, err := json.Marshal(map[string]any{"servers": map[string]any{name: map[string]string{registryURLField: upstream.URL + "/mcp"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := remote.LoadRegistry(data, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := &recordedEvents{}
+	tracker := budget.NewTracker()
+	handler := remote.NewHandler(remote.HandlerConfig{Registry: registry, HTTPClient: upstream.Client(), Budgets: tracker, AuditLogger: events})
+	routes := gateway.Dispatcher{"gateway.test:443": {Admission: gateway.AdmitSelected, Tier: audit.TierProtocol, Handler: handler,
+		Budgets: tracker, AuditLogger: events}}
+	grant := &gateway.ExecutionGrant{Execution: gateway.Reference{Backend: gateway.BackendKubernetes, Namespace: "agents", Name: "run", UID: "test-execution"},
+		Policy: gateway.PolicySnapshot{Name: "test-policy", Spec: api.AgentPolicySpec{AllowedCapabilities: []api.CapabilityKind{capability},
+			MCPServers: map[string]api.MCPServerScope{name: {Tools: map[string]api.MCPToolScope{"any": {}}}}}},
+		Template:     gateway.TemplateSnapshot{Name: "test-template"},
+		Capabilities: []api.CapabilityKind{capability}}
+	ctx, cancel := context.WithCancel(gateway.WithIdentity(context.Background(), grant))
+	defer cancel()
+	req := httptest.NewRequest(http.MethodPost, "https://gateway.test/mcp/"+name,
+		strings.NewReader(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"any","arguments":{}}}`)).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	response := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() { routes.ServeHTTP(response, req); close(done) }()
+	<-reached
+	cancel()
+	close(left)
+	<-done
+	return outcomeLine(t, "tools/call the workload abandons while the gateway connects", response, "-", events.taken())
+}
+
 func abandonedToolCall(t *testing.T) string {
 	t.Helper()
 	const name, tool = "slowdocs", "slow"
