@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -12,6 +13,10 @@ import (
 
 // legacyHarnessArgs are harness arguments an earlier validator accepted and
 // the current one refuses, as a journal written before the change holds them.
+// acceptedHarnessArg is an argument every validator accepts, which the tests
+// then replace in the journal with legacy ones.
+const acceptedHarnessArg = "--search"
+
 var legacyHarnessArgs = []string{`"-c","mcp_servers.mine.url=x"`, `"--model"`, `"-c=sandbox_mode=x"`}
 
 // legacyExecution creates a first visit with harness arguments the current
@@ -25,7 +30,7 @@ func legacyExecution(t *testing.T, legacy string, started bool) (*Coordinator, s
 	first := s.Source
 	first.ExecutionID, first.OperationID, first.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
 	first.ThreadID, first.CheckpointDigest = "", ""
-	first.HarnessArgs = []string{"--search"}
+	first.HarnessArgs = []string{acceptedHarnessArg}
 	if _, err := c.Create(first, []byte("captured git workspace"), ""); err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +53,7 @@ func rewriteLegacy(t *testing.T, dir, id, legacy string, local *fakePlacement) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	edited := strings.ReplaceAll(string(data), `"--search"`, legacy)
+	edited := strings.ReplaceAll(string(data), strconv.Quote(acceptedHarnessArg), legacy)
 	if edited == string(data) {
 		t.Fatal("the journal holds no harness arguments to replace")
 	}
@@ -79,7 +84,7 @@ func TestARefusedPreparedVisitIsNeverActivated(t *testing.T) {
 		first := s.Source
 		first.ExecutionID, first.OperationID, first.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
 		first.ThreadID, first.CheckpointDigest = "", ""
-		first.HarnessArgs = []string{"--search"}
+		first.HarnessArgs = []string{acceptedHarnessArg}
 		if _, err := c.Create(first, []byte("captured git workspace"), ""); err != nil {
 			t.Fatal(err)
 		}
