@@ -365,6 +365,13 @@ func harnessKinds(t *testing.T, fset *token.FileSet) map[string]string {
 // kind it does not name would take its default, or nothing. The kinds are
 // the registry's managed tier; each needs a NativeKind constant in
 // internal/harness for the scan to see it.
+//
+// While nativeAdapters is the only scope listed, this repeats
+// TestEveryManagedKindHasAnAdapter (cmd/native-session); it is here for any
+// scope added to behaviourSites later. It checks only that the scope names
+// the kind's constant somewhere in a form the scan flags, such as a map
+// index, not that the scope has a case for the kind that does the right
+// thing.
 func TestEveryBehaviourSiteNamesEveryManagedKind(t *testing.T) {
 	fset := token.NewFileSet()
 	constants := harnessKinds(t, fset)
