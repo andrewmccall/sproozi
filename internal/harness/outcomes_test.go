@@ -167,7 +167,6 @@ func recordedOutcomes() map[string]any {
 		o["signInOptions"] = h.SignInOptions
 		o["signInFile"] = h.SignInFile
 		o["provider"] = []string{h.Provider(false), h.Provider(true)}
-		o["inspectionHost"] = h.Protocol.InspectionHost()
 		o[outcomeDefault] = h.Default
 		env := map[string]any{}
 		for _, credential := range []NativeCredential{CredentialKey, CredentialToken, CredentialSignIn, "other"} {

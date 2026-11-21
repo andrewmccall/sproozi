@@ -475,7 +475,7 @@ func mustServing(t *testing.T, store *pki.Store) *x509.Certificate {
 }
 
 // inspectionHost is the OpenAI provider host the codex fixtures inspect.
-var inspectionHost = harness.ProtocolOpenAI.InspectionHost()
+const inspectionHost = "api.openai.com"
 
 // A Claude Code placement receives the home's configured MCP servers, as Codex
 // and Copilot placements do, and the service starts without a notice.

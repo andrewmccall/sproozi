@@ -210,14 +210,6 @@ const (
 	ProtocolAnthropic ModelProtocol = "anthropic"
 )
 
-// InspectionHost is the provider host the gateway inspects for the protocol.
-func (p ModelProtocol) InspectionHost() string {
-	if p == ProtocolAnthropic {
-		return "api.anthropic.com"
-	}
-	return "api.openai.com"
-}
-
 // codexKeyOptions point stock Codex at the OpenAI Responses API through the
 // gateway with the worker's placeholder key, and trust the managed workspace.
 var codexKeyOptions = []string{
