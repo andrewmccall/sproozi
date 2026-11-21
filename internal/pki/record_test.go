@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/andrewmccall/sproozi/internal/privatefs/privatefstest"
 )
 
 // sharedStates is every state in outcomeStates, built once per test binary
@@ -133,6 +135,9 @@ func treeFiles(dir string) (map[string]string, error) {
 // TestMain removes the shared states, and fails the package if a test
 // changed one.
 func TestMain(m *testing.M) {
+	// The tests write host-private files through privatefs; no test can
+	// observe a sync, and on macOS each one waits on every process's writes.
+	privatefstest.SkipSync()
 	code := m.Run()
 	if sharedStates.dir != "" {
 		files, err := treeFiles(sharedStates.dir)
