@@ -22,12 +22,13 @@ var errJournalRowIncomplete = errors.New("native journal row is incomplete")
 // observation only permits graceful quit before the runtime independently stops
 // and observes the entire container.
 func observeTurn(home, selected, instructionDigest string, maxBytes int64) (string, string, error) {
-	return observeTaskTurn(home, selected, instructionDigest, maxBytes, "", "")
+	return observeTaskTurn(home, selected, instructionDigest, maxBytes, "")
 }
 
-func observeTaskTurn(home, selected, instructionDigest string, maxBytes int64,
-	task, baseline string,
-) (string, string, error) {
+// observeTaskTurn is observeTurn for a launch with a task, whose completed
+// turn must carry the task's prompt. A task launch never resumes a
+// conversation (NativeLaunch.Validate), so the turn is the task's own.
+func observeTaskTurn(home, selected, instructionDigest string, maxBytes int64, task string) (string, string, error) {
 	var state harness.CodexState
 	err := filepath.WalkDir(filepath.Join(home, "sessions"), func(name string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -88,7 +89,7 @@ func observeTaskTurn(home, selected, instructionDigest string, maxBytes int64,
 	if err = harness.ValidateCodexContinuity(state, instructionDigest, maxBytes); err != nil {
 		return "", "", err
 	}
-	if task != "" && (turn == baseline || !taskInTurn(state.Rollout, turn, task)) {
+	if task != "" && !taskInTurn(state.Rollout, turn, task) {
 		return "", "", errors.New("submitted native task has no new completed turn")
 	}
 	return state.ThreadID, turn, nil

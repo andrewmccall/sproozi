@@ -41,18 +41,16 @@ func TestSubmittedTaskNeedsItsOwnCompletedNativeTurn(t *testing.T) {
 	finishNext := `{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-two"}}` + "\n"
 	old := journal(prompt)
 	for _, tc := range []struct {
-		name, data, baseline string
-		accept               bool
+		name, data string
+		accept     bool
 	}{
-		{"fresh completed task", old, "", true},
-		{"restored old completion", old, firstFixtureTurn, false},
-		{"different prompt", journal(strings.ReplaceAll(prompt, task, "Another task")), "", false},
-		{"new pending task", old + startNext + prompt, firstFixtureTurn, false},
-		{"new completed task", old + startNext + prompt + finishNext, firstFixtureTurn, true},
-		{"old prompt followed by unrelated completed turn", old + startNext + finishNext, firstFixtureTurn, false},
+		{"fresh completed task", old, true},
+		{"different prompt", journal(strings.ReplaceAll(prompt, task, "Another task")), false},
+		{"new completed task", old + startNext + prompt + finishNext, true},
+		{"old prompt followed by unrelated completed turn", old + startNext + finishNext, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := observeTaskTurn(writeJournal(t, tc.data), selected, digest(), 8192, task, tc.baseline)
+			_, _, err := observeTaskTurn(writeJournal(t, tc.data), selected, digest(), 8192, task)
 			if (err == nil) != tc.accept {
 				t.Fatalf("accept=%v error=%v", tc.accept, err)
 			}

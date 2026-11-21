@@ -107,9 +107,8 @@ guard.
    guard, one entry per managed kind in `nativeAdapters`:
    - required: `prepare`, `observe`, `turnless`, `waiting`, `finish` and
      `settle`;
-   - optional: `completion` (lifecycle diagnostics) and `taskBaseline` (the
-     resumed conversation's last turn before a task launch), each with what
-     leaving it unset means in `optionalAdapterFields`
+   - optional: `completion` (lifecycle diagnostics), with what leaving it
+     unset means in `optionalAdapterFields`
      (`cmd/native-session/turnless_test.go`);
    - facts: `executable` (the registry's `Executable`), `quits`,
      `namesSession`, and `observesHooks`, which Claude Code's alone sets:
@@ -120,10 +119,11 @@ guard.
    whose adapter leaves a required function unset; a function field added
    later is required unless it is named in `optionalAdapterFields`.
    `waitingFor` returns the adapter's text, and none for a kind without an
-   adapter, which then never reaches a graceful stop. Only an adapter with a
-   `taskBaseline` (Codex's) takes one; a kind with `TakesTask` needs a
-   `taskBaseline` or an entry with its reason in `taskBaselineExempt`
-   (Claude Code: its completion needs the task's own `UserPromptSubmit`).
+   adapter, which then never reaches a graceful stop. The adapter has no
+   task baseline: `NativeLaunch.Validate` refuses a task launch that resumes
+   a conversation, so a task's completed turn is always its own, and the
+   supervisor's activation no longer takes Codex's baseline, which only that
+   refused launch reached.
    Each harness's adapter code is in its own file (`codex.go`, `claude.go`,
    `copilot.go`).
 
@@ -154,7 +154,7 @@ The eight fall-throughs are each closed or named:
 | # | Now | Fails in |
 | --- | --- | --- |
 | 1 | `waiting` is a required adapter function | `TestEveryAdapterSetsEveryRequiredFunction` |
-| 2 | `taskBaseline` is optional, and a task kind needs it or a reason; `NativeLaunch.Validate` also refuses a task launch that resumes a conversation ([ADR 0057](0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md)) | `TestEveryTaskKindBindsCompletionToTheTask` |
+| 2 | `NativeLaunch.Validate` refuses a task launch that resumes a conversation, for every kind ([ADR 0057](0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md)), so no baseline is taken | `TestATaskLaunchResumesNoConversation` |
 | 3 | `FinalText` is a required method; the fixture needs a final text | compilation; `TestEveryManagedKindConformsToTheCheckpointFormat` |
 | 4 | `ValidateContinuity` is a required method; the fixture's evidence flag is tested, or a reason for none is required | compilation; the conformance test |
 | 5 | `ModelFlag` is a required fact | `TestManagedKindsSupplyEveryFact` |
@@ -273,8 +273,6 @@ These are recorded, not decided:
   (`claude-launch.py`).
 - Codex has no settled-input wait before a stop: unlike Claude Code's and
   Copilot's observers, its observer does not consult `inputSettled`.
-- Codex keeps a `taskBaseline`, though `NativeLaunch.Validate` now refuses
-  the task launch that resumes a conversation it serves.
 - Deferred until evidence asks for them: a single launch builder, an
   incremental journal fold, a shared Python helper module for the AgentRun
   launch files, a Copilot turn enum in place of its observer's booleans, and

@@ -1,11 +1,10 @@
 {
   "taskActivation": [
     {
-      "error": "initial task baseline is unavailable: lstat \u003ccodex home\u003e/sessions: no such file or directory",
+      "error": "the recorded terminal does not start",
       "home": "empty Codex home",
       "kind": "codex",
       "state": "prepared",
-      "taskBaseline": "",
       "validate": "native task launch cannot resume a conversation"
     },
     {
@@ -13,7 +12,6 @@
       "home": "Codex home with the resumed conversation",
       "kind": "codex",
       "state": "prepared",
-      "taskBaseline": "turn-one",
       "validate": "native task launch cannot resume a conversation"
     },
     {
@@ -21,7 +19,6 @@
       "home": "empty Codex home",
       "kind": "claude-code",
       "state": "prepared",
-      "taskBaseline": "",
       "validate": "native task launch cannot resume a conversation"
     },
     {
@@ -29,7 +26,6 @@
       "home": "Codex home with the resumed conversation",
       "kind": "claude-code",
       "state": "prepared",
-      "taskBaseline": "",
       "validate": "native task launch cannot resume a conversation"
     },
     {
@@ -37,7 +33,6 @@
       "home": "empty Codex home",
       "kind": "copilot",
       "state": "prepared",
-      "taskBaseline": "",
       "validate": "native task requires bounded nonempty Codex or Claude Code input"
     },
     {
@@ -45,7 +40,6 @@
       "home": "Codex home with the resumed conversation",
       "kind": "copilot",
       "state": "prepared",
-      "taskBaseline": "",
       "validate": "native task requires bounded nonempty Codex or Claude Code input"
     },
     {
@@ -53,7 +47,6 @@
       "home": "empty Codex home",
       "kind": "not-registered",
       "state": "prepared",
-      "taskBaseline": "",
       "validate": "unsupported native harness \"not-registered\""
     },
     {
@@ -61,7 +54,6 @@
       "home": "Codex home with the resumed conversation",
       "kind": "not-registered",
       "state": "prepared",
-      "taskBaseline": "",
       "validate": "unsupported native harness \"not-registered\""
     }
   ],

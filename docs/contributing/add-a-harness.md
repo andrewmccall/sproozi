@@ -168,9 +168,9 @@ fails, naming the file to change, unless:
 - every managed kind has a supervisor adapter that sets every required
   function (`TestEveryManagedKindHasAnAdapter`,
   `TestEveryAdapterSetsEveryRequiredFunction` in
-  `cmd/native-session/turnless_test.go`), launches the registry's
-  `Executable`, and, when it takes a task, binds the task's completion to a
-  new turn (`TestEveryTaskKindBindsCompletionToTheTask`);
+  `cmd/native-session/turnless_test.go`) and launches the registry's
+  `Executable`; a task launch that resumes a conversation is refused for
+  every kind (`TestATaskLaunchResumesNoConversation`);
 - every managed kind declares a `ModelFlag`, and a `ConfigOverride` or an
   exemption with its reason;
 - every managed kind supplies every managed fact listed in the managed
@@ -390,12 +390,12 @@ which runs it on a terminal. Follow the steps in order; after each, the
      selected conversation and completed turn), `turnless`, `waiting` (what a
      graceful stop waits for, in fixed words), `finish` and `settle`.
      `TestEveryAdapterSetsEveryRequiredFunction` fails on an unset one.
-     `completion` and `taskBaseline` are optional; `optionalAdapterFields` in
-     `cmd/native-session/turnless_test.go` says what leaving each unset
-     means. A kind that takes a task sets `taskBaseline`, or says in
-     `taskBaselineExempt` how its completion is bound to the task's own turn
-     (`TestEveryTaskKindBindsCompletionToTheTask`). Leave `observesHooks`
-     unset: it routes Claude Code's hook command.
+     `completion` is optional; `optionalAdapterFields` in
+     `cmd/native-session/turnless_test.go` says what leaving it unset
+     means. A kind that takes a task binds its completion to the task's
+     own turn in `observe`; a task launch never resumes a conversation
+     (`NativeLaunch.Validate`). Leave `observesHooks` unset: it routes
+     Claude Code's hook command.
    - Add a case for it to `recordedLaunch` in
      `cmd/native-session/launch_args_record_test.go` that renders its launch
      arguments through its `prepare`.

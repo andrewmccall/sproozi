@@ -338,8 +338,6 @@ func TestEveryManagedKindHasAnAdapter(t *testing.T) {
 // field is required, including one added later unless it is named here.
 var optionalAdapterFields = map[string]string{
 	"completion": "the harness reports no lifecycle diagnostics in status; only Claude Code's hooks give any",
-	"taskBaseline": "a task launch that resumes a conversation takes no baseline: the harness takes no task, " +
-		"or binds completion to the task's own prompt, as Claude Code's UserPromptSubmit hook does",
 }
 
 // adapterProblems names each required function a supervisor adapter leaves
@@ -380,37 +378,6 @@ func TestEveryAdapterSetsEveryRequiredFunction(t *testing.T) {
 	want := []string{"prepare", "observe", "turnless", "waiting", "finish", "settle"}
 	if got := adapterProblems(nativeAdapter{}); !slices.Equal(got, want) {
 		t.Errorf("an empty adapter misses %v; want the required functions %v", got, want)
-	}
-}
-
-// taskBaselineExempt names the managed kinds that take a task but whose
-// adapter has no taskBaseline, and how their completion is still bound to
-// the task's own turn rather than a resumed conversation's last one.
-var taskBaselineExempt = map[harness.NativeKind]string{
-	harness.NativeClaude: "completion is bound to the turn the task's own prompt started: claudeTurnReady needs " +
-		"taskTurn, which only a UserPromptSubmit hook carrying the task sets",
-}
-
-// A managed kind that takes a task binds the task's completion to a new
-// turn: its adapter takes a baseline, or an exemption says how it binds it.
-func TestEveryTaskKindBindsCompletionToTheTask(t *testing.T) {
-	for _, kind := range harness.ManagedKinds() {
-		adapter, err := adapterFor(kind)
-		if err != nil || !kind.TakesTask() {
-			continue
-		}
-		if adapter.taskBaseline == nil && taskBaselineExempt[kind] == "" {
-			t.Errorf("managed harness %q takes a task but its supervisor adapter has no taskBaseline, so a task "+
-				"that resumes a conversation could complete on that conversation's last turn; set taskBaseline in "+
-				"cmd/native-session/launch.go or say in taskBaselineExempt how completion is bound to the task", kind)
-		}
-	}
-	for kind := range taskBaselineExempt {
-		adapter, err := adapterFor(kind)
-		if err != nil || !kind.TakesTask() || adapter.taskBaseline != nil {
-			t.Errorf("taskBaselineExempt names %q, which is not a task-taking kind without a taskBaseline; remove it",
-				kind)
-		}
 	}
 }
 

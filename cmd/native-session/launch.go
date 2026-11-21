@@ -37,10 +37,6 @@ type nativeAdapter struct {
 	// waiting describes, in fixed words, what a graceful stop that has not
 	// yet observed a completed turn waits for.
 	waiting func(s *server) string
-	// taskBaseline, optional, reports the resumed conversation's completed
-	// turn before a task launch starts it, so that only a new turn completes
-	// the task. The caller holds s.mu.
-	taskBaseline func(s *server) (string, error)
 	// completion, optional, reports lifecycle diagnostics when the harness
 	// has them.
 	completion func(s *server) *harness.NativeCompletion
@@ -62,12 +58,11 @@ type nativeAdapter struct {
 
 var nativeAdapters = map[harness.NativeKind]nativeAdapter{
 	harness.NativeCodex: {
-		executable:   codexExecutable,
-		prepare:      prepareCodexLaunch,
-		observe:      (*server).observeCodexTurn,
-		turnless:     (*server).codexTurnless,
-		waiting:      (*server).codexWaiting,
-		taskBaseline: (*server).codexTaskBaseline,
+		executable: codexExecutable,
+		prepare:    prepareCodexLaunch,
+		observe:    (*server).observeCodexTurn,
+		turnless:   (*server).codexTurnless,
+		waiting:    (*server).codexWaiting,
 		// Codex quits itself after the completed turn and must exit cleanly.
 		finish: (*nativepty.Supervisor).QuitAfterCompletedTurn,
 		quits:  true,

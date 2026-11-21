@@ -196,10 +196,9 @@ func recordedActivation(t *testing.T, kind harness.NativeKind, journals bool) ma
 	s.reports, s.diagnostics = &lockedBuffer{}, &lockedBuffer{}
 	r := s.activate()
 	return map[string]any{
-		"validate":     strings.ReplaceAll(errText(c.Validate(time.Now())), codex, "<codex home>"),
-		"error":        strings.ReplaceAll(r.Error, codex, "<codex home>"),
-		"state":        string(r.State),
-		"taskBaseline": s.taskBaseline,
+		"validate": strings.ReplaceAll(errText(c.Validate(time.Now())), codex, "<codex home>"),
+		"error":    strings.ReplaceAll(r.Error, codex, "<codex home>"),
+		"state":    string(r.State),
 	}
 }
 

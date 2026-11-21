@@ -10,9 +10,8 @@ func (s *server) observeCodexTurn() (string, string, error) {
 	s.mu.Lock()
 	c := s.config
 	id := s.threadID
-	baseline := s.taskBaseline
 	s.mu.Unlock()
-	return observeTaskTurn(codexHome, id, c.InstructionDigest, c.RolloutMaxBytes, c.Task, baseline)
+	return observeTaskTurn(codexHome, id, c.InstructionDigest, c.RolloutMaxBytes, c.Task)
 }
 
 // codexTurnless reports a first visit with no Codex conversation to keep:
@@ -23,12 +22,4 @@ func (s *server) codexTurnless() bool { return !codexJournalExists(codexHome) }
 // until its journal exists, then the current one.
 func (s *server) codexWaiting() string {
 	return turnWaiting(harness.NativeCodex, codexJournalExists(codexHome))
-}
-
-// codexTaskBaseline is the resumed conversation's completed turn before a
-// task launch, which observeCodexTurn requires the task's turn to differ
-// from. The caller holds s.mu.
-func (s *server) codexTaskBaseline() (string, error) {
-	_, baseline, err := observeTurn(codexHome, s.threadID, s.config.InstructionDigest, s.config.RolloutMaxBytes)
-	return baseline, err
 }

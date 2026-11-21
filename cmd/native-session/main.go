@@ -83,7 +83,6 @@ type server struct {
 	diagnostics     io.Writer
 	claude          claudeLifecycle
 	inputGeneration uint64
-	taskBaseline    string
 	// lastInputAt is when the last terminal write was accepted.
 	lastInputAt time.Time
 }
@@ -419,14 +418,6 @@ func (s *server) activate() response {
 		return r
 	}
 	env = append(env, "HOME="+agentHome)
-	if s.config.Task != "" && s.threadID != "" && adapter.taskBaseline != nil {
-		baseline, err := adapter.taskBaseline(s)
-		if err != nil {
-			r.Error = "initial task baseline is unavailable: " + err.Error()
-			return r
-		}
-		s.taskBaseline = baseline
-	}
 	// The sign-in comes first: a harness that keeps other settings in its
 	// login file, such as Copilot's config.json, has them merged in.
 	login, err := startLogin(s.config)
