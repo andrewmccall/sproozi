@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+
+	"github.com/andrewmccall/sproozi/internal/privatefs/internal/durability"
 )
 
 // Check rejects symbolic links, wrong owners, non-ordinary objects and access
@@ -98,11 +100,15 @@ func replaceFile(temp, target, dir string) error {
 
 // SyncDir makes the directory's entries durable, such as a removal before a
 // later step that relies on it. It does not establish hardware power-loss
-// guarantees.
+// guarantees. In a test binary that called privatefstest.SkipSync it opens
+// the directory without syncing it.
 func SyncDir(dir string) error {
 	f, err := os.Open(dir)
 	if err != nil {
 		return err
+	}
+	if durability.Skipped() {
+		return f.Close()
 	}
 	return errors.Join(f.Sync(), f.Close())
 }
