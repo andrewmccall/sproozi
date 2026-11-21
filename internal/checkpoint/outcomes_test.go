@@ -23,7 +23,9 @@ import (
 // captures. A change that only moves where the format's code lives leaves it
 // byte-identical; regenerate it with SPROOZI_UPDATE_OUTCOMES=1 only for a
 // change that means to alter an outcome, and show the difference in that
-// change.
+// change. Adding a managed kind always changes it: continuityKinds asks every
+// fixture about every managed kind, and each fixture's harness-other-managed
+// variant names the kind after its own in registry order.
 const checkpointOutcomesFile = "testdata/checkpoint-outcomes.json"
 
 // checkpointArtifactDir holds each fixture's artifact as the format encoded

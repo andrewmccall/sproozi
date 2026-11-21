@@ -1,6 +1,8 @@
 package checkpoint
 
 import (
+	"bytes"
+	"encoding/json"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -17,16 +19,26 @@ type conversationContract struct {
 	// text is the fixture's final text. It may not be empty: a fixture with
 	// no answer cannot show that FinalText reads one.
 	text string
-	// evidence: the state keeps approved instructions, so ValidateContinuity
-	// refuses a digest they do not match.
+	// evidence: the harness records approved instructions in its
+	// conversation, so the fixture holds fixtureInstructions where the
+	// harness writes them, and ValidateContinuity refuses a digest they do
+	// not match.
 	evidence bool
+	// noEvidence is why a harness without evidence keeps none; required when
+	// evidence is false.
+	noEvidence string
 }
 
 // conversationContracts is the conformance fixture of every managed kind.
 var conversationContracts = map[harness.NativeKind]conversationContract{
-	harness.NativeCodex:   {fixture: "codex-instructed", text: fixtureReply, evidence: true},
-	harness.NativeClaude:  {fixture: "claude-code", text: "CLAUDE_FIRST_COMPLETE"},
-	harness.NativeCopilot: {fixture: "copilot", text: fixtureReply},
+	harness.NativeCodex: {fixture: "codex-instructed", text: fixtureReply, evidence: true},
+	harness.NativeClaude: {fixture: "claude-code", text: "CLAUDE_FIRST_COMPLETE",
+		noEvidence: "ADR 0011: Claude Code's transcript is no proof of approved instructions; the trusted launch " +
+			"supplies them fresh and holds them invariant"},
+	harness.NativeCopilot: {fixture: "copilot", text: fixtureReply,
+		noEvidence: "the supervisor writes copilot-instructions.md afresh at each launch. Unverified: Copilot adds " +
+			"that file to its system prompt (ADR 0048) and its journal records the first turn's system.message; " +
+			"the fixture comes from a launch with no instructions file, so it cannot show whether they appear there"},
 }
 
 // Every managed kind's conversation goes through the whole checkpoint
@@ -41,10 +53,10 @@ func TestEveryManagedKindConformsToTheCheckpointFormat(t *testing.T) {
 		t.Run(string(kind), func(t *testing.T) {
 			contract, ok := conversationContracts[kind]
 			i := slices.IndexFunc(fixtures, func(f stateFixture) bool { return f.name == contract.fixture && f.kind == kind })
-			if !ok || i < 0 || contract.text == "" {
-				t.Fatalf("managed harness %q has no checkpoint fixture with a final text; add its state to stateFixtures "+
-					"(internal/checkpoint/outcomes_test.go) and its contract to conversationContracts "+
-					"(internal/checkpoint/conformance_test.go)", kind)
+			if !ok || i < 0 || contract.text == "" || !contract.evidence && contract.noEvidence == "" {
+				t.Fatalf("managed harness %q has no checkpoint fixture with a final text, or keeps no instruction "+
+					"evidence without saying why; add its state to stateFixtures (internal/checkpoint/outcomes_test.go) "+
+					"and its contract to conversationContracts (internal/checkpoint/conformance_test.go)", kind)
 			}
 			h, err := harness.Managed(kind)
 			if err != nil || h.CaptureState == nil {
@@ -78,6 +90,7 @@ func TestEveryManagedKindConformsToTheCheckpointFormat(t *testing.T) {
 			if inspected, err := Inspect(data, checkpointLimit); err != nil || inspected != meta {
 				t.Fatalf("Inspect: %+v, %v", inspected, err)
 			}
+			checkJournal(t, data, contract.evidence, state, captured)
 
 			target := filepath.Join(t.TempDir(), "placement")
 			if restored, err := Restore(t.Context(), data, target, checkpointLimit); err != nil || restored != meta {
@@ -99,6 +112,28 @@ func TestEveryManagedKindConformsToTheCheckpointFormat(t *testing.T) {
 
 			checkContinuity(t, data, kind, contract.evidence)
 		})
+	}
+}
+
+// checkJournal checks the conversation file the artifact holds: each
+// state's Size is its length (the workspace gets what is left of the bound),
+// and it holds the fixture's approved instructions exactly when the contract
+// says the harness records them.
+func checkJournal(t *testing.T, data []byte, evidence bool, states ...harness.ConversationState) {
+	t.Helper()
+	var artifact nativeArtifact
+	if err := json.Unmarshal(data, &artifact); err != nil {
+		t.Fatal(err)
+	}
+	journal := journalOf(t, artifact)
+	for _, state := range states {
+		if state.Size() != len(journal) {
+			t.Fatalf("Size %d, want the %d journal bytes the artifact holds", state.Size(), len(journal))
+		}
+	}
+	if recorded := bytes.Contains(journal, []byte(fixtureInstructions)); recorded != evidence {
+		t.Fatalf("the fixture's journal holds the approved instructions: %v, but the contract says evidence=%v",
+			recorded, evidence)
 	}
 }
 
