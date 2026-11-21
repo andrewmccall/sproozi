@@ -1140,7 +1140,7 @@
       "resume",
       "01234567-89ab-cdef-0123-456789abcdef"
     ],
-    "validate": "harness argument \"-c mcp_servers={}\" is refused: Sproozi sets \"mcp_servers.sproozi\" for codex sessions; remove it"
+    "validate": "harness argument \"-c mcp_servers={}\" is refused: Sproozi sets \"mcp_servers\" for codex sessions; remove it"
   },
   {
     "args": [
@@ -1194,7 +1194,7 @@
       "resume",
       "01234567-89ab-cdef-0123-456789abcdef"
     ],
-    "validate": ""
+    "validate": "harness argument \"-c mcp_servers.github.url=\\\"https://x\\\"\" is refused: Sproozi sets \"mcp_servers\" for codex sessions; remove it"
   },
   {
     "args": [

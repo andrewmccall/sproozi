@@ -82,12 +82,15 @@ var modelFlag = controlledFlag{long: []string{modelName}, value: true}
 var codexModelFlag = controlledFlag{long: []string{modelName}, short: "m", value: true}
 
 // codexConfigOverride is Codex's -c/--config override and the keys Sproozi
-// sets.
+// sets, or that change what it sets. mcp_servers is the whole table: a launch
+// renders every approved connection there beside the control connection, and
+// which names are approved varies by launch
+// (TestEveryKeyACodexLaunchSetsIsControlled).
 var codexConfigOverride = ConfigOverride{
 	Flag: controlledFlag{long: []string{"config"}, short: "c", value: true},
 	ControlledKeys: []string{
 		"developer_instructions", "instructions", "model_instructions_file", "experimental_instructions_file",
-		"model_provider", "model_providers", "mcp_servers.sproozi", "projects", "sandbox_mode",
+		"model_provider", "model_providers", "mcp_servers", "projects", "sandbox_mode",
 		"sandbox_workspace_write", "approval_policy", "approvals_reviewer", "check_for_update_on_startup",
 		"profile", "profiles", "notice",
 	},
