@@ -43,6 +43,39 @@ func (r *Report) add(component string, err error, detail string) {
 	r.Checks = append(r.Checks, c)
 }
 
+// checkCredentials adds a credential check, and with checkProvider a
+// provider check, for each harness the installation journal names.
+func checkCredentials(ctx context.Context, r *Report, l Layout, inst Installation, checkProvider bool) {
+	for _, h := range inst.Harnesses {
+		if err := h.Harness.Validate(); err != nil {
+			// A journal a later release wrote can name a harness this
+			// release does not know; nothing here can repair that entry.
+			r.add("credential", fail("credential", fmt.Errorf("installation journal %s names harness %q, which this "+
+				"release of sproozi does not know", l.Installation(), h.Harness),
+				"use the sproozi release that added it, or move "+l.Installation()+
+					" aside and run sproozi init to start over"), "")
+			continue
+		}
+		provider, err := ProviderFor(h.Harness, h.Mechanism())
+		if err != nil {
+			r.add("credential", fail("credential", err, "use the sproozi release that added "+string(h.Harness)), "")
+			continue
+		}
+		if h.Credential == "" {
+			r.add("credential", nil, fmt.Sprintf("%s signs in to %s itself; run /login in its session", h.Harness, provider.Name))
+			continue
+		}
+		_, err = privatefs.ReadFile(h.Credential, 16<<10)
+		if err != nil {
+			err = fail("credential", err, "sproozi credentials set "+string(h.Harness))
+		}
+		r.add("credential", err, fmt.Sprintf("%s credential for %s is stored privately", provider.Name, h.Harness))
+		if err == nil && checkProvider && h.Kind == "" {
+			r.add("provider", CheckCredential(ctx, h.Harness, h.ProviderURL, h.ProviderCAFile, h.Credential), provider.Name+" accepted the credential")
+		}
+	}
+}
+
 // Doctor checks the installation without changing installation-owned state.
 // The restricted-path probe starts and removes temporary probe containers.
 // Provider validation lists models only and is opt-in.
@@ -84,25 +117,7 @@ func Doctor(ctx context.Context, l Layout, checkProvider bool) (r Report) {
 	r.add("image", err, fmt.Sprintf("%s provides helper contract %s", inst.Image.ID, helperContract))
 	network, err := inspectNetwork(ctx, docker, inst.Network.Name, inst.ID)
 	r.add("network", err, fmt.Sprintf("%s (%s) is owned by this installation", network.Name, network.Subnet))
-	for _, h := range inst.Harnesses {
-		provider, err := ProviderFor(h.Harness, h.Mechanism())
-		if err != nil {
-			r.add("credential", fail("credential", err, "run sproozi init"), "")
-			continue
-		}
-		if h.Credential == "" {
-			r.add("credential", nil, fmt.Sprintf("%s signs in to %s itself; run /login in its session", h.Harness, provider.Name))
-			continue
-		}
-		_, err = privatefs.ReadFile(h.Credential, 16<<10)
-		if err != nil {
-			err = fail("credential", err, "sproozi credentials set "+string(h.Harness))
-		}
-		r.add("credential", err, fmt.Sprintf("%s credential for %s is stored privately", provider.Name, h.Harness))
-		if err == nil && checkProvider && h.Kind == "" {
-			r.add("provider", CheckCredential(ctx, h.Harness, h.ProviderURL, h.ProviderCAFile, h.Credential), provider.Name+" accepted the credential")
-		}
-	}
+	checkCredentials(ctx, &r, l, inst, checkProvider)
 	store, err := pki.Open(l.PKI(), pki.DefaultPolicy, nil)
 	var trust []byte
 	if err == nil {

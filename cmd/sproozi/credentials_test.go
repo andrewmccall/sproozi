@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -49,4 +50,28 @@ func TestCredentialsHelpNamesEachAcceptedName(t *testing.T) {
 		return
 	}
 	t.Fatal("no credentials command")
+}
+
+// An installed harness this release does not know uses no stored
+// credential: "credentials list" names it under no provider.
+func TestCredentialsListAttributesNoProviderToAnUnknownHarness(t *testing.T) {
+	inst := localsetup.Installation{Harnesses: []localsetup.Harness{
+		{Harness: harness.NativeKind("not-registered"), Credential: "/credentials/openai"},
+		{Harness: harness.NativeCodex, Credential: "/credentials/openai"},
+	}}
+	q := &options{verb: verbList}
+	p, err := q.credentialsCommand(t.Context(), localsetup.Layout{Root: t.TempDir()}, inst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range p.(credentialReport) {
+		for _, h := range e.Harnesses {
+			if h == "not-registered" {
+				t.Errorf("provider %q lists the unknown harness", e.Provider)
+			}
+		}
+		if e.Provider == providerOpenAI && !slices.Contains(e.Harnesses, string(harness.NativeCodex)) {
+			t.Errorf("openai lists %v; want codex", e.Harnesses)
+		}
+	}
 }
