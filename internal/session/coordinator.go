@@ -570,6 +570,11 @@ func (c *Coordinator) activateDestination(ctx context.Context, r Record, index i
 			if err = ctx.Err(); err != nil {
 				return r, err
 			}
+			// Activating starts the prepared harness, which an earlier
+			// release may have prepared with arguments now refused.
+			if err = validateLaunchArgs(*op.Launch); err != nil {
+				return r, err
+			}
 			if err = p.Activate(ctx, *op.Launch, *op.Incarnation); err != nil {
 				return r, err
 			}
