@@ -25,7 +25,14 @@ into each run's contract. Every registered harness is one; see the
 An AgentRun harness that is also a native kind for managed sessions
 (`sproozi run`, `stop`, `resume`, `move`): Sproozi supervises its terminal,
 observes completed turns and checkpoints its conversation. Codex, Claude
-Code and GitHub Copilot CLI. Also seen as: native kind, native harness.
+Code and GitHub Copilot CLI. Also seen as: native harness.
+
+### Managed kind
+
+The value that names a [managed harness](#managed-harness) in a launch, a
+session and a checkpoint (`harness.NativeKind` in code), equal to its
+selector, such as `codex` or `claude-code`. Each has a constant in
+`internal/harness/native_kind.go`. Also seen as: native kind.
 
 ### Supervisor
 

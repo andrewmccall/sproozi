@@ -58,6 +58,14 @@ the user's arguments. The lists are per harness:
   `--desktop`, `--tmux`), `--bare`, `--safe-mode`, `--restricted` and
   `--worktree`.
 
+Corrected 2026-11-20: the Codex validator did not refuse every override of
+the keys Sproozi sets: `-c=KEY=VALUE`, keys spelled with TOML quoting, escapes
+or spaces, a table holding a controlled key, an approved connection
+(`mcp_servers.<name>`), and `-c` or `--config` followed by another option or
+by nothing all passed. The Codex list's `mcp_servers.sproozi` is now the whole
+`mcp_servers` table. [ADR 0073](0073-codex-harness-arguments-fail-closed.md)
+records the fix and the rules it adds.
+
 Corrected 2026-11-21: the lists are three. Copilot has its own
 ([ADR 0048](0048-github-copilot-cli-is-a-managed-harness.md)), and its
 supervisor appends the arguments after its own flags, which select the
@@ -66,14 +74,6 @@ option that chooses the model and Codex's override syntax are now facts in
 the harness's registry entry (`RefusedFlags`, `ModelFlag`, `ConfigOverride`),
 which the validator reads without naming a harness
 ([ADR 0072](0072-the-managed-harness-contract.md)).
-
-Corrected 2026-11-20: the Codex validator did not refuse every override of
-the keys Sproozi sets: `-c=KEY=VALUE`, keys spelled with TOML quoting, escapes
-or spaces, a table holding a controlled key, an approved connection
-(`mcp_servers.<name>`), and `-c` or `--config` followed by another option or
-by nothing all passed. The Codex list's `mcp_servers.sproozi` is now the whole
-`mcp_servers` table. [ADR 0073](0073-codex-harness-arguments-fail-closed.md)
-records the fix and the rules it adds.
 
 The model is the user's: when the arguments choose one (`--model`, Codex `-m`
 or `-c model=...`), the configured model is left out of the launch.

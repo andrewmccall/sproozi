@@ -3,7 +3,10 @@
 Status: accepted
 Date: 2026-11-21
 
-Extends [ADR 0039](0039-one-harness-registry-and-the-mcp-requirement.md).
+Extends [ADR 0039](0039-one-harness-registry-and-the-mcp-requirement.md), and
+changes one sentence of its 15 November correction: that behaviour (completion
+observers, checkpoint formats and the parsing of Codex's `-c` overrides)
+stays in code.
 
 ## Problem and constraints
 
@@ -98,7 +101,7 @@ guard.
    and `state` returns the artifact's one state, refusing none, two, or one
    whose `Kind` is not the artifact's harness. `CaptureStopped`, `Inspect`,
    `Restore`, `FinalText` and `ValidateContinuity` go through the interface.
-   This keeps ADR 0008's native-state rules (one selected file, an explicit
+   This keeps ADR 0008's rules for the conversation state (one selected file, an explicit
    kind, exactly one matching state, a version 1 decoder for Codex, no
    configuration copied).
 
@@ -124,8 +127,9 @@ guard.
    a conversation, so a task's completed turn is always its own, and the
    supervisor's activation no longer takes Codex's baseline, which only that
    refused launch reached.
-   Each harness's adapter code is in its own file (`codex.go`, `claude.go`,
-   `copilot.go`).
+   Claude Code's and Copilot's adapter code is in `claude.go` and
+   `copilot.go`; Codex's observers are in `codex.go` and `observer.go`, and
+   its launch (`prepareCodexLaunch`, `codexArguments`) in `launch.go`.
 
 4. **They are two because the packages are two.** The conversation state is
    read by every binary that handles checkpoints and holds no terminal code,
@@ -222,9 +226,10 @@ native configuration and local setup packages at the end.
 
 ## Tradeoffs and consequences
 
-- The registry now holds one behaviour function, `CaptureState`, and
-  Codex's override syntax as data, which ADR 0039's 15 November correction
-  had kept in code.
+- Besides each harness's MCP `Entry` renderer, which it already held, the
+  registry now holds one more function, each managed harness's
+  `CaptureState`, and Codex's override syntax as data; ADR 0039's 15
+  November correction had kept both in code.
 - A contributor writes a state type in `internal/harness` and an adapter in
   `cmd/native-session`; the [checklist](../contributing/add-a-harness.md)
   and the glossary's managed wiring name both.
