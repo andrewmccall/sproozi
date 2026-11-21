@@ -96,9 +96,12 @@ Constraints:
    to panic on `Log` in four handler families, now replies and gets the
    dispatcher's record. A request that is unrecorded by design says so with
    `gateway.Unrecorded(ctx, reason)`, without writing anything. The reasons
-   are a closed list: `UnrecordedReason` has only its three declared values,
-   and the decision keeps the reason so a test can see which site declared
-   what. When a handler returns without either, the dispatcher writes the
+   are a closed list: a handler outside the gateway package can neither
+   construct nor alter a reason, only take one of the three the package's
+   functions return, and the decision keeps the reason so a test can see which
+   site declared what. Any handler can still declare a listed reason on the
+   wrong path; the `Edges` requests and the per-site record rows are the check
+   for that. When a handler returns without either, the dispatcher writes the
    route's event with outcome `unrecorded`, naming the route and nothing from
    the request. A sandbox cannot cause one: a named MCP tool call the protocol
    handler refuses before the tool runs, and every path on a Docker MCP
@@ -163,23 +166,32 @@ Constraints:
      registry;
    - the Docker composition for every managed harness with a key, a token,
      its own sign-in and, for the OpenAI harnesses, ChatGPT, with GitHub and
-     Kubernetes, and every harness without a registry, GitHub or Kubernetes.
+     Kubernetes; and, for the malformed-request check alone, every harness
+     with its own sign-in and no registry, GitHub or Kubernetes.
 
    For each route it asserts: a valid declaration; a request without the
    capability is refused and recorded; one served request with a one-unit
    budget spends it, unless the handler is listed as free with its record
    (the relays, ADR 0047; the control connection, ADR 0025); malformed and
    unusual requests leave no `unrecorded` record; and every `model.inference`
-   authority is served by its provider-table route or by none. A separate
+   authority is served by its provider-table route or by none. It also
+   causes a refusal through the composed gateway and reads it back through
+   the composed control connection's `diagnose`, so the control connection
+   and the handlers share one journal. A separate
    sweep composes and validates, without serving, every configuration the
-   loader accepts across auth mode, keys, tokens, eleven module selections
-   and the registry (632 today). ChatGPT is served with a stored-sign-in
+   loader accepts across auth mode, keys, tokens, seven module selections and
+   the registry (632 today). ChatGPT is served with a stored-sign-in
    fake; an Anthropic harness with ChatGPT is not a configuration.
 
    The contract proves that each route's handler spends for one request. It
    does not prove every operation spends: a GitHub pull request charges each
    upstream request, and a Kubernetes watch is charged before it opens. The
    per-operation outcome records are the guard for the rest.
+
+Building the handlers in one function moves the GitHub App token
+provider's construction ahead of the ChatGPT session check, so when both are
+broken the gateway now reports the token provider's failure first at
+start-up.
 
 The model call's settlement (ADR 0028) may later be rewritten as one `end`
 step that derives the charge, end reason and audit fields from the call's
