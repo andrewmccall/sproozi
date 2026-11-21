@@ -131,6 +131,24 @@ var copilotControlled = []controlledFlag{
 	{long: []string{"acp", remoteName, "remote-export", "silent", "share-gist"}, short: "s", why: whyLifecycle},
 }
 
+// NativeArgsBounded checks only the size of harness arguments: how many,
+// how long and that none holds a NUL. A stored record checks this when it
+// loads; which arguments Sproozi refuses is checked, by ValidateNativeArgs,
+// where a launch is created and where one is started, so a record holding
+// arguments an earlier release accepted still loads and its session can
+// still end (ADR 0073).
+func NativeArgsBounded(args []string) error {
+	if len(args) > NativeArgsMax {
+		return fmt.Errorf("harness arguments: at most %d are accepted", NativeArgsMax)
+	}
+	for _, arg := range args {
+		if len(arg) > NativeArgMaxBytes || strings.ContainsAny(arg, "\x00") {
+			return fmt.Errorf("harness arguments: each must be at most %d bytes without NUL", NativeArgMaxBytes)
+		}
+	}
+	return nil
+}
+
 // ValidateNativeArgs refuses harness arguments that would replace a flag
 // Sproozi controls, with a message naming the flag and why. A refusal is
 // explicit; Sproozi never rewrites the user's arguments.
@@ -141,13 +159,8 @@ func ValidateNativeArgs(kind NativeKind, args []string) error {
 	if err := kind.Validate(); err != nil {
 		return err
 	}
-	if len(args) > NativeArgsMax {
-		return fmt.Errorf("harness arguments: at most %d are accepted", NativeArgsMax)
-	}
-	for _, arg := range args {
-		if len(arg) > NativeArgMaxBytes || strings.ContainsAny(arg, "\x00") {
-			return fmt.Errorf("harness arguments: each must be at most %d bytes without NUL", NativeArgMaxBytes)
-		}
+	if err := NativeArgsBounded(args); err != nil {
+		return err
 	}
 	h, _ := Managed(kind)
 	controlled := h.RefusedFlags

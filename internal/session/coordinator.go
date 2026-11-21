@@ -28,6 +28,9 @@ func (c *Coordinator) Create(first Launch, input []byte, session string) (Record
 	if err = validateLaunch(first); err != nil {
 		return Record{}, err
 	}
+	if err = validateLaunchArgs(first); err != nil {
+		return Record{}, err
+	}
 	if first.Epoch != 1 || session != "" && (!validUUID(session) || session == first.ExecutionID) {
 		return Record{}, errors.New("session: invalid first visit")
 	}
@@ -131,6 +134,11 @@ func (c *Coordinator) Move(ctx context.Context, id, operationID, destination str
 	if r.Active == nil && c.PastDeadline(r) {
 		// Nothing runs and nothing may start: refuse before recording intent.
 		return r, ErrDeadlinePassed
+	}
+	// The move's visit carries the execution's arguments; refuse them before
+	// recording intent, so the session can still be stopped and removed.
+	if err = harness.ValidateNativeArgs(r.Harness, r.HarnessArgs); err != nil {
+		return r, err
 	}
 	for _, v := range r.Visits {
 		if v.Launch.OperationID == operationID {
@@ -473,6 +481,11 @@ func (c *Coordinator) prepareDestination(ctx context.Context, r Record, index in
 			if err := c.save(r); err != nil {
 				return r, err
 			}
+		}
+		// A stored launch is checked again before it starts: its record may
+		// come from an earlier release, or have been edited.
+		if err := validateLaunchArgs(*op.Launch); err != nil {
+			return r, err
 		}
 		if err := spendable(op.Launch.Allowances); err != nil {
 			return r, err
