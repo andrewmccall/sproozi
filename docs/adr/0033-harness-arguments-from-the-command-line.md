@@ -58,15 +58,13 @@ the user's arguments. The lists are per harness:
   `--desktop`, `--tmux`), `--bare`, `--safe-mode`, `--restricted` and
   `--worktree`.
 
-Corrected 2026-11-20: the Codex list did not refuse every override of a key
-Sproozi sets. `-c=KEY=VALUE`, a key spelled with TOML quoting, escapes or
-spaces, a table holding a controlled key (`mcp_servers={}`), an approved
-connection (`mcp_servers.<name>`), and `-c`, `--config`, `-m` or `--model`
-followed by another option or by nothing all passed. The validator now reads
-each override's key as a TOML dotted key, refuses one it cannot read, refuses
-a parent of a controlled key, controls the whole `mcp_servers` table, and
-refuses a separate option value that begins with `-` or is missing
-(`internal/harness/native_args.go`, `internal/harness/toml_key.go`).
+Corrected 2026-11-20: the Codex validator did not refuse every override of
+the keys Sproozi sets: `-c=KEY=VALUE`, keys spelled with TOML quoting, escapes
+or spaces, a table holding a controlled key, an approved connection
+(`mcp_servers.<name>`), and `-c` or `--config` followed by another option or
+by nothing all passed. The Codex list's `mcp_servers.sproozi` is now the whole
+`mcp_servers` table. [ADR 0073](0073-codex-harness-arguments-fail-closed.md)
+records the fix and the rules it adds.
 
 The model is the user's: when the arguments choose one (`--model`, Codex `-m`
 or `-c model=...`), the configured model is left out of the launch.

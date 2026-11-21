@@ -168,6 +168,7 @@ driver settles it as it settles a task's.
 | [0069](0069-a-failed-chatgpt-refresh-is-remembered.md) | A failed refresh of the gateway's ChatGPT sign-in is remembered beside it: a 400 or 401 `invalid_grant` refuses it until the stored sign-in changes, any other failure holds further refreshes for 10 seconds while a still-valid access token keeps serving, a new sign-in ends either within the 10-second reload interval, the 503 a model request sees names the cause, and the refresh runs in a goroutine the authenticator owns, so no caller waits past its own deadline and a started refresh is saved; the token endpoint's redirects are never followed. |
 | [0070](0070-gateway-routes-declare-admission-and-requests-record-one-decision.md) | Every gateway route declares how it is admitted (`AdmitCapability` or `AdmitSelected`), both compositions validate them before serving and the dispatcher refuses an undeclared route; the dispatcher admits through `gateway.Admit`; each dispatched request records one decision through `gateway.Record`, declares a deliberate omission with `gateway.Unrecorded`, or gets an `unrecorded` record from the dispatcher; audit records gain `outcome` while `allowed` is unchanged; the dispatcher's budget and handler-less refusals and `LeakGuard`'s refusal are recorded; `gateway.Spend` tells a refused budget from an unavailable one; one test enumerates every composed route. |
 | [0071](0071-a-pod-gets-a-key-placeholder-only-for-a-client-that-reads-it.md) | A Pod gets a key placeholder only for a client that reads it: the controller sets `OPENAI_API_KEY` in an AgentRun Pod's workload containers only for a harness whose registry entry names it in `RunKeyEnv` (Codex) and for a runtime that names no harness; every other harness's launch file or runtime command sets its own placeholder, which the registry guard checks. |
+| [0073](0073-codex-harness-arguments-fail-closed.md) | Codex harness arguments fail closed: the validator reads each `-c`/`--config` key as a TOML dotted key and refuses one it cannot read, one with no `=`, a controlled key, a key below one and a table that holds one; the whole `mcp_servers` table is controlled (awaiting the owner); `-c`, `--config`, `--model` and `-m` need a separate value that is not an option; arguments are checked where a launch is created and started, not when a stored record loads. |
 
 ## Reserved numbers
 
@@ -177,6 +178,7 @@ These numbers belong to records that are not on `main` yet. Do not use them.
 | --- | --- |
 | 0055 | Release Please, proposed on an unmerged branch. |
 | 0059 | Renovate proposes pin updates, in a change based on main. |
+| 0072 | The managed-harness contract, on the harness-contract branches. |
 
 ## Removed
 
