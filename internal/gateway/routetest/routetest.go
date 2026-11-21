@@ -333,6 +333,40 @@ func serve(routes gateway.Dispatcher, authority string, r request, grant *gatewa
 	return response
 }
 
+// Diagnoses causes a refusal through the composed routes, a run without the
+// capability of the first capability route, and reads it back through the
+// composed control connection, so the control connection and the handlers
+// share one journal.
+func Diagnoses(t *testing.T, routes gateway.Dispatcher) {
+	t.Helper()
+	var refused, control string
+	var capability api.CapabilityKind
+	for _, authority := range slices.Sorted(maps.Keys(routes)) {
+		route := routes[authority]
+		switch {
+		case route.Handler == nil:
+		case route.Admission == gateway.AdmitSelected && control == "":
+			control = authority
+		case route.Admission == gateway.AdmitCapability && refused == "":
+			refused, capability = authority, route.Capability
+		}
+	}
+	if refused == "" || control == "" {
+		t.Fatalf("no capability route (%q) or control connection (%q) to diagnose with", refused, control)
+	}
+	grant := Grant("diagnosed", capability, "")
+	if response := serve(routes, refused, request{method: http.MethodGet, path: "/diagnosed"}, grant); response.Code != http.StatusForbidden {
+		t.Fatalf("%s: a run without %s got %d", refused, capability, response.Code)
+	}
+	call := request{method: http.MethodPost, path: "/mcp/sproozi",
+		body: `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"diagnose","arguments":{}}}`}
+	response := serve(routes, control, call, grant)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `\"status\":\"denied\"`) ||
+		!strings.Contains(response.Body.String(), string(capability)) {
+		t.Fatalf("diagnose did not see the %s refusal: %d %s", capability, response.Code, response.Body)
+	}
+}
+
 func refusedWithoutCapability(t *testing.T, name string, routes gateway.Dispatcher, authority, path string, served request,
 	capability api.CapabilityKind, uid string, events *Recorder,
 ) {

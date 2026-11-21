@@ -59,6 +59,7 @@ func TestEveryComposedRouteKeepsTheRouteContract(t *testing.T) {
 					t.Fatal(err)
 				}
 				routetest.Check(t, routes, events, tracker)
+				routetest.Diagnoses(t, routes)
 				routetest.Edges(t, routes, events)
 				if strays := routetest.ModelAuthorities(routes); len(strays) != 0 {
 					t.Errorf("model.inference routes outside the provider table: %v", strays)

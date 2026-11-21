@@ -100,6 +100,7 @@ func TestEveryComposedRouteKeepsTheRouteContract(t *testing.T) {
 				events := &routetest.Recorder{}
 				routes, budgets := composeServing(t, cfg, events)
 				routetest.Check(t, routes, events, budgets)
+				routetest.Diagnoses(t, routes)
 				declared := routetest.Edges(t, routes, events)
 				if modules == allModules {
 					for _, reason := range gateway.UnrecordedReasons() {
