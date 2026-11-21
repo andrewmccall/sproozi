@@ -328,9 +328,26 @@ func (r *recording) finish(n *nativepty.Supervisor, ctx context.Context) (native
 // kill that ends Claude Code and Copilot.
 var recordedFinishes = map[harness.NativeKind]func(*nativepty.Supervisor, context.Context) (nativepty.Exit, error){}
 
+// realStopLimit bounds a recorded harness's real quit or kill. The record's
+// quitWait and forcedStopWait are short so that a finish the harness
+// ignores, or a kill never confirmed, ends quickly; a real quit spends 300 ms
+// before its Enter and a reap up to 100 ms more, so on a loaded machine it
+// can outlast them and would be recorded as forced. A real quit or kill
+// therefore gets its own real bound, as in production, rather than the
+// supervisor's short one. No recorded world has a deadline nearer than this
+// bound while a real quit or kill runs.
+const realStopLimit = 10 * time.Second
+
+// realStop is ctx without its cancellation, bounded by realStopLimit.
+func realStop(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), realStopLimit)
+}
+
 // ownFinish is the adapter's own finish.
 func (r *recording) ownFinish(n *nativepty.Supervisor, ctx context.Context) (nativepty.Exit, error) {
 	r.note("finish (" + r.loginState() + ")")
+	ctx, cancel := realStop(ctx)
+	defer cancel()
 	exit, err := recordedFinishes[r.w.kind](n, ctx)
 	r.settle()
 	return exit, err
@@ -343,6 +360,8 @@ func (r *recording) forceStop(n *nativepty.Supervisor, ctx context.Context) (nat
 		return nativepty.Exit{}, ctx.Err()
 	}
 	r.note("forced stop")
+	ctx, cancel := realStop(ctx)
+	defer cancel()
 	exit, err := n.Stop(ctx)
 	r.settle()
 	return exit, err
