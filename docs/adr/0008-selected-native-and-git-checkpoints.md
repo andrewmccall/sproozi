@@ -49,6 +49,13 @@ Corrected 2026-11-16: capture keeps the selected file's complete rows and
 leaves out a final row a fenced writer did not finish
 ([ADR 0061](0061-a-stop-survives-an-interrupted-write.md)).
 
+Corrected 2026-11-21: Copilot's session journal is a third selected format
+([ADR 0048](0048-github-copilot-cli-is-a-managed-harness.md)). Each format is
+now a `harness.ConversationState` that the harness's registry entry captures,
+and every checkpoint operation goes through it
+([ADR 0072](0072-the-managed-harness-contract.md)); the rules above, and an
+artifact's bytes, are unchanged.
+
 A real three-home experiment using the stock CLI preserved the same native UUID
 and cumulative conversation under different absolute workspace paths, transferring
 one rollout file through the production adapter. Fresh provider ports and

@@ -58,6 +58,15 @@ the user's arguments. The lists are per harness:
   `--desktop`, `--tmux`), `--bare`, `--safe-mode`, `--restricted` and
   `--worktree`.
 
+Corrected 2026-11-21: the lists are three. Copilot has its own
+([ADR 0048](0048-github-copilot-cli-is-a-managed-harness.md)), and its
+supervisor appends the arguments after its own flags, which select the
+conversation with `--session-id <thread>`. Each list, the
+option that chooses the model and Codex's override syntax are now facts in
+the harness's registry entry (`RefusedFlags`, `ModelFlag`, `ConfigOverride`),
+which the validator reads without naming a harness
+([ADR 0072](0072-the-managed-harness-contract.md)).
+
 Corrected 2026-11-20: the Codex validator did not refuse every override of
 the keys Sproozi sets: `-c=KEY=VALUE`, keys spelled with TOML quoting, escapes
 or spaces, a table holding a controlled key, an approved connection

@@ -96,9 +96,29 @@ refuse to start without `sproozi`. See
 
 ### Managed wiring
 
-The per-kind code a [managed harness](#managed-harness) needs outside the
-registry: its supervisor adapter, checkpoint format and native configuration
-check. Guard tests require each one.
+The per-kind code a [managed harness](#managed-harness) needs beyond its
+registry facts: its [conversation state](#conversation-state), its
+[supervisor adapter](#supervisor-adapter) and its native configuration check.
+Guard tests require each one; see
+[ADR 0072](docs/adr/0072-the-managed-harness-contract.md).
+
+### Conversation state
+
+A managed harness's conversation as a [checkpoint](#checkpoint) carries it:
+the selected native file, such as Codex's rollout, Claude Code's transcript or
+Copilot's events journal, never configuration or credentials. Each kind's
+state type implements `harness.ConversationState` (its thread, completed turn,
+size, restore, final text and continuity check), and its registry entry
+captures it (`CaptureState`). Also seen as: native state (in older records;
+`NativeState` in code is the supervisor's lifecycle state).
+
+### Supervisor adapter
+
+The per-kind part of the [supervisor](#supervisor): one entry in
+`nativeAdapters` (`cmd/native-session/launch.go`) holding the functions that
+prepare a managed harness's launch, observe its completed turn, describe what
+a graceful stop waits for and stop it. Every function is required unless the
+guard names it optional. Also seen as: native adapter.
 
 ### Deterministic provider
 
