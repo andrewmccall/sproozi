@@ -565,14 +565,14 @@ func TestChatGPTSignInIsReusedForAnOpenAIHarness(t *testing.T) {
 		t.Fatal(err)
 	}
 	i := &installer{l: l, inst: inst, o: Options{Harness: harness.NativeCodex, ChatGPT: true, Progress: io.Discard}, selected: &inst.Harnesses[0]}
-	if err := i.signInChatGPT(t.Context(), ProviderFor(harness.NativeCodex, harness.CredentialKey)); err != nil {
+	if err := i.signInChatGPT(t.Context(), providerFor(t, harness.NativeCodex, harness.CredentialKey)); err != nil {
 		t.Fatal(err)
 	}
 	if i.selected.Kind != modelauth.ChatGPTMode || tokenKind(*i.selected) != modelauth.ChatGPTMode {
 		t.Fatalf("harness %+v", *i.selected)
 	}
 	i.o.Harness = harness.NativeClaude
-	if err := i.signInChatGPT(t.Context(), ProviderFor(harness.NativeClaude, harness.CredentialKey)); err == nil {
+	if err := i.signInChatGPT(t.Context(), providerFor(t, harness.NativeClaude, harness.CredentialKey)); err == nil {
 		t.Fatal("Claude Code was given a ChatGPT sign-in")
 	}
 }
@@ -586,11 +586,11 @@ func TestCopilotProviderFollowsItsMechanism(t *testing.T) {
 		harness.CredentialToken:  {Name: ProviderCopilot, URL: copilotURL},
 		harness.CredentialSignIn: {Name: ProviderCopilot, URL: copilotURL},
 	} {
-		if got := ProviderFor(harness.NativeCopilot, credential); got != want {
+		if got := providerFor(t, harness.NativeCopilot, credential); got != want {
 			t.Fatalf("%s: %+v", credential, got)
 		}
 	}
-	if got := ProviderFor(harness.NativeCodex, harness.CredentialSignIn); got.Name != "openai" {
+	if got := providerFor(t, harness.NativeCodex, harness.CredentialSignIn); got.Name != "openai" {
 		t.Fatalf("Codex signed in: %+v", got)
 	}
 	l, inst := testInstallation(t)

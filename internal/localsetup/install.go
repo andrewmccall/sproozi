@@ -295,7 +295,10 @@ func (i *installer) prepareHarness(ctx context.Context) error {
 			"leave out --sign-in and give it a provider key")
 	}
 	mechanism := chooseMechanism(o, *i.selected, keyGiven)
-	provider := ProviderFor(i.selected.Harness, mechanism)
+	provider, err := ProviderFor(i.selected.Harness, mechanism)
+	if err != nil {
+		return fail("harness", err, "use --harness "+harness.ManagedKindList())
+	}
 	i.selected.ProviderURL = providerURL(o.ProviderURL, i.selected.ProviderURL, provider)
 	// An explicit CA bundle replaces the stored one on every run.
 	if o.ProviderCAFile != "" {
@@ -422,7 +425,10 @@ func (i *installer) addHarness() error {
 	if err != nil {
 		return err
 	}
-	provider := ProviderFor(o.Harness, harness.CredentialKey)
+	provider, err := ProviderFor(o.Harness, harness.CredentialKey)
+	if err != nil {
+		return fail("harness", err, "use --harness "+harness.ManagedKindList())
+	}
 	name := "local"
 	if len(i.inst.Harnesses) > 0 {
 		directory, _ := harness.NativeDirectory(o.Harness)

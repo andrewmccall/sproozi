@@ -308,12 +308,25 @@ func credentialProvider(name string, inst localsetup.Installation) (string, bool
 	if kind.Validate() != nil {
 		return "", false
 	}
+	credential := harness.CredentialKey
 	for _, h := range inst.Harnesses {
 		if h.Harness == kind {
-			return localsetup.ProviderFor(kind, h.Mechanism()).Name, true
+			credential = h.Mechanism()
+			break
 		}
 	}
-	return localsetup.ProviderFor(kind, harness.CredentialKey).Name, true
+	provider, err := localsetup.ProviderFor(kind, credential)
+	return provider.Name, err == nil
+}
+
+// providerName is the provider an installed harness reaches, or "" when
+// local setup knows none for it, which matches no stored credential.
+func providerName(h localsetup.Harness) string {
+	provider, err := localsetup.ProviderFor(h.Harness, h.Mechanism())
+	if err != nil {
+		return ""
+	}
+	return provider.Name
 }
 
 const (
@@ -365,7 +378,7 @@ func (q *options) credentialsCommand(ctx context.Context, l localsetup.Layout,
 		for _, provider := range credentialProviders {
 			e := credentialEntry{Provider: provider, Stored: localsetup.HasCredential(l, provider)}
 			for _, h := range inst.Harnesses {
-				if localsetup.ProviderFor(h.Harness, h.Mechanism()).Name == provider && h.Credential != "" {
+				if providerName(h) == provider && h.Credential != "" {
 					e.Harnesses = append(e.Harnesses, string(h.Harness))
 				}
 			}
@@ -379,7 +392,7 @@ func (q *options) credentialsCommand(ctx context.Context, l localsetup.Layout,
 	}
 	var selected *localsetup.Harness
 	for i := range inst.Harnesses {
-		if localsetup.ProviderFor(inst.Harnesses[i].Harness, inst.Harnesses[i].Mechanism()).Name != provider {
+		if providerName(inst.Harnesses[i]) != provider {
 			continue
 		}
 		if inst.Harnesses[i].Credential == "" {
