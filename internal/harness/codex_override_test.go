@@ -14,6 +14,7 @@ const (
 	argConfig           = "--config"
 	quotedSandboxMode   = `"sandbox_mode"=x`
 	reasoningEffortHigh = "model_reasoning_effort=high"
+	valueWithoutKey     = "foo"
 )
 
 // refused fails t unless ValidateNativeArgs refuses args for kind.
@@ -84,7 +85,7 @@ func TestEveryTOMLSpellingOfAControlledKeyIsRefused(t *testing.T) {
 // every spelling.
 func TestAnOverrideWithoutAValueIsRefused(t *testing.T) {
 	for _, args := range [][]string{
-		{"-c", "foo"}, {"-cm"}, {argConfig, "foo"}, {"--config=foo"}, {"-c=foo"}, {"-c", "sandbox_mode"},
+		{"-c", valueWithoutKey}, {"-cm"}, {argConfig, valueWithoutKey}, {"--config=foo"}, {"-c=foo"}, {"-c", "sandbox_mode"},
 		{"-c", `"quoted"`}, {"-c", "a.b "},
 	} {
 		refused(t, NativeCodex, args...)
