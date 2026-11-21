@@ -268,6 +268,7 @@ func TestAnUnregisteredKindNeverStops(t *testing.T) {
 // What a graceful stop waits for, and how a task launch that resumes a
 // conversation activates, are the recorded ones for every kind.
 func TestWaitingOutcomesAreUnchanged(t *testing.T) {
+	requireCompleteAdapters(t, "its wait texts cannot be recorded")
 	got, err := json.MarshalIndent(recordedWaitingOutcomes(t), "", "  ")
 	if err != nil {
 		t.Fatal(err)

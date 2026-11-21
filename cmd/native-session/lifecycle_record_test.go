@@ -861,14 +861,8 @@ func TestSupervisorLifecycleRecord(t *testing.T) {
 	if codexJournalExists(codexHome) {
 		t.Skip("a real Codex home is present")
 	}
+	requireCompleteAdapters(t, "its lifecycle cannot be recorded")
 	for _, kind := range harness.ManagedKinds() {
-		// A missing function would panic a world and hide every other
-		// test's report in this package.
-		if adapter, err := adapterFor(kind); err != nil || len(adapterProblems(adapter)) != 0 {
-			t.Fatalf("managed harness %q has no supervisor adapter with every required function, so its lifecycle "+
-				"cannot be recorded; TestEveryManagedKindHasAnAdapter and TestEveryAdapterSetsEveryRequiredFunction "+
-				"name what to add", kind)
-		}
 		recordedFinishes[kind] = nativeAdapters[kind].finish
 		withAdapter(t, kind, func(a *nativeAdapter) {
 			a.observe = func(s *server) (string, string, error) { return recordingOf(s).observe() }

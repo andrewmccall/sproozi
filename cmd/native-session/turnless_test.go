@@ -354,6 +354,20 @@ func adapterProblems(adapter nativeAdapter) []string {
 	return missing
 }
 
+// requireCompleteAdapters stops a record test before it calls a managed
+// kind's adapter that is missing or leaves a required function unset: the
+// nil call would panic and hide every other test's report in this package.
+func requireCompleteAdapters(t *testing.T, consequence string) {
+	t.Helper()
+	for _, kind := range harness.ManagedKinds() {
+		if adapter, err := adapterFor(kind); err != nil || len(adapterProblems(adapter)) != 0 {
+			t.Fatalf("managed harness %q has no supervisor adapter with every required function, so %s; "+
+				"TestEveryManagedKindHasAnAdapter and TestEveryAdapterSetsEveryRequiredFunction name what to add",
+				kind, consequence)
+		}
+	}
+}
+
 // Every managed kind's supervisor adapter sets every function the supervisor
 // calls without checking, so a partly filled adapter fails here rather than
 // panicking at activation or stop in a sandbox.
