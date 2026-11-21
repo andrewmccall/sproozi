@@ -39,6 +39,7 @@ const (
 	mcpCapability = api.CapabilityKind("mcp." + MCPServer)
 	mcpTool       = "search"
 	mcpEndpoint   = "https://docs.mcp.example/mcp"
+	controlPath   = "/mcp/sproozi"
 	// Repository, Namespace and EgressProfile are what Grant permits.
 	Repository    = "owner/repo"
 	Namespace     = "demo"
@@ -58,7 +59,7 @@ var Free = map[string]string{
 
 // FreePaths lists free requests on a route that otherwise spends.
 var FreePaths = map[string]string{
-	"/mcp/sproozi": "ADR 0025: the control connection needs no capability and is unmetered",
+	controlPath: "ADR 0025: the control connection needs no capability and is unmetered",
 }
 
 // Recorder keeps every audit event the composed handlers write.
@@ -358,7 +359,7 @@ func Diagnoses(t *testing.T, routes gateway.Dispatcher) {
 	if response := serve(routes, refused, request{method: http.MethodGet, path: "/diagnosed"}, grant); response.Code != http.StatusForbidden {
 		t.Fatalf("%s: a run without %s got %d", refused, capability, response.Code)
 	}
-	call := request{method: http.MethodPost, path: "/mcp/sproozi",
+	call := request{method: http.MethodPost, path: controlPath,
 		body: `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"diagnose","arguments":{}}}`}
 	response := serve(routes, control, call, grant)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `\"status\":\"denied\"`) ||
@@ -401,7 +402,7 @@ var edgeRequests = []struct{ method, path, body string }{
 	{http.MethodPost, "/mcp/" + MCPServer, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18",` +
 		`"capabilities":{},"clientInfo":{"name":"edges","version":"1"}}}`},
 	{http.MethodGet, "/mcp/" + MCPServer, ""},
-	{http.MethodPost, "/mcp/sproozi", notJSON},
+	{http.MethodPost, controlPath, notJSON},
 	{http.MethodPost, kubernetesMCPPath, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`},
 	{http.MethodPost, kubernetesMCPPath, notJSON},
 	{http.MethodPost, kubernetesMCPPath, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"kubernetes_list_pods","arguments":{"namespace":"Bad_Name"}}}`},

@@ -32,6 +32,8 @@ import (
 // The recorded executions' namespace, policy and template.
 const (
 	recordNamespace = "agents"
+	recordRunName   = "run"
+	recordExecution = "test-execution"
 	recordPolicy    = "test-policy"
 	recordTemplate  = "test-template"
 )
@@ -226,7 +228,7 @@ func TestNamedMCPOutcomesAreRecorded(t *testing.T) {
 		return s
 	}
 	grant := func(change func(*gateway.ExecutionGrant)) *gateway.ExecutionGrant {
-		g := &gateway.ExecutionGrant{Execution: gateway.Reference{Backend: gateway.BackendKubernetes, Namespace: recordNamespace, Name: "run", UID: "test-execution"},
+		g := &gateway.ExecutionGrant{Execution: gateway.Reference{Backend: gateway.BackendKubernetes, Namespace: recordNamespace, Name: "run", UID: recordExecution},
 			Authority: gateway.Reference{Backend: gateway.BackendKubernetes, Namespace: recordNamespace, Name: "runner", UID: "sa-uid"},
 			Policy: gateway.PolicySnapshot{Name: recordPolicy, Generation: 7, Spec: api.AgentPolicySpec{
 				AllowedCapabilities: []api.CapabilityKind{docs, down},
@@ -368,7 +370,7 @@ func abandonedDuringConnection(t *testing.T) string {
 		http.Error(w, "gone", http.StatusServiceUnavailable)
 	}))
 	t.Cleanup(upstream.Close)
-	data, err := json.Marshal(map[string]any{"servers": map[string]any{name: map[string]string{registryURLField: upstream.URL + "/mcp"}}})
+	data, err := json.Marshal(map[string]any{registryServersField: map[string]any{name: map[string]string{registryURLField: upstream.URL + "/mcp"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +383,7 @@ func abandonedDuringConnection(t *testing.T) string {
 	handler := remote.NewHandler(remote.HandlerConfig{Registry: registry, HTTPClient: upstream.Client(), Budgets: tracker, AuditLogger: events})
 	routes := gateway.Dispatcher{"gateway.test:443": {Admission: gateway.AdmitSelected, Tier: audit.TierProtocol, Handler: handler,
 		Budgets: tracker, AuditLogger: events}}
-	grant := &gateway.ExecutionGrant{Execution: gateway.Reference{Backend: gateway.BackendKubernetes, Namespace: "agents", Name: "run", UID: "test-execution"},
+	grant := &gateway.ExecutionGrant{Execution: gateway.Reference{Backend: gateway.BackendKubernetes, Namespace: recordNamespace, Name: recordRunName, UID: recordExecution},
 		Policy: gateway.PolicySnapshot{Name: "test-policy", Spec: api.AgentPolicySpec{AllowedCapabilities: []api.CapabilityKind{capability},
 			MCPServers: map[string]api.MCPServerScope{name: {Tools: map[string]api.MCPToolScope{"any": {}}}}}},
 		Template:     gateway.TemplateSnapshot{Name: "test-template"},
@@ -418,7 +420,7 @@ func abandonedToolCall(t *testing.T) string {
 	upstream := httptest.NewTLSServer(sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return server },
 		&sdk.StreamableHTTPOptions{JSONResponse: true}))
 	t.Cleanup(upstream.Close)
-	data, err := json.Marshal(map[string]any{"servers": map[string]any{name: map[string]string{registryURLField: upstream.URL + "/mcp"}}})
+	data, err := json.Marshal(map[string]any{registryServersField: map[string]any{name: map[string]string{registryURLField: upstream.URL + "/mcp"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +432,7 @@ func abandonedToolCall(t *testing.T) string {
 	tracker := budget.NewTracker()
 	handler := remote.NewHandler(remote.HandlerConfig{Registry: registry, HTTPClient: upstream.Client(), Budgets: tracker, AuditLogger: events})
 	routes := gateway.Dispatcher{"gateway.test:443": {Admission: gateway.AdmitSelected, Tier: audit.TierProtocol, Handler: handler, Budgets: tracker, AuditLogger: events}}
-	grant := &gateway.ExecutionGrant{Execution: gateway.Reference{Backend: gateway.BackendKubernetes, Namespace: recordNamespace, Name: "run", UID: "test-execution"},
+	grant := &gateway.ExecutionGrant{Execution: gateway.Reference{Backend: gateway.BackendKubernetes, Namespace: recordNamespace, Name: "run", UID: recordExecution},
 		Policy: gateway.PolicySnapshot{Name: recordPolicy, Spec: api.AgentPolicySpec{AllowedCapabilities: []api.CapabilityKind{capability},
 			MCPServers: map[string]api.MCPServerScope{name: {Tools: map[string]api.MCPToolScope{tool: {}}}},
 			Budgets:    map[api.CapabilityKind]api.EndpointBudget{capability: {MaxUnits: 5}}}},
