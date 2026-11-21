@@ -164,10 +164,12 @@ mode for codex sessions; remove --sandbox`. The refused flags are:
 
 | Agent | Refused |
 | --- | --- |
-| `codex` | `--sandbox`, `-s`, `--ask-for-approval`, `-a`, `--dangerously-bypass-approvals-and-sandbox`, `--yolo`, `--approve-for-me`, `--full-auto`, `--cd`, `-C`, `--worktree`, `--oss`, `--local-provider`, `--profile`, `-p`, `--remote`, `--remote-auth-token-env`, `--no-daemon`, `--no-alt-screen`; `-c`/`--config` for `developer_instructions`, `instructions`, `model_instructions_file`, `experimental_instructions_file`, `model_provider`, `model_providers`, `mcp_servers.sproozi`, `projects`, `sandbox_mode`, `sandbox_workspace_write`, `approval_policy`, `approvals_reviewer`, `check_for_update_on_startup`, `profile`, `profiles`, `notice` and keys below them |
+| `codex` | `--sandbox`, `-s`, `--ask-for-approval`, `-a`, `--dangerously-bypass-approvals-and-sandbox`, `--yolo`, `--approve-for-me`, `--full-auto`, `--cd`, `-C`, `--worktree`, `--oss`, `--local-provider`, `--profile`, `-p`, `--remote`, `--remote-auth-token-env`, `--no-daemon`, `--no-alt-screen`; `-c`/`--config` for `developer_instructions`, `instructions`, `model_instructions_file`, `experimental_instructions_file`, `model_provider`, `model_providers`, `mcp_servers` (every connection, approved or control), `projects`, `sandbox_mode`, `sandbox_workspace_write`, `approval_policy`, `approvals_reviewer`, `check_for_update_on_startup`, `profile`, `profiles`, `notice`, the keys below them and a table that holds one, however TOML quotes, escapes or spaces the key; a `-c` value that is not a TOML key followed by `=` |
 | `claude-code` | `--permission-mode`, `--permission-prompts`, `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, `--tools`, `--allowedTools`, `--allowed-tools`, `--mcp-config`, `--strict-mcp-config`, `--plugin-dir`, `--plugin-url`, `--settings`, `--setting-sources`, `--bare`, `--safe-mode`, `--restricted`, `--system-prompt`, `--system-prompt-file`, `--append-system-prompt`, `--append-system-prompt-file`, `--resume`, `-r`, `--continue`, `-c`, `--session-id`, `--fork-session`, `--from-pr`, `--teleport`, `--no-session-persistence`, `--print`, `-p`, `--output-format`, `--input-format`, `--remote-control`, `--cloud`, `--environment`, `--bg`, `--background`, `--desktop`, `--tmux`, `--worktree`, `-w` |
 
-A second `--` is refused too. Other words pass through, so a Codex positional
+A second `--` is refused too, and so is `-c`, `--config`, `--model` or Codex
+`-m` given as a separate argument whose value begins with `-` or is missing:
+write the value after it, or joined (`--model=NAME`). Other words pass through, so a Codex positional
 becomes its first prompt. At most 64 arguments of 4096 bytes each are
 accepted. Agent arguments apply on this machine: moving such a session to a
 cluster fails with `ID was started with harness arguments, which apply only at
