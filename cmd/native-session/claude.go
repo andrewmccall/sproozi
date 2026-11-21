@@ -167,7 +167,7 @@ func (s *server) claudeHook(h *claudeHook) response {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r := response{Op: opClaudeHook, State: s.life.phase.wire()}
-	if h == nil || s.config.Harness != harness.NativeClaude || !s.life.phase.running() {
+	if h == nil || !nativeAdapters[s.config.Harness].observesHooks || !s.life.phase.running() {
 		r.Error = "Claude lifecycle observer is unavailable"
 		s.claude.rejected = "observer_unavailable"
 		return r

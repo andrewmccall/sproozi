@@ -54,6 +54,10 @@ type nativeAdapter struct {
 	// namesSession: the supervisor names a new conversation at launch
 	// rather than learning the harness's own choice.
 	namesSession bool
+	// observesHooks: the harness reports its lifecycle through Claude
+	// Code's hook command (opClaudeHook, read by claudeHook), which the
+	// supervisor refuses for every other kind.
+	observesHooks bool
 }
 
 var nativeAdapters = map[harness.NativeKind]nativeAdapter{
@@ -85,6 +89,8 @@ var nativeAdapters = map[harness.NativeKind]nativeAdapter{
 		turnless:   (*server).claudeTurnless,
 		waiting:    (*server).claudeWaiting,
 		completion: (*server).claudeCompletion,
+		// Claude Code's hooks report each prompt, tool and stop.
+		observesHooks: true,
 		// The observed lifecycle hooks proved completion; the supervisor
 		// stops Claude itself.
 		finish: (*nativepty.Supervisor).Stop,

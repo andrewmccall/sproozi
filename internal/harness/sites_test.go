@@ -19,8 +19,7 @@ import (
 // harness adds cases inside these scopes without editing this list; a branch
 // in any other scope fails TestNoHarnessFactOutsideTheRegistry.
 var behaviourSites = map[string]string{
-	"cmd/native-session/launch.go: nativeAdapters":    "the supervisor adapter of each managed kind",
-	"cmd/native-session/claude.go: server.claudeHook": "Claude Code's lifecycle hooks",
+	"cmd/native-session/launch.go: nativeAdapters": "the supervisor adapter of each managed kind",
 }
 
 // literalScanRoots are the packages that implement the managed harnesses, where
