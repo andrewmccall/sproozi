@@ -604,8 +604,6 @@
       "mcp_servers.sproozi.url=\"https://gateway.test/mcp/sproozi\"",
       "-c",
       "mcp_servers.sproozi.required=true",
-      "--model",
-      "configured-model",
       "-c=model=x",
       "resume",
       "01234567-89ab-cdef-0123-456789abcdef"
@@ -714,7 +712,7 @@
       "resume",
       "01234567-89ab-cdef-0123-456789abcdef"
     ],
-    "validate": ""
+    "validate": "harness argument \"-c=model_provider=x\" is refused: Sproozi sets \"model_provider\" for codex sessions; remove it"
   },
   {
     "args": [
@@ -1358,7 +1356,7 @@
       "resume",
       "01234567-89ab-cdef-0123-456789abcdef"
     ],
-    "validate": ""
+    "validate": "harness argument \"-c =x\" is refused: a configuration override needs a key; remove it"
   },
   {
     "args": [

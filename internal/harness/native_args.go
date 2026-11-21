@@ -157,6 +157,10 @@ func ValidateNativeArgs(kind NativeKind, args []string) error {
 				"the harness arguments; remove it", arg)
 		}
 		if key, consumed, ok := h.ConfigOverride.key(args, i); ok {
+			if key == "" {
+				return fmt.Errorf("harness argument %q is refused: a configuration override needs a key; remove it",
+					strings.Join(args[i:i+consumed+1], " "))
+			}
 			if refused := h.ConfigOverride.controlled(key); refused != "" {
 				return fmt.Errorf("harness argument %q is refused: Sproozi sets %q for %s sessions; remove it",
 					strings.Join(args[i:i+consumed+1], " "), refused, kind)
@@ -227,7 +231,9 @@ func (f controlledFlag) valueAt(args []string, i int) (string, int, bool) {
 	}
 	if f.short != "" && !strings.HasPrefix(arg, "--") {
 		if value, ok := strings.CutPrefix(arg, "-"+f.short); ok {
-			return value, 0, true
+			// "-c=key=value" is "-c key=value", as the client's parser
+			// reads a short option's "=".
+			return strings.TrimPrefix(value, "="), 0, true
 		}
 	}
 	return "", 0, false
