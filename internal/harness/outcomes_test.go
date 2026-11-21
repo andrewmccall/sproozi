@@ -91,6 +91,24 @@ func outcomeArgs() [][]string {
 	add("-c", "notice.x=y")
 	add("--harmless", "-c", "approval_policy=x")
 	add("-c", "x=y", "--sandbox", "x")
+	// Forms that reach a controlled key or swallow an argument Sproozi
+	// adds: "=" after a short option, a separate value that is an option or
+	// missing, a parent table, an approved connection Sproozi renders, and
+	// TOML key spellings.
+	for _, args := range [][]string{
+		{"-c=model_provider=x"}, {"-c=sandbox_mode=x"}, {"-c=model=x"}, {"-c="}, {"-cmodel_provider=x"},
+		{"-c", "--yolo"}, {"-c", "-p", "x"}, {"--config", "--cd=/"}, {"-c", "--"}, {"--harmless", "-c"},
+		{"-m", "--sandbox"}, {"--model", "-c"}, {"--harmless", "-m"}, {"--harmless", "--model"},
+		{"-c", "mcp_servers={}"}, {"-c", `mcp_servers={sproozi={url="https://x"}}`}, {"-c", "mcp_servers.sproozi={}"},
+		{"-c", `mcp_servers.github.url="https://x"`}, {"-c", "mcp_servers.github.required=false"},
+		{"-c", `"sandbox_mode"=x`}, {"-c", `" sandbox_mode"=x`}, {"-c", `'sandbox_mode'=x`},
+		{"-c", `"sandbox_mode"=x`}, {"-c", "sandbox_mode =x"}, {"-c", "SANDBOX_MODE=x"}, {"-c", "a b=x"},
+		{"-c", "=x"}, {"-c", `"unterminated=x`}, {"-c", "sandbox_mode.=x"}, {"-c", ".sandbox_mode=x"},
+		{"-c", "openai_base_url=x"}, {"-c", "shell_environment_policy.inherit=all"},
+		{"-c", "model_reasoning_effort=high"}, {"--model", "gpt-5.5", "-c", "model_reasoning_effort=high"},
+	} {
+		add(args...)
+	}
 	// Every controlled key, and a key below it, so that dropping one from
 	// a ConfigOverride changes a row.
 	for _, h := range registry {
