@@ -105,6 +105,7 @@ func outcomeArgs() [][]string {
 		{"-c", quotedSandboxMode}, {"-c", "sandbox_mode =x"}, {"-c", "SANDBOX_MODE=x"}, {"-c", "a b=x"},
 		{"-c", "=x"}, {"-c", `"unterminated=x`}, {"-c", "sandbox_mode.=x"}, {"-c", ".sandbox_mode=x"},
 		{"-c", "mcp_servers.sproozi=x"}, {"-c", "mcp_servers.sproozi.x=y"}, {"-c", "\"sandbox\\" + "u005fmode\"=x"},
+		{"-c", "foo"}, {"-cm"}, {argConfig, "foo"}, {"--config=foo"}, {"-c=foo"}, {"-c", "model"},
 		{"-c", "openai_base_url=x"}, {"-c", "shell_environment_policy.inherit=all"},
 		{"-c", reasoningEffortHigh}, {nativeModelFlag, "gpt-5.5", "-c", reasoningEffortHigh},
 	} {
