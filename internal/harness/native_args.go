@@ -176,7 +176,8 @@ func ValidateNativeArgs(kind NativeKind, args []string) error {
 		}
 		if key, consumed, ok := h.ConfigOverride.key(args, i); ok {
 			if key == "" {
-				return fmt.Errorf("harness argument %q is refused: a configuration override needs a key; remove it",
+				return fmt.Errorf("harness argument %q is refused: a configuration override needs a TOML key "+
+					"before its \"=\"; remove it",
 					strings.Join(args[i:i+consumed+1], " "))
 			}
 			if refused := h.ConfigOverride.controlled(key); refused != "" {
@@ -269,18 +270,12 @@ func (o ConfigOverride) key(args []string, i int) (string, int, bool) {
 	if !ok {
 		return "", 0, false
 	}
-	key, _, _ := strings.Cut(value, "=")
-	return normalizeConfigKey(key), consumed, true
-}
-
-// normalizeConfigKey removes TOML quoting and spaces from a dotted key, so
-// `"model_provider"` and `mcp_servers."sproozi".url` compare by name.
-func normalizeConfigKey(key string) string {
-	parts := strings.Split(strings.TrimSpace(key), ".")
-	for i, part := range parts {
-		parts[i] = strings.Trim(strings.TrimSpace(part), `"'`)
+	parts, rest, parsed := tomlDottedKey(value)
+	if !parsed || rest != "" && rest[0] != '=' {
+		// Not a TOML dotted key followed by "=": unparseable, refused.
+		return "", consumed, true
 	}
-	return strings.Join(parts, ".")
+	return strings.Join(parts, "."), consumed, true
 }
 
 // controlled is the controlled key that key is, is below, or holds as a

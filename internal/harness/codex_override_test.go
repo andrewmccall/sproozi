@@ -48,6 +48,27 @@ func TestAParentOfAControlledKeyIsRefused(t *testing.T) {
 	}
 }
 
+// A controlled key is refused however TOML spells it: quoted, literal,
+// escaped or spaced. A key that is not a TOML dotted key is refused too;
+// case is kept, since TOML keys are case-sensitive.
+func TestEveryTOMLSpellingOfAControlledKeyIsRefused(t *testing.T) {
+	for _, value := range []string{
+		`"sandbox_mode"=x`, `'sandbox_mode'=x`, `" sandbox_mode"=x`, `"sandbox_mode "=x`,
+		"\"sandbox\\" + "u005fmode\"=x", "\"sandbox\\" + "U0000005fmode\"=x", `sandbox_mode =x`, ` sandbox_mode=x`,
+		`mcp_servers . "sproozi" . url=x`, `mcp_servers.'sproozi'.url=x`, `"mcp_servers"."sproozi"={}`,
+		`a b=x`, `sandbox_mode.=x`, `.sandbox_mode=x`, `"unterminated=x`, `'unterminated=x`,
+		`"bad\qescape"=x`, `a..b=x`, `a.=x`, `sandbox_mode x`,
+	} {
+		refused(t, NativeCodex, "-c", value)
+	}
+	for _, value := range []string{"SANDBOX_MODE=x", "model_reasoning_effort=high", `"model_reasoning_effort"=high`,
+		"shell_environment_policy.inherit=all", "a-b_c.d=1", `"a=b"=x`} {
+		if err := ValidateNativeArgs(NativeCodex, []string{"-c", value}); err != nil {
+			t.Errorf("codex -c %q refused: %v", value, err)
+		}
+	}
+}
+
 // Every spelling of a Codex override of a controlled key gets the same
 // answer, and an override with an empty key is refused.
 func TestEveryOverrideSpellingIsRefusedAlike(t *testing.T) {
