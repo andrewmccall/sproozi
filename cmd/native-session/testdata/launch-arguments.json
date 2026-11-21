@@ -356,7 +356,7 @@
       "resume",
       "01234567-89ab-cdef-0123-456789abcdef"
     ],
-    "validate": ""
+    "validate": "harness argument \"--model\" is refused: it needs a value after it, and Sproozi adds the conversation to resume after the harness arguments; give its value"
   },
   {
     "args": [
@@ -406,7 +406,7 @@
       "resume",
       "01234567-89ab-cdef-0123-456789abcdef"
     ],
-    "validate": ""
+    "validate": "harness argument \"-m\" is refused: it needs a value after it, and Sproozi adds the conversation to resume after the harness arguments; give its value"
   },
   {
     "args": [
@@ -660,7 +660,7 @@
       "resume",
       "01234567-89ab-cdef-0123-456789abcdef"
     ],
-    "validate": ""
+    "validate": "harness argument \"-c -mx\" is refused: its value \"-mx\" begins with \"-\", so the harness could read it as an option; give a value"
   },
   {
     "args": [
@@ -766,7 +766,7 @@
       "resume",
       "01234567-89ab-cdef-0123-456789abcdef"
     ],
-    "validate": ""
+    "validate": "harness argument \"-c --yolo\" is refused: its value \"--yolo\" begins with \"-\", so the harness could read it as an option; give a value"
   },
   {
     "args": [
@@ -822,7 +822,7 @@
       "resume",
       "01234567-89ab-cdef-0123-456789abcdef"
     ],
-    "validate": ""
+    "validate": "harness argument \"-c -p\" is refused: its value \"-p\" begins with \"-\", so the harness could read it as an option; give a value"
   },
   {
     "args": [
@@ -876,7 +876,7 @@
       "resume",
       "01234567-89ab-cdef-0123-456789abcdef"
     ],
-    "validate": ""
+    "validate": "harness argument \"--config --cd=/\" is refused: its value \"--cd=/\" begins with \"-\", so the harness could read it as an option; give a value"
   },
   {
     "args": [
@@ -928,7 +928,7 @@
       "resume",
       "01234567-89ab-cdef-0123-456789abcdef"
     ],
-    "validate": ""
+    "validate": "harness argument \"-c\" is refused: it needs a value after it, and Sproozi adds the conversation to resume after the harness arguments; give its value"
   },
   {
     "args": [
@@ -982,7 +982,7 @@
       "resume",
       "01234567-89ab-cdef-0123-456789abcdef"
     ],
-    "validate": ""
+    "validate": "harness argument \"-c\" is refused: it needs a value after it, and Sproozi adds the conversation to resume after the harness arguments; give its value"
   },
   {
     "args": [
@@ -1034,7 +1034,7 @@
       "resume",
       "01234567-89ab-cdef-0123-456789abcdef"
     ],
-    "validate": "harness argument \"--sandbox\" is refused: Sproozi runs the harness unattended with its own sandbox and approval mode for codex sessions; remove --sandbox"
+    "validate": "harness argument \"-m --sandbox\" is refused: its value \"--sandbox\" begins with \"-\", so the harness could read it as an option; give a value"
   },
   {
     "args": [
@@ -1086,7 +1086,7 @@
       "resume",
       "01234567-89ab-cdef-0123-456789abcdef"
     ],
-    "validate": ""
+    "validate": "harness argument \"--model -c\" is refused: its value \"-c\" begins with \"-\", so the harness could read it as an option; give a value"
   },
   {
     "args": [
@@ -1680,7 +1680,7 @@
       "--resume",
       "01234567-89ab-cdef-0123-456789abcdef"
     ],
-    "validate": ""
+    "validate": "harness argument \"--model\" is refused: it needs a value after it, and Sproozi adds the conversation to resume after the harness arguments; give its value"
   },
   {
     "args": [
@@ -2130,7 +2130,7 @@
       "--resume",
       "01234567-89ab-cdef-0123-456789abcdef"
     ],
-    "validate": "harness argument \"-c\" is refused: Sproozi selects the native conversation to start or resume for claude-code sessions; remove -c"
+    "validate": "harness argument \"--model -c\" is refused: its value \"-c\" begins with \"-\", so the harness could read it as an option; give a value"
   },
   {
     "args": [
@@ -2493,7 +2493,7 @@
       "--no-auto-update",
       "--model"
     ],
-    "validate": ""
+    "validate": "harness argument \"--model\" is refused: it needs a value after it, and Sproozi adds the conversation to resume after the harness arguments; give its value"
   },
   {
     "args": [
@@ -2775,7 +2775,7 @@
       "--model",
       "-c"
     ],
-    "validate": ""
+    "validate": "harness argument \"--model -c\" is refused: its value \"-c\" begins with \"-\", so the harness could read it as an option; give a value"
   },
   {
     "args": [

@@ -156,6 +156,21 @@ func ValidateNativeArgs(kind NativeKind, args []string) error {
 			return fmt.Errorf("harness argument %q is refused: Sproozi adds the conversation to resume after "+
 				"the harness arguments; remove it", arg)
 		}
+		// An option whose value is the next argument needs one that is not
+		// itself an option.
+		for _, f := range []controlledFlag{h.ConfigOverride.Flag, h.ModelFlag} {
+			if !f.bare(arg) {
+				continue
+			}
+			if i+1 >= len(args) {
+				return fmt.Errorf("harness argument %q is refused: it needs a value after it, and Sproozi adds the "+
+					"conversation to resume after the harness arguments; give its value", arg)
+			}
+			if strings.HasPrefix(args[i+1], "-") {
+				return fmt.Errorf("harness argument %q is refused: its value %q begins with \"-\", so the harness "+
+					"could read it as an option; give a value", arg+" "+args[i+1], args[i+1])
+			}
+		}
 		if key, consumed, ok := h.ConfigOverride.key(args, i); ok {
 			if key == "" {
 				return fmt.Errorf("harness argument %q is refused: a configuration override needs a key; remove it",
@@ -212,13 +227,18 @@ func (f controlledFlag) matches(arg string) (string, bool) {
 	return "", false
 }
 
+// bare reports that arg is a value-taking option spelled without its value,
+// which is then the next argument.
+func (f controlledFlag) bare(arg string) bool {
+	return f.value && (slices.ContainsFunc(f.long, func(name string) bool { return arg == "--"+name }) ||
+		f.short != "" && arg == "-"+f.short)
+}
+
 // valueAt reads the value of this option at args[i] and how many further
 // arguments it consumed. A bare spelling with no argument after it has none.
 func (f controlledFlag) valueAt(args []string, i int) (string, int, bool) {
 	arg := args[i]
-	bare := slices.ContainsFunc(f.long, func(name string) bool { return arg == "--"+name }) ||
-		f.short != "" && arg == "-"+f.short
-	if bare {
+	if f.bare(arg) {
 		if i+1 >= len(args) {
 			return "", 0, false
 		}
