@@ -371,11 +371,9 @@ func chooseMechanism(o Options, current Harness, keyGiven bool) harness.NativeCr
 	return harness.CredentialKey
 }
 
-// providerURL is the harness's provider URL: the flag's, or a default that
-// follows the mechanism, such as Copilot's plan host when it signs in. A
-// private endpoint stays as configured.
-// addLogin records the named login --login asks for, for a harness that
-// signs in itself.
+// addLogin refuses --login for a harness that uses a credential the gateway
+// holds, and records a named login --login gives a harness that signs in
+// itself.
 func (i *installer) addLogin(mechanism harness.NativeCredential) error {
 	o := i.o
 	if o.Login != "" && mechanism != harness.CredentialSignIn {
@@ -390,6 +388,9 @@ func (i *installer) addLogin(mechanism harness.NativeCredential) error {
 	return nil
 }
 
+// providerURL is the harness's provider URL: the flag's, or a default that
+// follows the mechanism, such as Copilot's plan host when it signs in. A
+// private endpoint stays as configured.
 func providerURL(flag, current string, provider Provider) string {
 	switch {
 	case flag != "":
