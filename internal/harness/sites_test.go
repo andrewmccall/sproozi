@@ -152,56 +152,62 @@ func kindBranches(fset *token.FileSet, f *ast.File, kinds []string) []harnessSit
 		}
 		return names
 	}
-	isKindType := func(e ast.Expr) bool {
-		switch x := e.(type) {
-		case *ast.Ident:
-			return x.Name == kindTypeName
-		case *ast.SelectorExpr:
-			return x.Sel.Name == kindTypeName
-		}
-		return false
-	}
 	var sites []harnessSite
 	for _, decl := range f.Decls {
 		scope := declScope(decl)
 		ast.Inspect(decl, func(n ast.Node) bool {
-			var hit ast.Node
-			var names []string
-			switch x := n.(type) {
-			case *ast.CompositeLit:
-				if a, ok := x.Type.(*ast.ArrayType); ok && isKindType(a.Elt) && slices.ContainsFunc(x.Elts, isKind) {
-					hit, names = x, named(x.Elts...)
-				}
-			case *ast.IndexExpr:
-				if isKind(x.Index) {
-					hit, names = x, named(x.Index)
-				}
-			case *ast.CallExpr:
-				if len(x.Args) == 1 && isKindType(x.Fun) {
-					if lit, ok := x.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
-						hit = x
-					}
-				}
-			case *ast.BinaryExpr:
-				if (x.Op == token.EQL || x.Op == token.NEQ) && (isKind(x.X) || isKind(x.Y)) {
-					hit, names = x, named(x.X, x.Y)
-				}
-			case *ast.CaseClause:
-				if slices.ContainsFunc(x.List, isKind) {
-					hit, names = x, named(x.List...)
-				}
-			case *ast.KeyValueExpr:
-				if isKind(x.Key) {
-					hit, names = x, named(x.Key)
-				}
-			}
-			if hit != nil {
+			if hit, names := kindBranch(n, isKind, named); hit != nil {
 				sites = append(sites, harnessSite{scope: scope, line: fset.Position(hit.Pos()).Line, kinds: names})
 			}
 			return true
 		})
 	}
 	return sites
+}
+
+// isKindType reports that e names the NativeKind type.
+func isKindType(e ast.Expr) bool {
+	switch x := e.(type) {
+	case *ast.Ident:
+		return x.Name == kindTypeName
+	case *ast.SelectorExpr:
+		return x.Sel.Name == kindTypeName
+	}
+	return false
+}
+
+// kindBranch reports n when it is one of the forms kindBranches flags, with
+// the kind constants it names.
+func kindBranch(n ast.Node, isKind func(ast.Expr) bool, named func(...ast.Expr) []string) (ast.Node, []string) {
+	switch x := n.(type) {
+	case *ast.CompositeLit:
+		if a, ok := x.Type.(*ast.ArrayType); ok && isKindType(a.Elt) && slices.ContainsFunc(x.Elts, isKind) {
+			return x, named(x.Elts...)
+		}
+	case *ast.IndexExpr:
+		if isKind(x.Index) {
+			return x, named(x.Index)
+		}
+	case *ast.CallExpr:
+		if len(x.Args) == 1 && isKindType(x.Fun) {
+			if lit, ok := x.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+				return x, nil
+			}
+		}
+	case *ast.BinaryExpr:
+		if (x.Op == token.EQL || x.Op == token.NEQ) && (isKind(x.X) || isKind(x.Y)) {
+			return x, named(x.X, x.Y)
+		}
+	case *ast.CaseClause:
+		if slices.ContainsFunc(x.List, isKind) {
+			return x, named(x.List...)
+		}
+	case *ast.KeyValueExpr:
+		if isKind(x.Key) {
+			return x, named(x.Key)
+		}
+	}
+	return nil, nil
 }
 
 // registryValues are the registered values that harness code must read from

@@ -312,14 +312,8 @@ func (i *installer) prepareHarness(ctx context.Context) error {
 	if o.ChatGPT {
 		return i.signInChatGPT(ctx, provider)
 	}
-	if o.Login != "" && mechanism != harness.CredentialSignIn {
-		return fail("harness", fmt.Errorf("--login names a login of a harness that signs in itself, but %s uses a "+
-			"credential the gateway holds", o.Harness), "add --sign-in")
-	}
-	if o.Login != "" && o.Login != harness.DefaultLogin && !slices.Contains(i.selected.Logins, o.Login) {
-		i.selected.Logins = append(i.selected.Logins, o.Login)
-		i.step("%s has a login %q; start a session on it with: sproozi run --harness %s --login %s",
-			o.Harness, o.Login, o.Harness, o.Login)
+	if err = i.addLogin(mechanism); err != nil {
+		return err
 	}
 	if mechanism == harness.CredentialSignIn {
 		// The harness signs in in its first session; the gateway forwards
@@ -380,6 +374,22 @@ func chooseMechanism(o Options, current Harness, keyGiven bool) harness.NativeCr
 // providerURL is the harness's provider URL: the flag's, or a default that
 // follows the mechanism, such as Copilot's plan host when it signs in. A
 // private endpoint stays as configured.
+// addLogin records the named login --login asks for, for a harness that
+// signs in itself.
+func (i *installer) addLogin(mechanism harness.NativeCredential) error {
+	o := i.o
+	if o.Login != "" && mechanism != harness.CredentialSignIn {
+		return fail("harness", fmt.Errorf("--login names a login of a harness that signs in itself, but %s uses a "+
+			"credential the gateway holds", o.Harness), "add --sign-in")
+	}
+	if o.Login != "" && o.Login != harness.DefaultLogin && !slices.Contains(i.selected.Logins, o.Login) {
+		i.selected.Logins = append(i.selected.Logins, o.Login)
+		i.step("%s has a login %q; start a session on it with: sproozi run --harness %s --login %s",
+			o.Harness, o.Login, o.Harness, o.Login)
+	}
+	return nil
+}
+
 func providerURL(flag, current string, provider Provider) string {
 	switch {
 	case flag != "":
