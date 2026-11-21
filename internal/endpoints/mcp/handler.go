@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -280,8 +281,9 @@ func (h *Handler) prepare(ctx context.Context, upstream *sdk.ClientSession,
 					result, err := upstream.CallTool(workCtx, &sdk.CallToolParams{Name: name, Arguments: value})
 					if err != nil {
 						callEvent.DenyReason, callEvent.Outcome = "MCP upstream call failed", audit.UpstreamFailed
-						if workCtx.Err() != nil {
-							// The workload left while the tool ran.
+						if errors.Is(ctx.Err(), context.Canceled) || errors.Is(workCtx.Err(), context.Canceled) {
+							// The workload left while the tool ran; the parent
+							// may know before the call's own context does.
 							callEvent.Outcome = audit.Cancelled
 						}
 						return nil, fmt.Errorf("MCP upstream call failed")
@@ -431,6 +433,11 @@ func (h *Handler) deny(ctx context.Context, w http.ResponseWriter, event audit.E
 	event.DenyReason = reason
 	if event.Outcome == "" {
 		event.Outcome = gateway.RefusalOutcome(status)
+	}
+	if event.Outcome == audit.UpstreamFailed && errors.Is(ctx.Err(), context.Canceled) {
+		// The workload left while the gateway reached the upstream server,
+		// which is why the connection or discovery failed.
+		event.Outcome = audit.Cancelled
 	}
 	if h.config.AuditLogger != nil {
 		gateway.Record(ctx, h.config.AuditLogger, event)
