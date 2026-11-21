@@ -5,6 +5,17 @@ import (
 	"testing"
 )
 
+// Arguments the argument tests share.
+const (
+	argCdRoot           = "--cd=/"
+	argHarmless         = "--harmless"
+	argSandbox          = "--sandbox"
+	argYolo             = "--yolo"
+	argConfig           = "--config"
+	quotedSandboxMode   = `"sandbox_mode"=x`
+	reasoningEffortHigh = "model_reasoning_effort=high"
+)
+
 // refused fails t unless ValidateNativeArgs refuses args for kind.
 func refused(t *testing.T, kind NativeKind, args ...string) {
 	t.Helper()
@@ -18,17 +29,17 @@ func refused(t *testing.T, kind NativeKind, args ...string) {
 // swallow the conversation Sproozi adds after the harness arguments.
 func TestAnOptionValueIsNeitherAnOptionNorMissing(t *testing.T) {
 	for _, args := range [][]string{
-		{"-c", "--sandbox"}, {"-c", "--yolo"}, {"-c", "-p", "x"}, {"--config", "--cd=/"}, {"-c", "--"},
-		{"-c", "-mx"}, {"-c"}, {"--config"}, {"--harmless", "-c"}, {"-m"}, {"--model"}, {"--harmless", "-m"},
-		{"-m", "--sandbox"}, {"--model", "-c"},
+		{"-c", argSandbox}, {"-c", argYolo}, {"-c", "-p", "x"}, {argConfig, argCdRoot}, {"-c", "--"},
+		{"-c", "-mx"}, {"-c"}, {argConfig}, {argHarmless, "-c"}, {"-m"}, {nativeModelFlag}, {argHarmless, "-m"},
+		{"-m", argSandbox}, {nativeModelFlag, "-c"},
 	} {
 		refused(t, NativeCodex, args...)
 	}
 	for _, kind := range []NativeKind{NativeClaude, NativeCopilot} {
-		refused(t, kind, "--model")
-		refused(t, kind, "--model", "--verbose")
+		refused(t, kind, nativeModelFlag)
+		refused(t, kind, nativeModelFlag, "--verbose")
 	}
-	for _, args := range [][]string{{"-c", "x=-1"}, {"--model", "gpt-5.5"}, {"-m", "x"}, {"--model=-x"}} {
+	for _, args := range [][]string{{"-c", "x=-1"}, {nativeModelFlag, "gpt-5.5"}, {"-m", "x"}, {"--model=-x"}} {
 		if err := ValidateNativeArgs(NativeCodex, args); err != nil {
 			t.Errorf("codex %q refused: %v", args, err)
 		}
@@ -53,7 +64,7 @@ func TestAParentOfAControlledKeyIsRefused(t *testing.T) {
 // case is kept, since TOML keys are case-sensitive.
 func TestEveryTOMLSpellingOfAControlledKeyIsRefused(t *testing.T) {
 	for _, value := range []string{
-		`"sandbox_mode"=x`, `'sandbox_mode'=x`, `" sandbox_mode"=x`, `"sandbox_mode "=x`,
+		quotedSandboxMode, `'sandbox_mode'=x`, `" sandbox_mode"=x`, `"sandbox_mode "=x`,
 		"\"sandbox\\" + "u005fmode\"=x", "\"sandbox\\" + "U0000005fmode\"=x", `sandbox_mode =x`, ` sandbox_mode=x`,
 		`mcp_servers . "sproozi" . url=x`, `mcp_servers.'sproozi'.url=x`, `"mcp_servers"."sproozi"={}`,
 		`a b=x`, `sandbox_mode.=x`, `.sandbox_mode=x`, `"unterminated=x`, `'unterminated=x`,
@@ -61,7 +72,7 @@ func TestEveryTOMLSpellingOfAControlledKeyIsRefused(t *testing.T) {
 	} {
 		refused(t, NativeCodex, "-c", value)
 	}
-	for _, value := range []string{"SANDBOX_MODE=x", "model_reasoning_effort=high", `"model_reasoning_effort"=high`,
+	for _, value := range []string{"SANDBOX_MODE=x", reasoningEffortHigh, `"model_reasoning_effort"=high`,
 		"shell_environment_policy.inherit=all", "a-b_c.d=1", `"a=b"=x`} {
 		if err := ValidateNativeArgs(NativeCodex, []string{"-c", value}); err != nil {
 			t.Errorf("codex -c %q refused: %v", value, err)
@@ -74,13 +85,13 @@ func TestEveryTOMLSpellingOfAControlledKeyIsRefused(t *testing.T) {
 func TestEveryOverrideSpellingIsRefusedAlike(t *testing.T) {
 	for _, key := range codexConfigOverride.ControlledKeys {
 		for _, args := range [][]string{
-			{"-c", key + "=x"}, {"--config", key + "=x"}, {"-c" + key + "=x"}, {"-c=" + key + "=x"},
+			{"-c", key + "=x"}, {argConfig, key + "=x"}, {"-c" + key + "=x"}, {"-c=" + key + "=x"},
 			{"--config=" + key + "=x"},
 		} {
 			refused(t, NativeCodex, args...)
 		}
 	}
-	for _, args := range [][]string{{"-c="}, {"-c==x"}, {"-c", "=x"}, {"--config="}, {"--config", ""}} {
+	for _, args := range [][]string{{"-c="}, {"-c==x"}, {"-c", "=x"}, {"--config="}, {argConfig, ""}} {
 		refused(t, NativeCodex, args...)
 	}
 }
