@@ -1302,7 +1302,7 @@
       "resume",
       "01234567-89ab-cdef-0123-456789abcdef"
     ],
-    "validate": "harness argument \"-c a b=x\" is refused: a configuration override needs a TOML key before its \"=\"; remove it"
+    "validate": "harness argument \"-c a b=x\" is refused: a configuration override is a TOML key, \"=\" and a value; remove it"
   },
   {
     "args": [
@@ -1356,7 +1356,7 @@
       "resume",
       "01234567-89ab-cdef-0123-456789abcdef"
     ],
-    "validate": "harness argument \"-c =x\" is refused: a configuration override needs a TOML key before its \"=\"; remove it"
+    "validate": "harness argument \"-c =x\" is refused: a configuration override is a TOML key, \"=\" and a value; remove it"
   },
   {
     "args": [

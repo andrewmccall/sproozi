@@ -189,8 +189,8 @@ func ValidateNativeArgs(kind NativeKind, args []string) error {
 		}
 		if key, consumed, ok := h.ConfigOverride.key(args, i); ok {
 			if key == "" {
-				return fmt.Errorf("harness argument %q is refused: a configuration override needs a TOML key "+
-					"before its \"=\"; remove it",
+				return fmt.Errorf("harness argument %q is refused: a configuration override is a TOML key, "+
+					"\"=\" and a value; remove it",
 					strings.Join(args[i:i+consumed+1], " "))
 			}
 			if refused := h.ConfigOverride.controlled(key); refused != "" {
@@ -284,7 +284,7 @@ func (o ConfigOverride) key(args []string, i int) (string, int, bool) {
 		return "", 0, false
 	}
 	parts, rest, parsed := tomlDottedKey(value)
-	if !parsed || rest != "" && rest[0] != '=' {
+	if !parsed || !strings.HasPrefix(rest, "=") {
 		// Not a TOML dotted key followed by "=": unparseable, refused.
 		return "", consumed, true
 	}

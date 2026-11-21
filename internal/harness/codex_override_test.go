@@ -80,6 +80,17 @@ func TestEveryTOMLSpellingOfAControlledKeyIsRefused(t *testing.T) {
 	}
 }
 
+// A Codex override sets a key to a value, so one with no "=" is refused in
+// every spelling.
+func TestAnOverrideWithoutAValueIsRefused(t *testing.T) {
+	for _, args := range [][]string{
+		{"-c", "foo"}, {"-cm"}, {argConfig, "foo"}, {"--config=foo"}, {"-c=foo"}, {"-c", "sandbox_mode"},
+		{"-c", `"quoted"`}, {"-c", "a.b "},
+	} {
+		refused(t, NativeCodex, args...)
+	}
+}
+
 // Every spelling of a Codex override of a controlled key gets the same
 // answer, and an override with an empty key is refused.
 func TestEveryOverrideSpellingIsRefusedAlike(t *testing.T) {
