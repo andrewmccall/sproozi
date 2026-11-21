@@ -49,6 +49,7 @@ func validateAllowance(a map[string]Allowance) error {
 	}
 	return nil
 }
+
 // validateLaunchArgs refuses harness arguments Sproozi controls, with the
 // validator's message. It runs where a launch is created and before a stored
 // launch is started, not when a record loads.
