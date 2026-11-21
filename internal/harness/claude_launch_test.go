@@ -60,6 +60,14 @@ elif scenario.startswith("sign-in"):
         time.sleep(30)
     if scenario == "sign-in-signalled":
         os.kill(os.getpid(), signal.SIGKILL)
+    if scenario == "sign-in-refreshed-as-killed":
+        # Rewrites its login on the forwarded signal, then exits 0.
+        def refresh_and_exit(*_):
+            credentials.write_text('{"claudeAiOauth":{"refreshToken":"refreshed"}}')
+            os._exit(0)
+        signal.signal(signal.SIGTERM, refresh_and_exit)
+        Path(contract, "ready").write_text("")
+        time.sleep(30)
 else:
     assert os.environ["ANTHROPIC_API_KEY"] == "sproozi-local-placeholder"
 if scenario == "proxy":
