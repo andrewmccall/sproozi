@@ -90,7 +90,9 @@ refuses mid-turn is untested.
    control connection, the declared loader, the example and the reference row
    agree. A harness whose client needs a bridge also runs through the bridge
    hook below; one whose client loads MCP itself is checked only by the
-   verifiers in step 6.
+   verifiers in step 6. The two record tests fail until you regenerate
+   their records: run `SPROOZI_UPDATE_OUTCOMES=1 go test ./internal/harness/ ./cmd/sproozi/`
+   and review the difference (see what to expect in the guard list below).
 4. Add the client's pinned install under [`hack/clients`](../../hack/clients/README.md).
    This step and step 6 install the real client, so they need access to its
    package registry, such as npm.
@@ -138,7 +140,7 @@ described in [retained final answers](../reference/agent-contract.md#retained-fi
 
 ## What the guards check, and what they don't
 
-`go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/ ./cmd/sproozi/ ./internal/runtime/kubernetes/`
+`go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/ ./cmd/sproozi/ ./internal/nativeconfig/ ./internal/localsetup/ ./internal/runtime/kubernetes/`
 fails, naming the file to change, unless:
 
 - the registry, the `+kubebuilder:validation:Enum` marker and the generated
@@ -301,7 +303,7 @@ two pieces of code, each behind its own contract
 [conversation state](../../GLOSSARY.md#conversation-state), which a
 checkpoint carries, and its [supervisor adapter](../../GLOSSARY.md#supervisor-adapter),
 which runs it on a terminal. Follow the steps in order; after each, the
-`go test` command in step 7 names the next missing piece.
+`go test` command in step 8 names the next missing piece.
 
 1. Declare its kind beside `NativeCodex` in
    [`internal/harness/native_kind.go`](../../internal/harness/native_kind.go),
@@ -409,21 +411,27 @@ which runs it on a terminal. Follow the steps in order; after each, the
    new, add its default URL to `providerNamed` in
    [`internal/localsetup/credentials.go`](../../internal/localsetup/credentials.go),
    which refuses a provider it does not know.
-6. Regenerate the records the new kind adds rows to, and review each
-   difference (see the guard list below for what to expect):
-   `SPROOZI_UPDATE_OUTCOMES=1 go test ./internal/harness/ ./cmd/sproozi/ ./internal/checkpoint/ ./cmd/native-session/`
-   and `go test ./cmd/native-session/ -run TestSupervisorLifecycleRecord -update-lifecycle-record`.
-7. Run `go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/ ./cmd/sproozi/ ./internal/nativeconfig/ ./internal/localsetup/`;
-   the guards name each missing piece. Then prove a real round trip with
-   `make verify-local-onboarding` and the session verifiers in
-   [which command proves what](../../test/acceptance/running.md#which-command-proves-what).
-8. Document its managed behaviour in the harness reference's managed section,
+6. Regenerate the records the new kind adds rows to, in this order, and
+   review each difference (see the guard list below for what to expect):
+   first the lifecycle record,
+   `go test ./cmd/native-session/ -run TestSupervisorLifecycleRecord -update-lifecycle-record`,
+   then the others,
+   `SPROOZI_UPDATE_OUTCOMES=1 go test ./internal/harness/ ./cmd/sproozi/ ./internal/checkpoint/ ./cmd/native-session/`;
+   the second reports `TestSupervisorLifecycleRecord` failing until the
+   first has run.
+7. Document its managed behaviour in the harness reference's managed section,
    and change its row in the selector table to Managed `yes`
-   (`TestEveryHarnessHasAnExampleAndAReferenceRow`). Add its `DisplayName` to the local session and remote executor rows of the
+   (`TestEveryHarnessHasAnExampleAndAReferenceRow`). Add its `DisplayName` to
+   the local session and remote executor rows of the
    [configured MCP reference](../reference/configured-mcp.md), and, when it
    sets `RemoteExecutor`, to the sentence after them that names the
    harnesses an executor starts tasks and interactive sessions for;
    `TestConfiguredMCPReferenceMatchesTheRegistry` fails until they agree.
+8. Run `go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/ ./cmd/sproozi/ ./internal/nativeconfig/ ./internal/localsetup/ ./internal/runtime/kubernetes/`;
+   every guard now passes, or names the piece still missing. Then prove a
+   real round trip with `make verify-local-onboarding` and the session
+   verifiers in
+   [which command proves what](../../test/acceptance/running.md#which-command-proves-what).
 
 ## Gates
 
