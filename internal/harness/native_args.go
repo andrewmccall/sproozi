@@ -131,6 +131,24 @@ var copilotControlled = []controlledFlag{
 	{long: []string{"acp", remoteName, "remote-export", "silent", "share-gist"}, short: "s", why: whyLifecycle},
 }
 
+// NativeConfigOverrideKeys lists the key of each configuration override in
+// args, in every spelling ValidateNativeArgs reads, as it compares them: ""
+// for one it cannot read. A kind without a ConfigOverride has none.
+func NativeConfigOverrideKeys(kind NativeKind, args []string) []string {
+	h, err := Managed(kind)
+	if err != nil {
+		return nil
+	}
+	var keys []string
+	for i := 0; i < len(args); i++ {
+		if key, consumed, ok := h.ConfigOverride.key(args, i); ok {
+			keys = append(keys, key)
+			i += consumed
+		}
+	}
+	return keys
+}
+
 // NativeArgsBounded checks only the size of harness arguments: how many,
 // how long and that none holds a NUL. A stored record checks this when it
 // loads; which arguments Sproozi refuses is checked, by ValidateNativeArgs,
