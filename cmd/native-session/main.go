@@ -102,6 +102,11 @@ var quiesceWait = harness.NativeQuiesceWait
 // client waits for the reply.
 var quitWait = 30 * time.Second
 
+// stopWait bounds stop's wait for the harness it kills at a terminate, a
+// deadline or a failed stop. It is set only here; the supervisor reads no
+// flag, file or variable that changes it, and only tests replace it.
+var stopWait = 3 * time.Second
+
 // forcedStopWait bounds the wait for a harness the supervisor killed after
 // quitWait.
 var forcedStopWait = 3 * time.Second
@@ -286,7 +291,7 @@ func (s *server) stop(e event) {
 	var exit nativepty.Exit
 	var err error
 	if n != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), stopWait)
 		defer cancel()
 		exit, err = n.Stop(ctx)
 		login.stop()

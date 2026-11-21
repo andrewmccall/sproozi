@@ -879,9 +879,13 @@ func TestSupervisorLifecycleRecord(t *testing.T) {
 	setQuitWait(t, 600*time.Millisecond)
 	setForcedStopWait(t, 200*time.Millisecond)
 	setTurnlessSettle(t, 0)
-	previousWait, previousSettle := quiesceWait, inputSettle
-	quiesceWait, inputSettle = 2*time.Second, time.Hour
-	t.Cleanup(func() { quiesceWait, inputSettle = previousWait, previousSettle })
+	previousWait, previousSettle, previousStop := quiesceWait, inputSettle, stopWait
+	// A kill's reap waits for the process group and the terminal's reader,
+	// which on a loaded machine can outlast stop's 3 s; past it the exit is
+	// recorded with the wait's error instead of the kill. The record's real
+	// kills get realStopLimit, as its real quits do.
+	quiesceWait, inputSettle, stopWait = 2*time.Second, time.Hour, realStopLimit
+	t.Cleanup(func() { quiesceWait, inputSettle, stopWait = previousWait, previousSettle, previousStop })
 
 	worlds := recordedWorlds()
 	records := make([]string, len(worlds))
