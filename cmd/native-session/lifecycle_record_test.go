@@ -862,6 +862,13 @@ func TestSupervisorLifecycleRecord(t *testing.T) {
 		t.Skip("a real Codex home is present")
 	}
 	for _, kind := range harness.ManagedKinds() {
+		// A missing function would panic a world and hide every other
+		// test's report in this package.
+		if adapter, err := adapterFor(kind); err != nil || len(adapterProblems(adapter)) != 0 {
+			t.Fatalf("managed harness %q has no supervisor adapter with every required function, so its lifecycle "+
+				"cannot be recorded; TestEveryManagedKindHasAnAdapter and TestEveryAdapterSetsEveryRequiredFunction "+
+				"name what to add", kind)
+		}
 		recordedFinishes[kind] = nativeAdapters[kind].finish
 		withAdapter(t, kind, func(a *nativeAdapter) {
 			a.observe = func(s *server) (string, string, error) { return recordingOf(s).observe() }
@@ -923,11 +930,13 @@ func TestSupervisorLifecycleRecord(t *testing.T) {
 		// The first line counts the steps; a differing step says more.
 		for i := range min(len(gotLines), len(wantLines)) {
 			if i > 0 && gotLines[i] != wantLines[i] {
-				t.Fatalf("the supervisor's lifecycle differs from %s at line %d:\n got %s\nwant %s",
+				t.Fatalf("the supervisor's lifecycle differs from %s at line %d:\n got %s\nwant %s\nIf the change is "+
+					"meant, regenerate it with -update-lifecycle-record and show the difference in its own commit",
 					lifecycleRecord, i+1, gotLines[i], wantLines[i])
 			}
 		}
-		t.Fatalf("the supervisor's lifecycle differs from %s in length: %d lines, recorded %d",
+		t.Fatalf("the supervisor's lifecycle differs from %s in length: %d lines, recorded %d; if the change is "+
+			"meant, regenerate it with -update-lifecycle-record and show the difference in its own commit",
 			lifecycleRecord, len(gotLines), len(wantLines))
 	}
 }

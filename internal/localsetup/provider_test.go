@@ -22,10 +22,10 @@ func providerFor(t *testing.T, kind harness.NativeKind, credential harness.Nativ
 // OpenAI's by default, and every registered kind still gets one for each way
 // it reaches its provider.
 func TestProviderForRefusesAProviderItDoesNotKnow(t *testing.T) {
-	if got, err := ProviderFor(harness.NativeKind("acme"), harness.CredentialKey); err == nil {
+	if got, err := ProviderFor(harness.NativeKind("not-registered"), harness.CredentialKey); err == nil {
 		t.Fatalf("an unregistered kind reached %+v", got)
 	}
-	if got, err := providerNamed("acme"); err == nil || !strings.Contains(err.Error(), `"acme"`) {
+	if got, err := providerNamed("not-a-provider"); err == nil || !strings.Contains(err.Error(), `"not-a-provider"`) {
 		t.Fatalf("an unknown provider reached %+v (%v)", got, err)
 	}
 	for _, kind := range harness.ManagedKinds() {

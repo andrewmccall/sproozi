@@ -320,7 +320,8 @@ func journalOf(t *testing.T, a nativeArtifact) []byte {
 	case a.Copilot != nil:
 		return a.Copilot.Events
 	}
-	t.Fatal("artifact carries no native state")
+	t.Fatal("artifact carries no native state journalOf reads; add a case for its field, returning its native bytes, " +
+		"to journalOf in internal/checkpoint/outcomes_test.go")
 	return nil
 }
 

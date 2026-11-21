@@ -72,7 +72,8 @@ func recordedLaunch(t *testing.T, kind harness.NativeKind, args []string) []stri
 		}
 		return rendered
 	}
-	t.Fatalf("no recorded launch for %s", kind)
+	t.Fatalf("no recorded launch for %s; add a case to recordedLaunch in cmd/native-session/launch_args_record_test.go "+
+		"that renders its launch arguments through its adapter's prepare", kind)
 	return nil
 }
 
