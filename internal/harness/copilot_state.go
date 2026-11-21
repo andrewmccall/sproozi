@@ -54,7 +54,7 @@ func captureCopilot(home, _, threadID string, maxBytes int64) (ConversationState
 // Kind is NativeCopilot.
 func (s CopilotState) Kind() NativeKind { return NativeCopilot }
 
-// Thread is the Copilot session ID.
+// Thread is the harness conversation ID (`threadId`).
 func (s CopilotState) Thread() string { return s.ThreadID }
 
 // Size is the journal's length.
@@ -71,9 +71,12 @@ func (s CopilotState) Restore(home, _ string, maxBytes int64) error {
 	return RestoreCopilotState(home, s, maxBytes)
 }
 
-// ValidateContinuity finds no evidence to compare: Copilot keeps no approved
-// instructions in its journal, and the supervisor writes
-// copilot-instructions.md afresh at each launch.
+// ValidateContinuity compares no evidence: the supervisor writes
+// copilot-instructions.md afresh at each launch. Copilot adds that file to
+// its system prompt (ADR 0048), and its journal records the first turn's
+// system.message; whether the instructions appear there has not been
+// checked, and nothing reads them. checkpoint.ValidateContinuity checks the
+// digest's form.
 func (s CopilotState) ValidateContinuity(string, int64) error { return nil }
 
 // FinalText is the main agent's last answer that requested no tools.

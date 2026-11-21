@@ -125,7 +125,7 @@ func captureClaude(home, workspace, threadID string, maxBytes int64) (Conversati
 // Kind is NativeClaude.
 func (s ClaudeState) Kind() NativeKind { return NativeClaude }
 
-// Thread is the Claude Code session ID.
+// Thread is the harness conversation ID (`threadId`).
 func (s ClaudeState) Thread() string { return s.ThreadID }
 
 // Size is the transcript's length.
@@ -148,7 +148,8 @@ func (s ClaudeState) FinalText(maxBytes int64) (string, error) { return ClaudeFi
 
 // ValidateContinuity finds no evidence to compare: Claude Code's transcript
 // is no proof of approved instructions, so the trusted launch supplies them
-// fresh and holds them invariant (ADR 0011).
+// fresh and holds them invariant (ADR 0011). checkpoint.ValidateContinuity
+// checks the digest's form.
 func (s ClaudeState) ValidateContinuity(string, int64) error { return nil }
 
 // RestoreClaudeState publishes the same transcript bytes at the destination's

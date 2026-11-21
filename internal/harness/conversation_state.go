@@ -9,7 +9,7 @@ package harness
 type ConversationState interface {
 	// Kind is the managed kind whose state this is.
 	Kind() NativeKind
-	// Thread is the native conversation ID.
+	// Thread is the harness conversation ID (`threadId`).
 	Thread() string
 	// CompletedTurn validates the state and returns its last completed turn,
 	// or the candidate settled leaf where the harness writes no completion
@@ -22,12 +22,15 @@ type ConversationState interface {
 	// conversation file.
 	Restore(home, workspace string, maxBytes int64) error
 	// FinalText is the conversation's last answer, untrusted workload
-	// output; empty when the harness recorded none.
+	// output; empty when the harness recorded none. It validates the state
+	// as CompletedTurn does first, and returns that error for a state with
+	// no completed turn.
 	FinalText(maxBytes int64) (string, error)
 	// ValidateContinuity compares the state's native evidence of approved
 	// instructions with the trusted launch's digest. A harness whose state
-	// keeps no such evidence returns nil and says why in its method; the
-	// caller checks the digest's form either way.
+	// keeps no such evidence returns nil and says why in its method. The
+	// digest's form is checked by checkpoint.ValidateContinuity for every
+	// kind, not here.
 	ValidateContinuity(instructionDigest string, maxBytes int64) error
 }
 

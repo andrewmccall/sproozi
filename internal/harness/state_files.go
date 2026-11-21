@@ -49,6 +49,9 @@ func stateDirectories(home, relative string, create bool, unsafe string) error {
 		if err != nil {
 			return stateFileError(err)
 		}
+		// An Lstat of a link reports no directory, so the link test adds
+		// nothing on Unix. It stays as the guard every native walk writes
+		// (codex_state.go too), stating the intent, and costs no call.
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return refusedState(errors.New(unsafe))
 		}

@@ -93,7 +93,7 @@ func captureCodex(home, _, threadID string, maxBytes int64) (ConversationState, 
 // Kind is NativeCodex.
 func (s CodexState) Kind() NativeKind { return NativeCodex }
 
-// Thread is the Codex thread ID.
+// Thread is the harness conversation ID (`threadId`).
 func (s CodexState) Thread() string { return s.ThreadID }
 
 // Size is the rollout's length.
