@@ -132,8 +132,10 @@ var copilotControlled = []controlledFlag{
 }
 
 // NativeConfigOverrideKeys lists the key of each configuration override in
-// args, in every spelling ValidateNativeArgs reads, as it compares them: ""
-// for one it cannot read. A kind without a ConfigOverride has none.
+// args, in every spelling ValidateNativeArgs reads, as a TOML dotted key
+// whose every part is a quoted basic string, so it reads back as the same
+// key whatever characters a part holds: "" for an override it cannot read.
+// A kind without a ConfigOverride has none.
 func NativeConfigOverrideKeys(kind NativeKind, args []string) []string {
 	h, err := Managed(kind)
 	if err != nil {
@@ -141,10 +143,16 @@ func NativeConfigOverrideKeys(kind NativeKind, args []string) []string {
 	}
 	var keys []string
 	for i := 0; i < len(args); i++ {
-		if key, consumed, ok := h.ConfigOverride.key(args, i); ok {
-			keys = append(keys, key)
-			i += consumed
+		parts, consumed, ok := h.ConfigOverride.keyParts(args, i)
+		if !ok {
+			continue
 		}
+		quoted := make([]string, len(parts))
+		for n, part := range parts {
+			quoted[n] = tomlQuote(part)
+		}
+		keys = append(keys, strings.Join(quoted, "."))
+		i += consumed
 	}
 	return keys
 }
@@ -297,16 +305,24 @@ func (f controlledFlag) valueAt(args []string, i int) (string, int, bool) {
 // key reads the key of an override at args[i] and how many further
 // arguments it consumed.
 func (o ConfigOverride) key(args []string, i int) (string, int, bool) {
+	parts, consumed, ok := o.keyParts(args, i)
+	return strings.Join(parts, "."), consumed, ok
+}
+
+// keyParts reads the parts of an override's key at args[i], none for one
+// that is not a TOML dotted key followed by "=", and how many further
+// arguments it consumed.
+func (o ConfigOverride) keyParts(args []string, i int) ([]string, int, bool) {
 	value, consumed, ok := o.Flag.valueAt(args, i)
 	if !ok {
-		return "", 0, false
+		return nil, 0, false
 	}
 	parts, rest, parsed := tomlDottedKey(value)
 	if !parsed || !strings.HasPrefix(rest, "=") {
 		// Not a TOML dotted key followed by "=": unparseable, refused.
-		return "", consumed, true
+		return nil, consumed, true
 	}
-	return strings.Join(parts, "."), consumed, true
+	return parts, consumed, true
 }
 
 // controlled is the controlled key that key is, is below, or holds as a

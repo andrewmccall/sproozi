@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -66,6 +67,26 @@ func tomlDottedKey(s string) (parts []string, rest string, ok bool) {
 		}
 		return parts, s[i:], true
 	}
+}
+
+// tomlQuote spells s as a TOML basic string, which tomlBasicString reads back
+// as s.
+func tomlQuote(s string) string {
+	var out strings.Builder
+	out.WriteByte('"')
+	for _, r := range s {
+		switch {
+		case r == '"' || r == '\\':
+			out.WriteByte('\\')
+			out.WriteRune(r)
+		case r < 0x20 || r == 0x7f:
+			fmt.Fprintf(&out, "\\u%04X", r)
+		default:
+			out.WriteRune(r)
+		}
+	}
+	out.WriteByte('"')
+	return out.String()
 }
 
 func tomlBareKeyByte(b byte) bool {

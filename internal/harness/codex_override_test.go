@@ -17,6 +17,16 @@ const (
 	valueWithoutKey     = "foo"
 )
 
+// A key part tomlQuote spells reads back as itself.
+func TestTOMLQuotedKeyPartsReadBack(t *testing.T) {
+	for _, part := range []string{"plain", "brand new", `with "quotes"`, `back\slash`, "a.b", "tab\there", "é", "x\x7fy"} {
+		parts, rest, ok := tomlDottedKey(tomlQuote(part) + "=x")
+		if !ok || rest != "=x" || len(parts) != 1 || parts[0] != part {
+			t.Errorf("%q spelled %s read back as %q, %q, %v", part, tomlQuote(part), parts, rest, ok)
+		}
+	}
+}
+
 // refused fails t unless ValidateNativeArgs refuses args for kind.
 func refused(t *testing.T, kind NativeKind, args ...string) {
 	t.Helper()
