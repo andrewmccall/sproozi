@@ -335,21 +335,30 @@ func managedFactProblems(h Harness) []string {
 	for _, fact := range []struct {
 		name    string
 		missing bool
+		// or is what a harness without the fact supplies instead.
+		or string
 	}{
-		{"DisplayName", h.DisplayName == ""},
-		{"Product", h.Product == ""},
-		{"Executable", !strings.HasPrefix(h.Executable, "/")},
-		{"CaptureState", h.CaptureState == nil},
-		{"InstructionsFile", h.InstructionsFile == ""},
-		{"KeyEnv", h.KeyEnv == ""},
-		{"ModelFlag", !h.ModelFlag.declared() || !h.ModelFlag.value},
-		{"ConfigOverride", !h.ConfigOverride.Flag.declared() && configOverrideExempt[h.Native] == ""},
-		{"RefusedFlags", len(h.RefusedFlags) == 0},
-		{"ReservedEnv", len(h.ReservedEnv) == 0 && reservedEnvExempt[h.Native] == ""},
-		{"SignInChoices", len(h.SignInChoices) == 0},
+		{"DisplayName", h.DisplayName == "", ""},
+		{"Product", h.Product == "", ""},
+		{"Executable", !strings.HasPrefix(h.Executable, "/"), ""},
+		{"CaptureState", h.CaptureState == nil, ""},
+		{"InstructionsFile", h.InstructionsFile == "", ""},
+		{"KeyEnv", h.KeyEnv == "", ""},
+		{"ModelFlag", !h.ModelFlag.declared() || !h.ModelFlag.value, ""},
+		{"ConfigOverride", !h.ConfigOverride.Flag.declared() && configOverrideExempt[h.Native] == "",
+			"or, for a client with no option that sets one configuration key, an entry with that reason in " +
+				"configOverrideExempt in internal/harness/facts_test.go"},
+		{"RefusedFlags", len(h.RefusedFlags) == 0, ""},
+		{"ReservedEnv", len(h.ReservedEnv) == 0 && reservedEnvExempt[h.Native] == "",
+			"or an entry with its reason in reservedEnvExempt in internal/harness/registry_test.go"},
+		{"SignInChoices", len(h.SignInChoices) == 0, ""},
 	} {
 		if fact.missing {
-			problems = append(problems, "needs "+fact.name+"; a managed harness must supply every fact, "+
+			name := fact.name
+			if fact.or != "" {
+				name += ", " + fact.or + ","
+			}
+			problems = append(problems, "needs "+name+"; a managed harness must supply every fact, "+
 				"see docs/contributing/add-a-harness.md")
 		}
 	}

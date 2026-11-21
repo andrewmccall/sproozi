@@ -34,7 +34,9 @@ func TestManagedFactProblemsNamesEachBrokenRule(t *testing.T) {
 		{"a ModelFlag without a value", func(h *Harness) { h.ModelFlag.value = false }, "needs ModelFlag"},
 		{"a ConfigOverride without its keys", func(h *Harness) { h.ConfigOverride.ControlledKeys = nil },
 			"ConfigOverride's Flag, ControlledKeys and ModelKey together"},
-		{"no ConfigOverride", func(h *Harness) { h.ConfigOverride = ConfigOverride{} }, "needs ConfigOverride"},
+		{"no ConfigOverride", func(h *Harness) { h.ConfigOverride = ConfigOverride{} },
+			"needs ConfigOverride, or, for a client with no option that sets one configuration key, an entry with that " +
+				"reason in configOverrideExempt"},
 		{"no RefusedFlags", func(h *Harness) { h.RefusedFlags = nil }, "needs RefusedFlags"},
 		{"no ReservedEnv", func(h *Harness) { h.ReservedEnv = nil }, "needs ReservedEnv"},
 		{"no SignInChoices", func(h *Harness) { h.SignInChoices = nil }, "needs SignInChoices"},
