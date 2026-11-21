@@ -69,7 +69,7 @@ func TestATaskLaunchResumesNoConversation(t *testing.T) {
 		}
 		launch := NativeLaunch{Harness: kind, Deadline: time.Now().Add(time.Hour), Env: []string{}, Task: "Fix it",
 			Instructions: "approved", InstructionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte("approved"))),
-			RolloutMaxBytes: NativeRolloutMaxBytes, ClientConfig: &NativeClientConfig{MCPGateway: "https://gateway.test"}}
+			RolloutMaxBytes: NativeRolloutMaxBytes, ClientConfig: &NativeClientConfig{MCPGateway: testGateway}}
 		if err := launch.Validate(time.Now()); err != nil {
 			t.Fatalf("%s: a new task launch: %v", kind, err)
 		}
