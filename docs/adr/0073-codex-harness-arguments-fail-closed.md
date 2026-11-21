@@ -67,12 +67,26 @@ forbids for contradicted records.
 4. **Arguments are checked where a launch is created and where it starts,
    not when a record loads.** Loading and saving a record check only the
    arguments' size (`harness.NativeArgsBounded`). `ValidateNativeArgs` runs
-   when home starts or resumes a session, in `Coordinator.Create`, before a
-   move records its intent, before a stored launch is prepared
-   (`prepareDestination`) and again in the Docker placement's launch
-   contract. A record holding arguments an earlier release accepted still
-   loads and can be stopped, cancelled and removed; starting or moving it is
-   refused with the validator's message.
+   at each point that creates a launch or starts a harness from one:
+   - when home starts or resumes a session, and in `Coordinator.Create`;
+   - before a move records its intent;
+   - before a stored launch is prepared (`prepareDestination`);
+   - before a prepared visit is activated (`activateDestination`, before
+     `Activate`), since a visit an earlier release prepared carries its
+     arguments in the native contract it already sent;
+   - in the Docker placement's native contract, at configure.
+
+   A record holding arguments an earlier release accepted still loads, in
+   every phase, and can be cancelled and removed; one that is running or
+   stopped can be stopped. Preparing, activating or moving it is refused
+   with the validator's message.
+
+   The Docker placement does not refuse such a visit by itself. Its
+   activation checks the agent container against the placement's own
+   record (`VerifyManaged`), whose launch the earlier release wrote with the
+   same arguments. Only when the upgrade also changed the placement's
+   settings, such as its native image, does the placement refuse the old
+   record, and then it refuses every operation on it, not only the start.
 
 ## Alternatives
 
@@ -95,8 +109,16 @@ forbids for contradicted records.
 - A session started by an earlier release with such arguments still loads and
   ends. `resume` takes its own arguments, so it resumes; only a move of the
   execution that holds them (`move --local`) is refused.
-- A record's arguments are no longer checked against the policy on load; an
-  edited journal is refused when it would start, not when it is read.
+- A record's arguments are no longer checked against the policy on load. An
+  edited journal is refused when it would prepare, activate or move a visit,
+  not when it is read. An edit to the coordinator's journal alone cannot
+  start the edited arguments either: preparing writes the placement's own
+  record from the journal's launch, and every later operation requires the
+  two launches to match (`SameLaunch`), so an edit after prepare stops the
+  visit's operations with a mismatch rather than starting anything.
+- A stop of a visit left preparing or activating waits for the pending
+  start's recovery, as it does for accepted arguments; since the start is
+  refused, such a visit ends by cancelling.
 
 ## Revisit conditions
 
