@@ -1,27 +1,47 @@
 package pki
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
 
 // sharedStates is every state in outcomeStates, built once per test binary
 // by the first test that asks. Tests read a state, or copy it with
-// copyStore and change the copy; TestMain fails the package if any test
-// changed a shared state. Building them takes 175 durable file
-// replacements, each a file and a directory fsync; building them again in
-// every test that uses them was most of the package's time. The tests that
-// still make the most such writes run in parallel, so their waits on the
-// disk overlap; none of them sets a package variable (appliedHook is set
-// only by TestEveryMoveGoesThroughApply, which is not parallel and so ends
-// before any parallel test resumes).
+// copyStore and change the copy. Building the states runs the store's
+// operations from an empty directory for each of them, 175 store file
+// writes and 28 new authorities in all; building them
+// again in every test that used them (24 directly, 6 more through
+// boundBases) was most of the package's time. TestMain fails the package
+// if a test left a shared state's files, contents or permissions
+// different; a file changed and then restored before the run ends is not
+// detected.
+//
+// The directory is named after the test binary's process ID, so a binary
+// that a timeout killed before TestMain could remove it leaves a directory
+// the next run of this package recognises: buildStates removes every
+// pki-states directory whose process no longer exists.
+//
+// The five tests with the most store operations
+// (TestStoreOutcomesMatchTheRecordedTable,
+// TestInterruptedOperationsConvergeAfterRestart,
+// TestEveryFinishingMoveCommitsAtTheLargestStartedRecord,
+// TestReplaceRecoversARefusedRecord and
+// TestOnlyReplaceProceedsOnARefusedRecord) call t.Parallel, so their CPU
+// and file work overlap. Two tests change package state every store
+// operation reads and must not be parallel: TestEveryMoveGoesThroughApply
+// sets appliedHook, and TestApplyRefusesAResultTheTableDoesNotDeclare
+// edits the transitions map. Go finishes every non-parallel top-level test
+// before it resumes the parallel ones, so neither overlaps them.
 var sharedStates struct {
 	once  sync.Once
 	dir   string
@@ -30,6 +50,10 @@ var sharedStates struct {
 	err   error
 }
 
+// sharedStatesPrefix begins every shared directory's name, followed by the
+// process ID and a random suffix.
+const sharedStatesPrefix = "pki-states-"
+
 // buildStates returns every state in outcomeStates, keyed by name, each in
 // its own root. The states are shared: copy one before changing it.
 func buildStates(t *testing.T) map[string]string {
@@ -37,7 +61,8 @@ func buildStates(t *testing.T) map[string]string {
 	sharedStates.once.Do(func() {
 		// Stays set if a build step stops t, so every later caller fails too.
 		sharedStates.err = fmt.Errorf("building the shared states failed in %s", t.Name())
-		dir, err := os.MkdirTemp("", "pki-states-")
+		removeAbandonedStates()
+		dir, err := os.MkdirTemp("", fmt.Sprintf("%s%d-", sharedStatesPrefix, os.Getpid()))
 		must(t, err)
 		sharedStates.dir = dir
 		roots := map[string]string{}
@@ -57,16 +82,49 @@ func buildStates(t *testing.T) map[string]string {
 	return maps.Clone(sharedStates.roots)
 }
 
+// removeAbandonedStates removes the shared directories of earlier runs
+// whose process has exited, as a run killed by its timeout leaves them. It
+// removes a directory only when signalling its process reports that the
+// process is gone, so a directory of a run still going, in this or another
+// checkout, is kept; where that cannot be told, as on Windows, nothing is
+// removed.
+func removeAbandonedStates() {
+	dirs, _ := filepath.Glob(filepath.Join(os.TempDir(), sharedStatesPrefix+"*-*"))
+	for _, dir := range dirs {
+		pidText, _, ok := strings.Cut(strings.TrimPrefix(filepath.Base(dir), sharedStatesPrefix), "-")
+		pid, err := strconv.Atoi(pidText)
+		if !ok || err != nil || pid <= 0 || pid == os.Getpid() {
+			continue
+		}
+		process, err := os.FindProcess(pid)
+		if err != nil {
+			continue
+		}
+		if errors.Is(process.Signal(syscall.Signal(0)), os.ErrProcessDone) {
+			_ = os.RemoveAll(dir)
+		}
+	}
+}
+
 // treeFiles reads every regular file under dir but the store's lock file,
-// by path.
+// by path, with its permission bits, so a test that changes a shared
+// file's contents or mode, adds one or removes one is seen.
 func treeFiles(dir string) (map[string]string, error) {
 	files := map[string]string{}
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || d.Name() == lockFile {
+		if err != nil || d.Name() == lockFile {
 			return err
 		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			files[path] = info.Mode().String()
+			return nil
+		}
 		data, err := os.ReadFile(path)
-		files[path] = string(data)
+		files[path] = info.Mode().String() + " " + string(data)
 		return err
 	})
 	return files, err
@@ -152,7 +210,7 @@ func refusedRecordCases() []corruption {
 // changes. Guards describe in record.go (each case removes one rule) and the
 // refusal of phaseRefused by every event but replace in transitions.go.
 func TestOnlyReplaceProceedsOnARefusedRecord(t *testing.T) {
-	t.Parallel() // its durable writes wait on the disk; see sharedStates
+	t.Parallel() // one of the largest tables; see sharedStates
 	refusals := refusedRecordErrors()
 	roots := buildStates(t)
 	seen := map[string]bool{}

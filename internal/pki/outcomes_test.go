@@ -505,7 +505,7 @@ func outcomeLines(t *testing.T) []string {
 // generated from the store before its rotation record adopted ADR 0058's
 // pattern; each later difference is a deliberate change in its own commit.
 func TestStoreOutcomesMatchTheRecordedTable(t *testing.T) {
-	t.Parallel() // its durable writes wait on the disk; see sharedStates
+	t.Parallel() // one of the largest tables; see sharedStates
 	lines := outcomeLines(t)
 	got := strings.Join(lines, "\n") + "\n"
 	if *updateOutcomes {

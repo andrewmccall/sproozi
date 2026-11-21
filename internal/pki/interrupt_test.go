@@ -94,7 +94,7 @@ func settled(root string) string {
 // followed by a restart, ends in the same state as an uninterrupted run
 // followed by the same restart.
 func TestInterruptedOperationsConvergeAfterRestart(t *testing.T) {
-	t.Parallel() // its durable writes wait on the disk; see sharedStates
+	t.Parallel() // one of the largest tables; see sharedStates
 	bases := map[string]string{}
 	for name, root := range buildStates(t) {
 		bases[name] = filepath.Join(root, "pki")

@@ -101,9 +101,18 @@ func boundStore(t *testing.T, base string, size int) *Store {
 }
 
 // largestAccepted is the largest record size, padded from base, at which
-// start succeeds.
+// start succeeds. A larger record is never accepted where a smaller one is
+// refused, so a size that is accepted while one byte more is refused is
+// that largest size. It checks the size the reserve predicts that way
+// first, with the two probes a binary search ends on, and searches the
+// whole range only if the prediction is wrong; every probe copies a store,
+// and a full search takes 16.
 func largestAccepted(t *testing.T, base string, start func(s *Store) error) int {
 	t.Helper()
+	if want := maxState - growthReserve; start(boundStore(t, base, want)) == nil &&
+		start(boundStore(t, base, want+1)) != nil {
+		return want
+	}
 	lo, hi := storedSize(t, base), maxState
 	for lo < hi {
 		mid := (lo + hi + 1) / 2
@@ -167,7 +176,7 @@ var (
 // renewal with unchanged names) commit, until the store is single again.
 // Guards growthReserve and its check in startsWithin.
 func TestEveryFinishingMoveCommitsAtTheLargestStartedRecord(t *testing.T) {
-	t.Parallel() // its durable writes wait on the disk; see sharedStates
+	t.Parallel() // one of the largest tables; see sharedStates
 	bases := boundBases(t)
 	chains := []struct {
 		from  Phase
