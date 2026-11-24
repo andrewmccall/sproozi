@@ -46,7 +46,7 @@ func openOwner(t *testing.T, c Config) *Owner {
 // startInteractive submits an interactive session and waits until it runs.
 func startInteractive(t *testing.T, o *Owner, q Submit) View {
 	t.Helper()
-	v, err := o.Submit(t.Context(), q)
+	v, err := submitRetained(t, o, CallerHome, q)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestClaudeExecutorRunsInteractiveSessionsAndRefusesCodex(t *testing.T) {
 		t.Fatalf("Claude first visit launched as %+v", launched)
 	}
 
-	if _, err := o.Submit(t.Context(), interactiveRequest()); code(err) != profile.CodeUnsupported {
+	if _, err := submitRetained(t, o, CallerHome, interactiveRequest()); code(err) != profile.CodeUnsupported {
 		t.Fatalf("Codex session accepted by a Claude executor: %v", err)
 	}
 	p.mu.Lock()
@@ -438,7 +438,7 @@ func TestWorkTokenCannotUseInteractiveOwnerActions(t *testing.T) {
 	t.Parallel()
 	c, _ := fixture(t)
 	o := openOwner(t, c)
-	if _, err := o.SubmitAs(t.Context(), CallerWorkToken, interactiveRequest()); code(err) != profile.CodeDenied {
+	if _, err := submitRetained(t, o, CallerWorkToken, interactiveRequest()); code(err) != profile.CodeDenied {
 		t.Fatalf("the work token started an interactive session: %v", err)
 	}
 	v := startInteractive(t, o, interactiveRequest())
@@ -612,14 +612,22 @@ func TestInteractiveUploadIsValidatedLikeAMovedCheckpoint(t *testing.T) {
 	}
 	q := interactiveRequest()
 	q.Workspace = upload
-	v := startInteractive(t, o, q)
+	// An upload is kept, not captured, so this session starts as Submit does.
+	submitted, err := o.Submit(t.Context(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if submitted.Mode != ModeInteractive {
+		t.Fatalf("submission lost its mode: %+v", submitted)
+	}
+	v := waitPhase(t, o, submitted.ID, phaseActive)
 	p.mu.Lock()
 	input := p.inputs[v.AllocationID]
 	p.mu.Unlock()
 	if restored, err := workspace.Inspect(input, testLimit); err != nil || restored.Revision != original.Revision {
 		t.Fatalf("the session did not start from its upload: %+v %v", restored, err)
 	}
-	if again, err := o.Submit(t.Context(), q); err != nil || again.ID != v.ID || again.AllocationID != v.AllocationID {
+	if again, err := submitRetained(t, o, CallerHome, q); err != nil || again.ID != v.ID || again.AllocationID != v.AllocationID {
 		t.Fatalf("upload replay: %+v %v", again, err)
 	}
 	for name, change := range map[string]func(*Submit){
@@ -637,14 +645,14 @@ func TestInteractiveUploadIsValidatedLikeAMovedCheckpoint(t *testing.T) {
 			bad := interactiveRequest()
 			bad.Workspace = upload
 			change(&bad)
-			if _, err := o.Submit(t.Context(), bad); code(err) != profile.CodeInvalid {
+			if _, err := submitRetained(t, o, CallerHome, bad); code(err) != profile.CodeInvalid {
 				t.Fatalf("%s upload accepted: %v", name, err)
 			}
 		})
 	}
 	byToken := interactiveRequest()
 	byToken.Workspace = upload
-	if _, err = o.SubmitAs(t.Context(), CallerWorkToken, byToken); code(err) != profile.CodeDenied {
+	if _, err = submitRetained(t, o, CallerWorkToken, byToken); code(err) != profile.CodeDenied {
 		t.Fatalf("the work token uploaded a workspace: %v", err)
 	}
 }

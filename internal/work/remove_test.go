@@ -128,13 +128,13 @@ func TestRemoveFreesCapacityAndIsReplaySafe(t *testing.T) {
 	c.RetainedBytes = 2 * c.MaxCheckpointBytes
 	o := openOwner(t, c)
 	first := taskRequest()
-	v, err := o.Submit(t.Context(), first)
+	v, err := submitRetained(t, o, CallerHome, first)
 	if err != nil {
 		t.Fatal(err)
 	}
 	waitPhase(t, o, v.ID, phaseRetained)
 	refused := taskRequest()
-	if _, err = o.Submit(t.Context(), refused); code(err) != profile.CodeRetentionFull {
+	if _, err = submitRetained(t, o, CallerHome, refused); code(err) != profile.CodeRetentionFull {
 		t.Fatalf("submission beyond retainedBytes: %v", err)
 	}
 
@@ -149,10 +149,10 @@ func TestRemoveFreesCapacityAndIsReplaySafe(t *testing.T) {
 	if _, err = o.Remove(t.Context(), uuid.NewString(), false); code(err) != profile.CodeInvalid {
 		t.Fatalf("removed a session that never existed: %v", err)
 	}
-	if _, err = o.Submit(t.Context(), first); code(err) != profile.CodeConflict {
+	if _, err = submitRetained(t, o, CallerHome, first); code(err) != profile.CodeConflict {
 		t.Fatalf("a repeated submission restarted a removed session: %v", err)
 	}
-	next, err := o.Submit(t.Context(), refused)
+	next, err := submitRetained(t, o, CallerHome, refused)
 	if err != nil {
 		t.Fatalf("submission after removal: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestRemoveWhileAnotherSessionsStopWaits(t *testing.T) {
 	// new submission's reservations: removing anything makes room.
 	o.config.RetainedBytes = keptBytes(t, c) + 3*c.MaxCheckpointBytes - 1
 	refused := taskRequest()
-	if _, err := o.Submit(t.Context(), refused); code(err) != profile.CodeRetentionFull {
+	if _, err := submitRetained(t, o, CallerHome, refused); code(err) != profile.CodeRetentionFull {
 		t.Fatalf("submission to a full executor: %v", err)
 	}
 	// Remove returns at once; one that waited for the stopping session's
@@ -220,7 +220,7 @@ func TestRemoveWhileAnotherSessionsStopWaits(t *testing.T) {
 		t.Fatal("removal did not return while another session stops")
 	}
 	assertRemoved(t, c, o, done.ID, done.ExecutionID)
-	if _, err := o.Submit(t.Context(), refused); err != nil {
+	if _, err := submitRetained(t, o, CallerHome, refused); err != nil {
 		t.Fatalf("submission after removal while another session stops: %v", err)
 	}
 	// The task's turn still runs: its completion wait reads active.
@@ -235,7 +235,7 @@ func TestRemoveRefusesTheSourceOfAnUnstartedSession(t *testing.T) {
 	t.Parallel()
 	c, _ := projectFixture(t)
 	o := openOwner(t, c)
-	v, err := o.Submit(t.Context(), projectRequest("sproozi-dev"))
+	v, err := submitRetained(t, o, CallerHome, projectRequest("sproozi-dev"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func TestRemoveRefusesTheSourceOfAnUnstartedSession(t *testing.T) {
 	}
 	// A submission naming a removed session as its start is refused.
 	q.RequestID = uuid.NewString()
-	if _, err = o.Submit(t.Context(), q); code(err) != profile.CodeInvalid {
+	if _, err = submitRetained(t, o, CallerHome, q); code(err) != profile.CodeInvalid {
 		t.Fatalf("submission from a removed session: %v", err)
 	}
 }
@@ -299,7 +299,7 @@ func TestRemoveRacesASubmissionFromIt(t *testing.T) {
 	o := openOwner(t, c)
 	sources := make([]View, 0, 4)
 	for range 4 {
-		v, err := o.Submit(t.Context(), projectRequest("sproozi-dev"))
+		v, err := submitRetained(t, o, CallerHome, projectRequest("sproozi-dev"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -376,7 +376,7 @@ func TestSubmissionFromASourceRemovedWhileItIsRead(t *testing.T) {
 				_, removeErr = o.Remove(t.Context(), source.ID, false)
 			}
 			o = openOwner(t, c)
-			v, err := o.Submit(t.Context(), projectRequest("sproozi-dev"))
+			v, err := submitRetained(t, o, CallerHome, projectRequest("sproozi-dev"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -385,7 +385,7 @@ func TestSubmissionFromASourceRemovedWhileItIsRead(t *testing.T) {
 			q := projectRequest("sproozi-dev")
 			q.WorkspaceFrom = &RevisionSource{SessionID: source.ID, Digest: source.CheckpointDigest,
 				Revision: source.CheckpointInfo.Workspace.Revision}
-			_, submitErr := o.Submit(t.Context(), q)
+			_, submitErr := submitRetained(t, o, CallerHome, q)
 			if !removed || removeErr != nil {
 				t.Fatalf("removal at the %s step: ran %t, %v", step, removed, removeErr)
 			}
@@ -397,7 +397,7 @@ func TestSubmissionFromASourceRemovedWhileItIsRead(t *testing.T) {
 				t.Fatalf("a refused submission kept session %s", id)
 			}
 			q.RequestID = uuid.NewString()
-			if _, after := o.Submit(t.Context(), q); after == nil || after.Error() != submitErr.Error() {
+			if _, after := submitRetained(t, o, CallerHome, q); after == nil || after.Error() != submitErr.Error() {
 				t.Fatalf("submission after the removal: %v, during it: %v", after, submitErr)
 			}
 		})

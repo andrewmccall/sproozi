@@ -273,6 +273,10 @@ func TestMain(m *testing.M) {
 	// observe a sync, and on macOS each one waits on every process's writes.
 	privatefstest.SkipSync()
 	code := m.Run()
+	if err := checkRetained(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		code = 1
+	}
 	if template.root != "" {
 		_ = os.RemoveAll(template.root)
 	}
@@ -361,7 +365,7 @@ func (l fixtureLog) Write(p []byte) (int, error) {
 
 func submit(t *testing.T, o *Owner) View {
 	t.Helper()
-	v, e := o.Submit(t.Context(), Submit{RequestID: uuid.NewString(), Repository: repositorySproozi, Harness: harness.NativeCodex, Executor: executorKubernetes, Task: fixtureTask})
+	v, e := submitRetained(t, o, CallerHome, Submit{RequestID: uuid.NewString(), Repository: repositorySproozi, Harness: harness.NativeCodex, Executor: executorKubernetes, Task: fixtureTask})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -408,12 +412,12 @@ func assertRemoteSubmissionReplay(t *testing.T, o *Owner, q Submit, v View) {
 	if v.ExecutionID != v.ID || !CanonicalID(v.AllocationID) || v.AllocationID == v.ExecutionID {
 		t.Fatalf("session, bounded execution and allocation identities differ: %+v", v)
 	}
-	again, e := o.Submit(t.Context(), q)
+	again, e := submitRetained(t, o, CallerHome, q)
 	if e != nil || again.ID != v.ID || again.ExecutionID != v.ExecutionID || again.AllocationID != v.AllocationID || again.Placement != executorKubernetes {
 		t.Fatalf("submission replay: %+v %v", again, e)
 	}
 	q.Task = "A different task"
-	if _, e = o.Submit(t.Context(), q); e == nil {
+	if _, e = submitRetained(t, o, CallerHome, q); e == nil {
 		t.Fatal("conflicting task accepted")
 	}
 }
@@ -426,7 +430,7 @@ func TestRemoteCatalogueRetainsCompletionAndExclusiveClaimAcrossRestart(t *testi
 	}
 	t.Cleanup(func() { _ = o.Close() })
 	q := Submit{RequestID: uuid.NewString(), Repository: repositorySproozi, Harness: harness.NativeCodex, Executor: executorKubernetes, Task: fixtureTask}
-	v, e := o.Submit(t.Context(), q)
+	v, e := submitRetained(t, o, CallerHome, q)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -595,7 +599,7 @@ func TestSubmissionReplayDoesNotWaitForHeldNativeWork(t *testing.T) {
 	defer close(release)
 	q := Submit{RequestID: uuid.NewString(), Repository: repositorySproozi, Harness: harness.NativeCodex,
 		Executor: executorKubernetes, Task: fixtureTask}
-	initial, err := o.Submit(t.Context(), q)
+	initial, err := submitRetained(t, o, CallerHome, q)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -707,19 +711,19 @@ func TestSubmissionStoresItsProfileAndLaunchesWithItsDigest(t *testing.T) {
 	}
 	q := Submit{RequestID: uuid.NewString(), Repository: repositorySproozi, Harness: harness.NativeCodex,
 		Executor: executorKubernetes, Task: fixtureTask, Profile: []byte("not an archive")}
-	if _, e = o.Submit(t.Context(), q); e == nil {
+	if _, e = submitRetained(t, o, CallerHome, q); e == nil {
 		t.Fatal("invalid profile archive accepted")
 	}
 	q.RequestID, q.Profile, q.ProfileDigest = uuid.NewString(), nil, digest
-	if _, e = o.Submit(t.Context(), q); e == nil {
+	if _, e = submitRetained(t, o, CallerHome, q); e == nil {
 		t.Fatal("caller named a profile digest without its archive")
 	}
 	q.RequestID, q.Profile, q.ProfileDigest = uuid.NewString(), archive, ""
-	v, e := o.Submit(t.Context(), q)
+	v, e := submitRetained(t, o, CallerHome, q)
 	if e != nil {
 		t.Fatal(e)
 	}
-	if again, e := o.Submit(t.Context(), q); e != nil || again.ID != v.ID {
+	if again, e := submitRetained(t, o, CallerHome, q); e != nil || again.ID != v.ID {
 		t.Fatalf("profile submission replay: %+v %v", again, e)
 	}
 	waitPhase(t, o, v.ID, phaseRetained)
@@ -755,7 +759,7 @@ func TestSubmissionRespectsRetainedBytes(t *testing.T) {
 	defer func() { _ = o.Close() }()
 	defer close(release)
 	submit(t, o)
-	if _, err = o.Submit(t.Context(), Submit{RequestID: uuid.NewString(), Repository: repositorySproozi,
+	if _, err = submitRetained(t, o, CallerHome, Submit{RequestID: uuid.NewString(), Repository: repositorySproozi,
 		Harness: harness.NativeCodex, Executor: executorKubernetes, Task: fixtureTask}); OutcomeCode(err) != profile.CodeRetentionFull {
 		t.Fatalf("second submission beyond retainedBytes: %v", err)
 	}

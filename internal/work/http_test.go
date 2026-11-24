@@ -21,7 +21,7 @@ func TestMCPDiscoveryAndSessionListingUseObjectSchemas(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = o.Close() }()
-	v, err := o.Submit(t.Context(), projectRequest("sproozi-dev"))
+	v, err := submitRetained(t, o, CallerHome, projectRequest("sproozi-dev"))
 	if err != nil {
 		t.Fatal(err)
 	}

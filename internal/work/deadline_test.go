@@ -65,12 +65,12 @@ func TestTaskWithoutDeadlineRuns(t *testing.T) {
 	t.Cleanup(func() { _ = o.Close() })
 	q := Submit{RequestID: uuid.NewString(), Repository: repositorySproozi, Harness: harness.NativeCodex,
 		Executor: executorKubernetes, Task: fixtureTask, MaxDuration: deadline.NoneArg}
-	v, e := o.Submit(t.Context(), q)
+	v, e := submitRetained(t, o, CallerHome, q)
 	if e != nil || !v.Deadline.IsZero() {
 		t.Fatalf("submit without deadline: %+v %v", v, e)
 	}
 	q.MaxDuration = "1h"
-	if _, e = o.Submit(t.Context(), q); e == nil {
+	if _, e = submitRetained(t, o, CallerHome, q); e == nil {
 		t.Fatal("a retry changed the submission's maximum duration")
 	}
 	if done := waitPhase(t, o, v.ID, phaseRetained); done.Result != testResult {

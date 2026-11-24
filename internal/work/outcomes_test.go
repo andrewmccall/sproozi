@@ -90,7 +90,7 @@ func TestWorkHTTPAndMCPShareActionableRejections(t *testing.T) {
 			if err = json.Unmarshal(w.Body.Bytes(), &failure); err != nil || w.Code != tc.status || failure.Error != tc.code {
 				t.Fatalf("got %d %s: %v", w.Code, w.Body.String(), err)
 			}
-			_, refusal := o.Submit(t.Context(), tc.input)
+			_, refusal := submitRetained(t, o, CallerHome, tc.input)
 			result, _, err := tool(View{}, refusal)
 			content, marshalErr := json.Marshal(result)
 			if err != nil || marshalErr != nil || result == nil || !result.IsError || !strings.Contains(string(content), string(tc.code)) {
@@ -156,7 +156,7 @@ func TestWorkStatusNamesAContradictedPlacementRecord(t *testing.T) {
 			want := "conflict: the retained record of visit V records a stop, but its session registration was never active; "
 			var id string
 			if mode == ModeInteractive {
-				v, err := o.Submit(t.Context(), interactiveRequest())
+				v, err := submitRetained(t, o, CallerHome, interactiveRequest())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -179,7 +179,7 @@ func TestExportProjectMetadataRejectionsRemainUnsupported(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = o.Close() }()
-	v, err := o.Submit(t.Context(), projectRequest("sproozi-dev"))
+	v, err := submitRetained(t, o, CallerHome, projectRequest("sproozi-dev"))
 	if err != nil {
 		t.Fatal(err)
 	}
