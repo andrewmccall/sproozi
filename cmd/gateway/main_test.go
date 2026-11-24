@@ -480,7 +480,7 @@ func TestAnthropicStartupAndReservedRoute(t *testing.T) {
 	if _, ok := cfg.certificates["api.openai.com"]; ok {
 		t.Fatal("inactive OpenAI authority requires inspection")
 	}
-	routes := composeDispatcher(cfg, nil, nil, http.NotFoundHandler())
+	routes := composeDispatcher(cfg, nil, nil, testModelRoutes(cfg))
 	if !routes.Allows("api.anthropic.com:443") || routes.Allows("api.openai.com:443") {
 		t.Fatal("provider activation incorrect")
 	}
@@ -500,6 +500,11 @@ func TestAnthropicStartupAndReservedRoute(t *testing.T) {
 
 const anthropicHost, openAIHost = "api.anthropic.com", "api.openai.com"
 
+// testModelRoutes are the provider routes main composes for cfg.
+func testModelRoutes(cfg *startupConfig) []modelgateway.ServedRoute {
+	return modelRoutes(cfg, audit.NewLogger(io.Discard), http.DefaultClient, nil, nil)
+}
+
 // A gateway-held Anthropic key with no Copilot sign-in must still inspect
 // github.com, Copilot's sign-in host, for pull requests: git clones and pushes
 // there.
@@ -518,7 +523,7 @@ func TestModelPruningKeepsHostsOtherCapabilitiesRoute(t *testing.T) {
 		}
 	}
 	routes := composeDispatcher(cfg, map[api.CapabilityKind]http.Handler{
-		api.CapabilityGitHubPullRequest: http.NotFoundHandler()}, nil, http.NotFoundHandler())
+		api.CapabilityGitHubPullRequest: http.NotFoundHandler()}, nil, testModelRoutes(cfg))
 	if !routes.Allows("github.com:443") || !routes.Allows("api.github.com:443") {
 		t.Fatal("pull-request authorities are not routed")
 	}
@@ -552,12 +557,10 @@ func TestWorkloadModeForwardsEachHarnessSignIn(t *testing.T) {
 			t.Fatalf("%s is not inspected in workload mode", host)
 		}
 	}
-	openAI, anthropic, signedIn := modelHandlers(cfg, audit.NewLogger(io.Discard), http.DefaultClient, nil, nil)
-	if openAI == nil || anthropic == nil {
+	routes := composeDispatcher(cfg, nil, nil, testModelRoutes(cfg))
+	if routes[openAIHost+":443"].Handler == nil || routes[anthropicHost+":443"].Handler == nil {
 		t.Fatal("both provider routes are enabled in workload mode")
 	}
-	handlers := map[api.CapabilityKind]http.Handler{api.CapabilityModelInference: openAI}
-	routes := composeDispatcher(cfg, handlers, nil, anthropic, signedIn)
 	for _, authority := range []string{"api.openai.com:443", "api.anthropic.com:443", "chatgpt.com:443"} {
 		if !routes.Allows(authority) || !routes[authority].ProviderCredential {
 			t.Fatalf("%s does not forward the harness's own credential", authority)
@@ -578,9 +581,8 @@ func TestWorkloadModeForwardsEachHarnessSignIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	openAI, anthropic, signedIn = modelHandlers(cfg, audit.NewLogger(io.Discard), http.DefaultClient, nil, nil)
-	handlers = map[api.CapabilityKind]http.Handler{api.CapabilityModelInference: openAI}
-	routes = composeDispatcher(cfg, handlers, nil, anthropic, signedIn)
+	routes = composeDispatcher(cfg, nil, nil, testModelRoutes(cfg))
+	openAI := routes[openAIHost+":443"].Handler
 	if routes["api.openai.com:443"].ProviderCredential || !routes["api.anthropic.com:443"].ProviderCredential ||
 		routes.Allows("chatgpt.com:443") || !routes.Allows("platform.claude.com:443") {
 		t.Fatal("a mixed gateway forwarded the wrong provider's credential")
@@ -935,11 +937,8 @@ func TestCopilotHostsServeAForwardedSignInOrAGatewayToken(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		openAI, anthropic, signedIn := modelHandlers(cfg, audit.NewLogger(io.Discard), http.DefaultClient, nil, nil)
-		git := http.NotFoundHandler()
-		handlers := map[api.CapabilityKind]http.Handler{api.CapabilityModelInference: openAI,
-			api.CapabilityGitHubPullRequest: git}
-		routes := composeDispatcher(cfg, handlers, nil, anthropic, signedIn)
+		handlers := map[api.CapabilityKind]http.Handler{api.CapabilityGitHubPullRequest: http.NotFoundHandler()}
+		routes := composeDispatcher(cfg, handlers, nil, testModelRoutes(cfg))
 		// Copilot's own sign-in runs GitHub's device flow on github.com as a
 		// path route; the rest of github.com stays the GitHub capability's.
 		login, _, _ := routes.Select("github.com:443", "/login/device/code")
@@ -999,9 +998,7 @@ func TestCopilotHostsServeAForwardedSignInOrAGatewayToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	openAI, anthropic, signedIn := modelHandlers(cfg, audit.NewLogger(io.Discard), http.DefaultClient, nil, nil)
-	handlers := map[api.CapabilityKind]http.Handler{api.CapabilityModelInference: openAI}
-	routes := composeDispatcher(cfg, handlers, nil, anthropic, signedIn)
+	routes := composeDispatcher(cfg, nil, nil, testModelRoutes(cfg))
 	if routes.Allows("api.individual.githubcopilot.com:443") {
 		t.Fatal("Copilot's host opened without a credential")
 	}

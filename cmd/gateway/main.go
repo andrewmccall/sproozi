@@ -554,82 +554,57 @@ func providerAuth(cfg *startupConfig, name string) (auth modelauth.Authenticator
 // modelProviders are the providers the gateway composes routes for.
 var modelProviders = []string{modelgateway.ProviderOpenAI, modelgateway.ProviderAnthropic, modelgateway.ProviderCopilot}
 
-// signedInRoute is a provider route beyond its API host, and whether it
-// forwards the harness's own credential.
-type signedInRoute struct {
-	handler  http.Handler
-	forwards bool
-	// prefixes make the route a path route of a host another capability
-	// owns, such as Copilot's account requests on api.github.com.
-	prefixes []string
+// modelCredentials are each provider's one credential, keyed by provider
+// name; a provider without one is absent. In chatgpt mode the gateway's
+// ChatGPT sign-in is OpenAI's.
+func modelCredentials(cfg *startupConfig, chatGPT modelauth.SessionStore) map[string]modelauth.Authenticator {
+	credentials := map[string]modelauth.Authenticator{}
+	for _, name := range modelProviders {
+		if auth, ok := providerAuth(cfg, name); ok {
+			credentials[name] = auth
+		}
+	}
+	if cfg.modelAuthMode == modelauth.ChatGPTMode {
+		credentials[modelgateway.ProviderOpenAI] = modelauth.NewChatGPT(chatGPT, modelauth.NewRefreshClient())
+	}
+	return credentials
 }
 
-// modelHandlers builds the OpenAI and Anthropic API routes' handlers; either
-// is nil when its route is disabled. signedIn holds the extra routes of each
-// provider that forwards the harness's own sign-in: a subscription backend
-// such as chatgpt.com, and the provider's sign-in relay.
-func modelHandlers(cfg *startupConfig, auditLogger audit.Writer, modelClient *http.Client,
+// modelRoutes are the provider table's routes for each provider with a
+// credential, or none when model inference is disabled.
+func modelRoutes(cfg *startupConfig, auditLogger audit.Writer, modelClient *http.Client,
 	drain *modelgateway.Drain, chatGPT modelauth.SessionStore,
-) (openAIHandler, anthropicHandler http.Handler, signedIn map[string]signedInRoute) {
-	signedIn = map[string]signedInRoute{}
+) []modelgateway.ServedRoute {
 	if !cfg.enabled[sprooziv1alpha1.CapabilityModelInference] {
-		return nil, nil, signedIn
+		return nil
 	}
-	config := func(upstream string, auth modelauth.Authenticator) modelgateway.HandlerConfig {
-		c := modelgateway.HandlerConfig{Pricing: cfg.pricing, AuditLogger: auditLogger, UpstreamURL: upstream,
-			ProviderAuth: auth, HTTPClient: modelClient, Drain: drain}
-		if os.Getenv("MODEL_DIAGNOSTICS") == "true" {
-			// Administrator opt-in: bounded provider errors only, separate from audit.
-			// Never log prompts, model text, reasoning, raw bodies or auth headers.
-			c.Diagnostics = func(d modelgateway.ResponseDiagnostic) { _ = json.NewEncoder(os.Stderr).Encode(d) }
-		}
-		return c
+	config := modelgateway.RouteConfig{
+		Handler: modelgateway.HandlerConfig{Pricing: cfg.pricing, AuditLogger: auditLogger, HTTPClient: modelClient,
+			Drain: drain},
+		// The administrator's API origins; every other model authority keeps
+		// the table's.
+		Upstreams: map[string]string{modelgateway.OpenAIAuthority: cfg.openAIUpstreamURL,
+			modelgateway.AnthropicAuthority: cfg.anthropicUpstreamURL},
 	}
-	if auth, ok := providerAuth(cfg, modelgateway.ProviderAnthropic); ok {
-		anthropicHandler = modelgateway.NewAnthropicHandler(config(cfg.anthropicUpstreamURL, auth))
+	if os.Getenv("MODEL_DIAGNOSTICS") == "true" {
+		// Administrator opt-in: bounded provider errors only, separate from audit.
+		// Never log prompts, model text, reasoning, raw bodies or auth headers.
+		config.Handler.Diagnostics = func(d modelgateway.ResponseDiagnostic) { _ = json.NewEncoder(os.Stderr).Encode(d) }
 	}
-	auth, ok := providerAuth(cfg, modelgateway.ProviderOpenAI)
-	if cfg.modelAuthMode == modelauth.ChatGPTMode {
-		auth, ok = modelauth.NewChatGPT(chatGPT, modelauth.NewRefreshClient()), true
-	}
-	if ok {
-		openAIHandler = &modelgateway.Handler{Config: config(cfg.openAIUpstreamURL, auth)}
-	}
+	credentials := modelCredentials(cfg, chatGPT)
+	var routes []modelgateway.ServedRoute
 	for _, name := range modelProviders {
-		auth, ok := providerAuth(cfg, name)
-		if !ok {
-			continue
-		}
-		forwards := auth.Mode() == modelauth.WorkloadMode
-		provider, _ := modelgateway.ProviderFor(name)
-		apiRoute := !provider.Models[0].SignedIn
-		for _, m := range provider.Models {
-			// A provider's API route is composed above. Its signed-in routes
-			// serve a forwarded sign-in, or a gateway-held token for a provider
-			// with no API route, such as Copilot.
-			if !m.SignedIn || !forwards && apiRoute {
-				continue
-			}
-			signedIn[m.Authority] = signedInRoute{handler: m.New(config(m.UpstreamURL, auth)), forwards: forwards}
-		}
-		if forwards && provider.SignInAuthority != "" {
-			route := signedInRoute{handler: provider.SignInRelay(modelClient, auditLogger)}
-			if provider.SignInPrefix != "" {
-				route.prefixes = []string{provider.SignInPrefix}
-			}
-			signedIn[provider.SignInAuthority] = route
-		}
-		if provider.AccountAuthority != "" {
-			signedIn[provider.AccountAuthority] = signedInRoute{handler: provider.AccountRelay(auth, modelClient, auditLogger),
-				forwards: forwards, prefixes: provider.AccountPrefixes}
+		if auth, ok := credentials[name]; ok {
+			provider, _ := modelgateway.ProviderFor(name)
+			routes = append(routes, provider.Routes(auth, config)...)
 		}
 	}
-	return openAIHandler, anthropicHandler, signedIn
+	return routes
 }
 
 func composeDispatcher(
 	cfg *startupConfig, handlers map[sprooziv1alpha1.CapabilityKind]http.Handler,
-	mcpHandler http.Handler, anthropicHandler http.Handler, signedIn ...map[string]signedInRoute,
+	mcpHandler http.Handler, models []modelgateway.ServedRoute,
 ) gateway.Dispatcher {
 	routes := gateway.Dispatcher{}
 	host := cfg.host
@@ -657,23 +632,7 @@ func composeDispatcher(
 		}
 		routes[authority] = route
 	}
-	// The two fixed provider protocols share model.inference accounting, while
-	// credentials and upstream transport remain administrator-owned.
-	anthropic := routes[modelgateway.AnthropicAuthority]
-	anthropic.Handler = anthropicHandler
-	routes[modelgateway.AnthropicAuthority] = anthropic
-	// A provider that forwards each harness's own sign-in marks its model
-	// routes so the transport keeps the credential (ADR 0047).
-	apiRoutes := map[string]string{modelgateway.OpenAIAuthority: modelgateway.ProviderOpenAI,
-		modelgateway.AnthropicAuthority: modelgateway.ProviderAnthropic}
-	for authority, name := range apiRoutes {
-		if auth, ok := providerAuth(cfg, name); ok && auth.Mode() == modelauth.WorkloadMode {
-			route := routes[authority]
-			route.ProviderCredential = true
-			routes[authority] = route
-		}
-	}
-	// The signed-in and sign-in authorities stay reserved but closed unless a
+	// The provider table's authorities stay reserved but closed unless a
 	// provider serves them.
 	for _, name := range modelProviders {
 		provider, _ := modelgateway.ProviderFor(name)
@@ -684,9 +643,7 @@ func composeDispatcher(
 			closed = append(closed, provider.SignInAuthority)
 		}
 		for _, m := range provider.Models {
-			if m.SignedIn {
-				closed = append(closed, m.Authority)
-			}
+			closed = append(closed, m.Authority)
 		}
 		for _, authority := range closed {
 			if route, reserved := routes[authority]; reserved {
@@ -695,20 +652,18 @@ func composeDispatcher(
 			}
 		}
 	}
-	for _, extra := range signedIn {
-		for authority, served := range extra {
-			route := routes[authority]
-			if len(served.prefixes) > 0 {
-				for _, prefix := range served.prefixes {
-					route.Paths = append(route.Paths, gateway.PathRoute{Prefix: prefix, Route: gateway.Route{
-						Capability: sprooziv1alpha1.CapabilityModelInference, Tier: audit.TierSemantic,
-						Handler: served.handler, ProviderCredential: served.forwards}})
-				}
-			} else {
-				route.Handler, route.ProviderCredential = served.handler, served.forwards
-			}
-			routes[authority] = route
+	// A provider route serves its reserved authority, or is a path route of
+	// a host another capability owns. A provider that forwards each
+	// harness's own sign-in marks its routes so the transport keeps the
+	// credential (ADR 0047).
+	for _, served := range models {
+		route := routes[served.Authority]
+		if served.Prefix != "" {
+			route.Paths = append(route.Paths, gateway.PathRoute{Prefix: served.Prefix, Route: served.Route})
+		} else {
+			route.Handler, route.ProviderCredential = served.Route.Handler, served.Route.ProviderCredential
 		}
+		routes[served.Authority] = route
 	}
 	if cfg.enabled[sprooziv1alpha1.CapabilityNetworkEgress] {
 		for _, dest := range cfg.profiles.Destinations() {
@@ -749,9 +704,13 @@ func composeGateway(cfg *startupConfig, deps gatewayDeps) (gateway.Dispatcher, e
 		MaxResponseBytes: 8 << 20,
 		AuditLogger:      deps.journal})
 	handlers := map[sprooziv1alpha1.CapabilityKind]http.Handler{sprooziv1alpha1.CapabilityKubernetesRead: kube}
-	openAIHandler, anthropicHandler, signedIn := modelHandlers(cfg, deps.journal, deps.model, deps.drain, deps.chatGPT)
-	if openAIHandler != nil {
-		handlers[sprooziv1alpha1.CapabilityModelInference] = openAIHandler
+	models := modelRoutes(cfg, deps.journal, deps.model, deps.drain, deps.chatGPT)
+	for _, served := range models {
+		// Known exception (ADR 0070): a model.inference semantic authority
+		// the provider table does not name gets the OpenAI API handler.
+		if served.Authority == modelgateway.OpenAIAuthority {
+			handlers[sprooziv1alpha1.CapabilityModelInference] = served.Route.Handler
+		}
 	}
 	if cfg.enabled[sprooziv1alpha1.CapabilityGitHubPullRequest] {
 		handlers[sprooziv1alpha1.CapabilityGitHubPullRequest] = &githubgateway.Handler{Config: githubgateway.HandlerConfig{
@@ -770,7 +729,7 @@ func composeGateway(cfg *startupConfig, deps gatewayDeps) (gateway.Dispatcher, e
 		HTTPClient:  deps.upstream}}
 	named := mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: cfg.mcpRegistry, HTTPClient: deps.mcp,
 		Budgets: deps.budgets, AuditLogger: deps.journal})
-	dispatcher := composeDispatcher(cfg, handlers, diagnose.NewControl(deps.journal, named), anthropicHandler, signedIn)
+	dispatcher := composeDispatcher(cfg, handlers, diagnose.NewControl(deps.journal, named), models)
 	attachAccounting(dispatcher, deps.budgets, deps.journal)
 	if err := dispatcher.Validate(); err != nil {
 		return nil, err
