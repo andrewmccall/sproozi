@@ -336,12 +336,9 @@ func loadStartupConfig() (*startupConfig, error) {
 		withoutModel := maps.Clone(enabled)
 		delete(withoutModel, sprooziv1alpha1.CapabilityModelInference)
 		owned := inspectionHosts(host, withoutModel, profiles, mcpRegistry)
-		// Only the credentials' modes are read, so the ChatGPT sign-in needs
-		// no store yet.
-		credentials := modelCredentials(&startupConfig{modelAuthMode: modelAuthMode, openAIKey: openAIKey,
-			anthropicKey: anthropicKey, openAIToken: openAIToken, anthropicToken: anthropicToken,
-			copilotToken: copilotToken}, nil)
-		pruneModelHosts(hosts, owned, credentials)
+		pruneModelHosts(hosts, owned, providerModes(&startupConfig{modelAuthMode: modelAuthMode,
+			openAIKey: openAIKey, anthropicKey: anthropicKey, openAIToken: openAIToken, anthropicToken: anthropicToken,
+			copilotToken: copilotToken}))
 	}
 	for name := range hosts {
 		if err := leaf.VerifyHostname(name); err != nil {
@@ -369,12 +366,13 @@ func loadStartupConfig() (*startupConfig, error) {
 // account host; any other needs the API host. A model.inference semantic
 // authority outside the provider table is never served, so its host is
 // dropped too. It never drops a host in owned, which other capabilities and
-// egress profiles route.
-func pruneModelHosts(hosts, owned map[string]bool, credentials map[string]modelauth.Authenticator) {
+// egress profiles route. modes are the credentials' modes by provider, as
+// providerModes chooses them.
+func pruneModelHosts(hosts, owned map[string]bool, modes map[string]string) {
 	needed := map[string]bool{}
-	for name, auth := range credentials {
+	for name, mode := range modes {
 		provider, _ := modelgateway.ProviderFor(name)
-		for _, host := range provider.Hosts(auth.Mode() == modelauth.WorkloadMode || provider.Models[0].SignedIn) {
+		for _, host := range provider.Hosts(mode == modelauth.WorkloadMode || !provider.HasAPIAuthority()) {
 			needed[host] = true
 		}
 	}
@@ -558,15 +556,29 @@ func providerAuth(cfg *startupConfig, name string) (auth modelauth.Authenticator
 // ChatGPT sign-in is OpenAI's.
 func modelCredentials(cfg *startupConfig, chatGPT modelauth.SessionStore) map[string]modelauth.Authenticator {
 	credentials := map[string]modelauth.Authenticator{}
+	for name, mode := range providerModes(cfg) {
+		if mode == modelauth.ChatGPTMode {
+			credentials[name] = modelauth.NewChatGPT(chatGPT, modelauth.NewRefreshClient())
+		} else {
+			credentials[name], _ = providerAuth(cfg, name)
+		}
+	}
+	return credentials
+}
+
+// providerModes are the mode of each provider's credential, keyed by
+// provider name, without building it; a provider without one is absent.
+func providerModes(cfg *startupConfig) map[string]string {
+	modes := map[string]string{}
 	for _, provider := range modelgateway.Providers() {
 		if auth, ok := providerAuth(cfg, provider.Name); ok {
-			credentials[provider.Name] = auth
+			modes[provider.Name] = auth.Mode()
 		}
 	}
 	if cfg.modelAuthMode == modelauth.ChatGPTMode {
-		credentials[modelgateway.ProviderOpenAI] = modelauth.NewChatGPT(chatGPT, modelauth.NewRefreshClient())
+		modes[modelgateway.ProviderOpenAI] = modelauth.ChatGPTMode
 	}
-	return credentials
+	return modes
 }
 
 // modelRoutes are the provider table's routes for each provider with a

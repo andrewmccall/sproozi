@@ -148,7 +148,7 @@ func modelRoutes(config GatewayConfig, modelConfig modelgateway.HandlerConfig, t
 	// A configured private endpoint or fixture serves every route; the
 	// public API default gives each route its own origin.
 	var upstreams map[string]string
-	if modelConfig.UpstreamURL != provider.Models[0].UpstreamURL {
+	if len(provider.Models) > 0 && modelConfig.UpstreamURL != provider.Models[0].UpstreamURL {
 		upstreams = map[string]string{}
 		for _, m := range provider.Models {
 			upstreams[m.Authority] = modelConfig.UpstreamURL

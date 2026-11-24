@@ -149,16 +149,26 @@ type RouteConfig struct {
 	SignIn http.Handler
 }
 
+// HasAPIAuthority reports whether the provider's first model authority is an
+// API a gateway-held key reaches, rather than a signed-in client's host.
+func (p Provider) HasAPIAuthority() bool {
+	return len(p.Models) > 0 && !p.Models[0].SignedIn
+}
+
 // Routes are the routes the provider serves with auth, its one credential
 // (ADR 0047). A gateway-held key, token or ChatGPT sign-in serves the
 // provider's API authority, or every model authority of a provider with no
 // API authority, such as Copilot, with its account requests. When auth
 // forwards the harness's own sign-in, every model authority and the account
 // requests forward it, and the sign-in relay serves its sign-in and refresh.
-// No other authority is served: an authority outside the table has no route.
+// No other authority is served: an authority outside the table has no route,
+// and a provider without a credential has none.
 func (p Provider) Routes(auth modelauth.Authenticator, c RouteConfig) []ServedRoute {
+	if auth == nil {
+		return nil
+	}
 	forwards := auth.Mode() == modelauth.WorkloadMode
-	apiRoute := !p.Models[0].SignedIn
+	apiRoute := p.HasAPIAuthority()
 	route := func(handler http.Handler, credential bool) gateway.Route {
 		return gateway.Route{Capability: api.CapabilityModelInference, Tier: audit.TierSemantic, Handler: handler,
 			ProviderCredential: credential}
