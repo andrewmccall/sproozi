@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -128,5 +129,75 @@ func TestUsageFailsWithoutItsRoot(t *testing.T) {
 	}))
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("usage of a root removed during the walk: %v, want not exist", err)
+	}
+}
+
+// A directory replaced by a file between the listing and the descent, and a
+// parent replaced by a file before its child is examined, are not removals:
+// the sum fails with "not a directory" rather than skipping them.
+func TestUsageFailsWhenADirectoryBecomesAFile(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name string
+		hook string // path, under the root, at which the directory is replaced
+	}{
+		{"directory replaced before its descent", "sub"},
+		{"parent replaced before its child is examined", filepath.Join("sub", "x")},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			sub := filepath.Join(dir, "sub")
+			if err := os.Mkdir(sub, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			writeSized(t, filepath.Join(sub, "x"), 4)
+			size, err := usage(dir, nil, at(filepath.Join(dir, c.hook), func() {
+				if err := os.RemoveAll(sub); err != nil {
+					t.Error(err)
+				}
+				writeSized(t, sub, 9)
+			}))
+			if err == nil || !strings.Contains(err.Error(), "not a directory") {
+				t.Fatalf("usage = %d, %v; want a not a directory error", size, err)
+			}
+		})
+	}
+}
+
+// Sizes are the entry's own, as lstat reports them: a symbolic link is
+// counted at its own length and is never followed, to a file or to a
+// directory.
+func TestUsageDoesNotFollowSymbolicLinks(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symbolic links on Windows needs a privilege the test does not assume")
+	}
+	outside := t.TempDir()
+	writeSized(t, filepath.Join(outside, "big"), 100000)
+	if err := os.Mkdir(filepath.Join(outside, "tree"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeSized(t, filepath.Join(outside, "tree", "inner"), 50000)
+	dir := t.TempDir()
+	fileLink := filepath.Join(dir, "file-link")
+	dirLink := filepath.Join(dir, "dir-link")
+	if err := os.Symlink(filepath.Join(outside, "big"), fileLink); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "tree"), dirLink); err != nil {
+		t.Fatal(err)
+	}
+	var want int64
+	for _, l := range []string{fileLink, dirLink} {
+		info, err := os.Lstat(l)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want += info.Size()
+	}
+	size, err := Usage(dir, nil)
+	if err != nil || size != want {
+		t.Fatalf("Usage = %d, %v; want %d (the links' own lengths), no error", size, err, want)
 	}
 }
