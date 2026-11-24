@@ -870,9 +870,10 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 		{name: "row 15/openai written, then 429 relayed with a failing release (Q1)", path: chatPath, body: chatBody,
 			ledger: releaseFails,
 			client: respondWritten(http.StatusTooManyRequests, `{"error":{"message":"slow down"}}`)},
-		// The provider read the whole request, but the transport had not yet
-		// reported the write when the call failed: released, not estimated.
-		{name: "row 12/openai provider read the request, write not yet reported (released)", path: chatPath, body: chatBody,
+		// The provider reads the whole request and then fails, and the
+		// transport never reports the write: released, not estimated. This
+		// is not the race where the write is reported late.
+		{name: "row 12/openai provider read the request and failed, write never reported (released)", path: chatPath, body: chatBody,
 			client: func(*caseRun) *http.Client {
 				return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 					_, _ = io.ReadAll(r.Body)
