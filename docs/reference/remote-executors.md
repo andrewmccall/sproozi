@@ -340,7 +340,8 @@ and journal first and fails the same way.
 
 These reserve nothing and do not refuse: a session removed while admission
 counts, and a record or journal that reads but is not valid (it does not
-parse, has trailing data, names another session or fails its checks). Nothing
+parse, has trailing data, names another session or, for a journal, another
+execution, or fails its checks). Nothing
 can commit a checkpoint for such a session.
 
 Outside the bound: removal marks (below), and scratch space. Validating an
