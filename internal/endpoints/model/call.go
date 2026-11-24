@@ -600,14 +600,8 @@ func (c *modelCall) relayEvent(raw []byte) bool {
 	if c.diagnostic != nil {
 		c.diagnostic.observeFrame(frame, c.credential)
 	}
-	var err error
-	if c.anthropic != nil {
-		err = c.anthropic.next(frame)
-		c.visible = c.anthropic.visible
-	} else {
-		err = c.responses.next(frame)
-		c.visible = c.responses.visible
-	}
+	err := c.events().next(frame)
+	c.visible = c.events().visibleBytes()
 	if err != nil {
 		// The provider's own error event still reaches the workload.
 		c.write(raw)
@@ -615,7 +609,7 @@ func (c *modelCall) relayEvent(raw []byte) bool {
 		c.end(ending{kind: endingInterrupted, reason: endUpstreamError})
 		return false
 	}
-	if c.anthropic != nil && c.anthropic.stopped() || c.responses != nil && c.responses.terminal != "" {
+	if c.events().ended() {
 		// The terminal event is relayed, then settles the call.
 		ok := c.write(raw)
 		c.settleCompleted()
@@ -647,25 +641,32 @@ func (c *modelCall) settleCompleted() {
 // completion is how a stream that reached its terminal event ends: with its
 // usage, or interrupted when the usage is missing or invalid.
 func (c *modelCall) completion() ending {
-	if c.anthropic != nil {
-		usage, err := c.anthropic.finish()
-		if err != nil {
-			c.observeFailure(err.Error())
-			return ending{kind: endingInterrupted, reason: endUpstreamError}
-		}
-		return ending{kind: endingUsage, reason: endCompleted,
-			usage: providerUsage{usage: anthropicResponseUsage(usage), anthropic: usage}}
-	}
-	usage, err := c.responses.finish()
-	if err != nil || invalidTokenUsage(usage, nil, c.limits) {
-		c.observeFailure("terminal event omitted required token usage")
+	usage, reason, err := c.events().completion(c.limits)
+	if err != nil {
+		c.observeFailure(err.Error())
 		return ending{kind: endingInterrupted, reason: endUpstreamError}
 	}
-	reason := endCompleted
-	if c.responses.terminal == responseFailedEvent {
-		reason = endUpstreamError
+	return ending{kind: endingUsage, reason: reason, usage: usage}
+}
+
+// events is the call's stream reader, or nil when it does not stream.
+func (c *modelCall) events() eventStream {
+	if c.anthropic != nil {
+		return c.anthropic
 	}
-	return ending{kind: endingUsage, reason: reason, usage: providerUsage{usage: usage}}
+	if c.responses != nil {
+		return c.responses
+	}
+	return nil
+}
+
+// reported is the exact usage the stream has reported so far; a response
+// that does not stream reports none before it ends.
+func (c *modelCall) reported() (anthropicUsage, bool, bool) {
+	if events := c.events(); events != nil {
+		return events.reported()
+	}
+	return anthropicUsage{}, false, false
 }
 
 func anthropicResponseUsage(usage anthropicUsage) responseUsage {
@@ -678,11 +679,7 @@ func anthropicResponseUsage(usage anthropicUsage) responseUsage {
 // cancelled and the reservation is charged.
 func (c *modelCall) cut() {
 	c.cancelUpstream()
-	event := `event: error` + "\n" + `data: {"type":"error","code":"budget_exhausted","message":"` + budgetCutMessage + `","param":null}` + "\n\n"
-	if c.anthropic != nil {
-		event = `event: error` + "\n" + `data: {"type":"error","error":{"type":"budget_error","message":"` + budgetCutMessage + `"}}` + "\n\n"
-	}
-	c.write([]byte(event))
+	c.write([]byte(c.events().cutEvent()))
 	c.observeFailure(reasonBudgetCut)
 	c.end(ending{kind: endingCut})
 }
@@ -721,9 +718,9 @@ func (c *modelCall) estimate() (units, costMicros int64, inputSource string) {
 	}
 	elapsed := max(c.now().Sub(c.startedAt), 0)
 	output := max(c.visible, ceilDiv(elapsed.Nanoseconds(), int64(time.Second), rate))
-	if c.anthropic != nil && c.anthropic.delta {
+	if reported, _, exactOutput := c.reported(); exactOutput {
 		// message_delta reported the exact output so far.
-		output = c.anthropic.usage.Output
+		output = reported.Output
 	}
 	if c.plan.outputBound > 0 {
 		output = min(output, c.plan.outputBound)
@@ -737,9 +734,8 @@ func (c *modelCall) estimate() (units, costMicros int64, inputSource string) {
 func (c *modelCall) usage(output int64) (units, costMicros int64, inputSource string) {
 	inputSource = inputFromRequest
 	input := ceilDiv(int64(len(c.body)), inputBytesPerToken, 1)
-	var exact anthropicUsage
-	if c.anthropic != nil && c.anthropic.started() {
-		exact = c.anthropic.usage
+	exact, exactInput, _ := c.reported()
+	if exactInput {
 		input, inputSource = exact.Input+exact.CacheRead+exact.CacheWrite5m+exact.CacheWrite1h, inputFromProvider
 	}
 	units = input + output
