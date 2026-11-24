@@ -108,7 +108,22 @@ type startupConfig struct {
 	admission            connectionLimits
 	maxModelCall         time.Duration
 	ledgerRetention      time.Duration
+	// agentNamespace holds the AgentRuns and their sandboxes; credentialNamespace
+	// holds the ChatGPT sign-in Secret; budgetNamespace holds the budget ledgers.
+	agentNamespace, credentialNamespace, budgetNamespace string
+	// gitBaseURL and apiBaseURL are the GitHub upstream origins.
+	gitBaseURL, apiBaseURL string
+	// modelDiagnostics turns on provider-response diagnostics on stderr.
+	modelDiagnostics bool
 }
+
+// Defaults for the settings an empty or unset variable leaves open.
+const (
+	defaultAgentNamespace   = "sproozi-agents"
+	defaultSystemNamespace  = "sproozi-system"
+	defaultGitBaseURL       = "https://github.com"
+	defaultGitHubAPIBaseURL = "https://api.github.com"
+)
 
 // connectionLimits are the administrator-tunable gateway connection limits. They
 // must fit the gateway's memory limit; see proxytransport.DefaultMaxConnections.
@@ -287,8 +302,8 @@ func loadStartupConfig() (*startupConfig, error) {
 	var pricing *modelgateway.PricingTable
 	openAIKey, anthropicKey, modelAuthMode := "", "", ""
 	openAIToken, anthropicToken, copilotToken := "", "", ""
-	openAIUpstreamURL := envOrDefault("OPENAI_UPSTREAM_URL", "https://api.openai.com")
-	anthropicUpstreamURL := envOrDefault("ANTHROPIC_UPSTREAM_URL", "https://api.anthropic.com")
+	openAIUpstreamURL := envOrDefault("OPENAI_UPSTREAM_URL", modelgateway.OpenAIUpstreamURL)
+	anthropicUpstreamURL := envOrDefault("ANTHROPIC_UPSTREAM_URL", modelgateway.AnthropicUpstreamURL)
 	if enabled[sprooziv1alpha1.CapabilityModelInference] {
 		pricingFile, err := os.Open(envOrDefault("MODEL_PRICING_PATH", "/etc/sproozi/model/pricing.json"))
 		if err != nil {
@@ -358,7 +373,13 @@ func loadStartupConfig() (*startupConfig, error) {
 		openAIUpstreamURL: openAIUpstreamURL, anthropicUpstreamURL: anthropicUpstreamURL,
 		appID: appID, installationID: installationID, privateKey: privateKey,
 		mcpRegistry: mcpRegistry, admission: admission, maxModelCall: maxModelCall,
-		ledgerRetention: ledgerRetention,
+		ledgerRetention:     ledgerRetention,
+		agentNamespace:      envOrDefault("AGENT_NAMESPACE", defaultAgentNamespace),
+		credentialNamespace: envOrDefault("CREDENTIAL_NAMESPACE", defaultSystemNamespace),
+		budgetNamespace:     envOrDefault("BUDGET_NAMESPACE", defaultSystemNamespace),
+		gitBaseURL:          envOrDefault("GIT_BASE_URL", defaultGitBaseURL),
+		apiBaseURL:          envOrDefault("API_BASE_URL", defaultGitHubAPIBaseURL),
+		modelDiagnostics:    os.Getenv("MODEL_DIAGNOSTICS") == "true",
 	}, nil
 }
 
@@ -449,7 +470,7 @@ func loadModelCredentials(openAIUpstreamURL, openAIToken, anthropicToken string)
 		return "", "", "", fmt.Errorf("MODEL_AUTH_MODE=%q must be api_key, chatgpt or workload: check key mode in %s",
 			mode, modelAuthSource)
 	}
-	if mode == modelauth.ChatGPTMode && openAIUpstreamURL != "https://api.openai.com" {
+	if mode == modelauth.ChatGPTMode && openAIUpstreamURL != modelgateway.OpenAIUpstreamURL {
 		return "", "", "", errors.New("ChatGPT plan usage requires the public OpenAI API upstream")
 	}
 	if mode == modelauth.APIKeyMode && openAIKey == "" && anthropicKey == "" &&
@@ -608,7 +629,7 @@ func modelRoutes(cfg *startupConfig, auditLogger audit.Writer, modelClient *http
 		Upstreams: map[string]string{modelgateway.OpenAIAuthority: cfg.openAIUpstreamURL,
 			modelgateway.AnthropicAuthority: cfg.anthropicUpstreamURL},
 	}
-	if os.Getenv("MODEL_DIAGNOSTICS") == "true" {
+	if cfg.modelDiagnostics {
 		// Administrator opt-in: bounded provider errors only, separate from audit.
 		// Never log prompts, model text, reasoning, raw bodies or auth headers.
 		config.Handler.Diagnostics = func(d modelgateway.ResponseDiagnostic) { _ = json.NewEncoder(os.Stderr).Encode(d) }
@@ -629,9 +650,6 @@ func composeDispatcher(
 ) gateway.Dispatcher {
 	routes := gateway.Dispatcher{}
 	host := cfg.host
-	if host == "" {
-		host = defaultHost
-	}
 	// Named MCP capabilities and the Sproozi control connection share the
 	// gateway's own authority. The module chooses the exact account only after
 	// authenticating the requested path.
@@ -712,8 +730,8 @@ func composeGateway(cfg *startupConfig, deps gatewayDeps) (gateway.Dispatcher, e
 		handlers[sprooziv1alpha1.CapabilityGitHubPullRequest] = &githubgateway.Handler{Config: githubgateway.HandlerConfig{
 			TokenProvider: deps.githubTokens,
 			AuditLogger:   deps.journal,
-			GitBaseURL:    envOrDefault("GIT_BASE_URL", "https://github.com"),
-			APIBaseURL:    envOrDefault("API_BASE_URL", "https://api.github.com"),
+			GitBaseURL:    cfg.gitBaseURL,
+			APIBaseURL:    cfg.apiBaseURL,
 			HTTPClient:    deps.upstream}}
 	}
 	handlers[sprooziv1alpha1.CapabilityPackagesInstall] = &packagesgateway.Handler{Config: packagesgateway.HandlerConfig{
@@ -784,12 +802,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	agentNamespace := envOrDefault("AGENT_NAMESPACE", "sproozi-agents")
-	authorityClient, err := startAuthorityCache(context.Background(), config, agentNamespace)
+	authorityClient, err := startAuthorityCache(context.Background(), config, cfg.agentNamespace)
 	if err != nil {
 		log.Fatal(err)
 	}
-	authenticator := gatewaykubernetes.NewAuthenticator(clientset, "sproozi-gateway", runtimeClient, agentNamespace).
+	authenticator := gatewaykubernetes.NewAuthenticator(clientset, "sproozi-gateway", runtimeClient, cfg.agentNamespace).
 		WithWatchCache(authorityClient)
 	httpClient := newUpstreamClient(upstreamCallTimeout)
 	modelClient := newModelClient()
@@ -820,7 +837,7 @@ func main() {
 		// The ChatGPT credential stays in sproozi-system, where the gateway's
 		// access to it is limited to the one named Secret.
 		store := modelauthkube.SessionStore{Client: runtimeClient,
-			Namespace: envOrDefault("CREDENTIAL_NAMESPACE", "sproozi-system")}
+			Namespace: cfg.credentialNamespace}
 		if err := checkChatGPTSession(context.Background(), store); err != nil {
 			log.Fatal(err)
 		}
@@ -828,7 +845,7 @@ func main() {
 	}
 
 	// Unknown authorities are absent and are denied before an upstream call.
-	budgetNamespace := envOrDefault("BUDGET_NAMESPACE", "sproozi-system")
+	budgetNamespace := cfg.budgetNamespace
 	budgets := budget.NewTrackerWithLedger(budgetkubernetes.NewLedger(runtimeClient, budgetNamespace))
 	// Every current reservation carries a lease, so a pending reservation
 	// without one can only come from a gateway from before leases. Settle
