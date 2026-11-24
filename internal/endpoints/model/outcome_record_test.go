@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"os"
 	"path/filepath"
 	"slices"
@@ -20,6 +21,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -194,6 +196,9 @@ type outcomeWriter struct {
 	body      bytes.Buffer
 	failWrite bool
 	failFlush bool
+	// failAfter, when positive, fails every write that starts once the body
+	// holds this many bytes, as a workload that leaves mid-response does.
+	failAfter int
 	flushed   chan struct{}
 }
 
@@ -215,7 +220,7 @@ func (w *outcomeWriter) Write(p []byte) (int, error) {
 	if w.status == 0 {
 		w.status = http.StatusOK
 	}
-	if w.failWrite {
+	if w.failWrite || w.failAfter > 0 && w.body.Len() >= w.failAfter {
 		return 0, errors.New("workload connection closed")
 	}
 	return w.body.Write(p)
@@ -257,24 +262,34 @@ func (w *outcomeWriter) waitFor(t *testing.T, want string) {
 
 // caseRun is one recorded model request and what its case drives around it.
 type caseRun struct {
-	t        *testing.T
-	tracker  *budget.Tracker
-	clock    *manualClock
-	drain    *model.Drain
-	cancel   context.CancelFunc
-	writer   *outcomeWriter
-	config   model.HandlerConfig
-	identity *gateway.ExecutionGrant
-	cleanups []func()
+	t       *testing.T
+	tracker *budget.Tracker
+	clock   *manualClock
+	drain   *model.Drain
+	// blockerDrain stops the blocker apart from the case's own call, so a
+	// case decides which of the two stops first.
+	blockerDrain *model.Drain
+	cancel       context.CancelFunc
+	writer       *outcomeWriter
+	config       model.HandlerConfig
+	identity     *gateway.ExecutionGrant
+	cleanups     []func()
 }
 
 // blocker starts another call on the same account, through its own handler
 // and audit writer, that holds all remaining capacity until the case ends.
+// Under a drain the blocker has its own, which shutdownBlocker stops: were
+// both calls in one drain, the blocker could release its reservation before
+// the case's call saw the stop, and the case would be admitted instead.
 func (run *caseRun) blocker(anthropic bool) {
 	started := make(chan struct{})
 	var once sync.Once
 	config := run.config
 	config.AuditLogger = audit.NewLogger(io.Discard)
+	if run.drain != nil {
+		run.blockerDrain = model.NewDrain()
+		config.Drain = run.blockerDrain
+	}
 	config.HTTPClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		once.Do(func() { close(started) })
 		<-r.Context().Done()
@@ -350,6 +365,10 @@ type modelCase struct {
 	useDrain   bool
 	failWrite  bool
 	failFlush  bool
+	failAfter  int
+	// bubble runs the case in a synctest bubble: its timers run on the
+	// bubble's clock and drive can wait until every goroutine is blocked.
+	bubble bool
 	// client answers the provider call; nil answers 200 with okBody.
 	client  func(run *caseRun) *http.Client
 	config  func(run *caseRun, c *model.HandlerConfig)
@@ -367,6 +386,26 @@ func respond(status int, contentType, body string) func(*caseRun) *http.Client {
 			}
 			return response, nil
 		})}
+	}
+}
+
+// respondWritten reports the whole request written, as the transport does
+// before a provider answers, then answers status.
+func respondWritten(status int, body string) func(*caseRun) *http.Client {
+	return func(*caseRun) *http.Client {
+		return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			reportWritten(r)
+			response := modelResponse(r, body)
+			response.StatusCode, response.Status = status, http.StatusText(status)
+			response.Header.Set("Content-Type", "application/json")
+			return response, nil
+		})}
+	}
+}
+
+func reportWritten(r *http.Request) {
+	if trace := httptrace.ContextClientTrace(r.Context()); trace != nil && trace.WroteRequest != nil {
+		trace.WroteRequest(httptrace.WroteRequestInfo{})
 	}
 }
 
@@ -406,11 +445,15 @@ func (b failingBody) Read(p []byte) (int, error) {
 func (failingBody) Close() error { return nil }
 
 func respondFailing(status int, text string) func(*caseRun) *http.Client {
+	return respondFailingAs(status, "application/json", text)
+}
+
+func respondFailingAs(status int, contentType, text string) func(*caseRun) *http.Client {
 	return func(*caseRun) *http.Client {
 		return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 			response := modelResponse(r, "")
 			response.StatusCode = status
-			response.Header.Set("Content-Type", "application/json")
+			response.Header.Set("Content-Type", contentType)
 			response.Body = failingBody{strings.NewReader(text)}
 			return response, nil
 		})}
@@ -418,11 +461,28 @@ func respondFailing(status int, text string) func(*caseRun) *http.Client {
 }
 
 // blockingServer reads the whole request, signals, then answers nothing
-// until the call ends, so the request is written.
+// until the call ends, so the request is written. It signals only once the
+// handler has also seen the write: the transport reports it after the bytes
+// are sent, so the server can read them first, and a case that moved the
+// clock or ended the call then would see the write timed later or missed.
+// The handler's first reading of the clock is that report.
 func blockingServer(received chan<- struct{}, timeout time.Duration) func(*caseRun) *http.Client {
 	return func(run *caseRun) *http.Client {
+		wrote := make(chan struct{})
+		var once sync.Once
+		now := run.config.Now
+		run.config.Now = func() time.Time {
+			at := now()
+			once.Do(func() { close(wrote) })
+			return at
+		}
 		server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 			_, _ = io.ReadAll(r.Body)
+			select {
+			case <-wrote:
+			case <-r.Context().Done():
+				return
+			}
 			if received != nil {
 				received <- struct{}{}
 			}
@@ -436,11 +496,16 @@ func blockingServer(received chan<- struct{}, timeout time.Duration) func(*caseR
 	}
 }
 
-func shutdown(run *caseRun) {
+func shutdown(run *caseRun) { stopDrain(run.t, run.drain) }
+
+// shutdownBlocker stops the blocker and waits until it has settled.
+func shutdownBlocker(run *caseRun) { stopDrain(run.t, run.blockerDrain) }
+
+func stopDrain(t *testing.T, drain *model.Drain) {
 	ctx, stop := context.WithTimeout(context.Background(), 10*time.Second)
 	defer stop()
-	if err := run.drain.Shutdown(ctx); err != nil {
-		run.t.Fatal(err)
+	if err := drain.Shutdown(ctx); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -471,6 +536,15 @@ const (
 
 func runModelCase(t *testing.T, tc modelCase) string {
 	t.Helper()
+	if tc.bubble {
+		var line string
+		synctest.Test(t, func(t *testing.T) {
+			bubbled := tc
+			bubbled.bubble = false
+			line = runModelCase(t, bubbled)
+		})
+		return line
+	}
 	run := &caseRun{t: t, clock: newManualClock()}
 	defer func() {
 		for _, v := range slices.Backward(run.cleanups) {
@@ -531,7 +605,7 @@ func runModelCase(t *testing.T, tc modelCase) string {
 		req.Header.Set(k, v)
 	}
 	run.writer = newOutcomeWriter()
-	run.writer.failWrite, run.writer.failFlush = tc.failWrite, tc.failFlush
+	run.writer.failWrite, run.writer.failFlush, run.writer.failAfter = tc.failWrite, tc.failFlush, tc.failAfter
 	done := make(chan struct{})
 	identity := run.identity
 	if tc.noIdentity {
@@ -570,6 +644,18 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 	largeEvent := `data: {"type":"response.output_text.delta","delta":"` + strings.Repeat("w", 8<<20) + `"}` + "\n\n"
 	largeJSON := `{"id":"chatcmpl-1","pad":"` + strings.Repeat("p", 8<<20) + `","usage":{"total_tokens":7,"prompt_tokens":5,"completion_tokens":2}}`
 	unsizable := unsizableAnthropicRequest
+	responsesTerminal := responsesEvents[len(responsesEvents)-1]
+	anthropicStop := anthropicEvents[len(anthropicEvents)-1]
+	// A comment longer than one read, so what follows a terminal event
+	// arrives both with it and in later reads.
+	padding := ": " + strings.Repeat("k", 64<<10) + "\n\n"
+	refreshFailed := func(_ *caseRun, c *model.HandlerConfig) {
+		c.ProviderAuth = failingChatGPT{fmt.Errorf("wrapped: %w", &modelauth.RefreshError{Refused: true})}
+	}
+	releaseFails := func() budget.Ledger { return releaseFailingLedger{budget.NewMemoryLedger()} }
+	settleFails := func() budget.Ledger {
+		return settleFailingLedger{Ledger: budget.NewMemoryLedger(), err: errors.New("ledger down")}
+	}
 	priced := func(_ *caseRun, c *model.HandlerConfig) {
 		c.Pricing = &model.PricingTable{Models: map[string]model.ModelPrice{"test": {
 			InputMicrosPerMillionTokens: 1, CachedInputMicrosPerMillionTokens: 1, OutputMicrosPerMillionTokens: 1}}}
@@ -640,8 +726,10 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 		{name: "row 1/anthropic deadline while waiting for the budget", anthropic: true, body: messagesBody, grant: oneSecondCall,
 			prepare: func(run *caseRun) { run.blocker(true) }},
 		{name: "row 2/anthropic gateway stopping while waiting for the budget", anthropic: true, body: messagesBody, useDrain: true,
+			bubble:  true,
 			prepare: func(run *caseRun) { run.blocker(true) },
-			drive:   func(run *caseRun) { time.Sleep(200 * time.Millisecond); shutdown(run) }},
+			// Stop the call once it waits for the blocker, then the blocker.
+			drive: func(run *caseRun) { synctest.Wait(); shutdown(run); shutdownBlocker(run) }},
 		{name: "row 3/openai too many pending calls", path: testResponsesPath, body: `{"model":"test","max_output_tokens":10,"input":[]}`,
 			limits: budgetOf(1_000_000, 0),
 			prepare: func(run *caseRun) {
@@ -681,6 +769,8 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 		{name: "row 6/openai provider auth failed with a failing release (Q1)", path: chatPath, body: chatBody,
 			ledger: func() budget.Ledger { return releaseFailingLedger{budget.NewMemoryLedger()} },
 			config: func(_ *caseRun, c *model.HandlerConfig) { c.ProviderAuth = modelauth.APIKey{} }},
+		{name: "row 6/openai chatgpt sign-in refresh failed (message names it)", path: testResponsesPath, body: chatGPTRequest,
+			config: refreshFailed},
 		{name: "row 7/anthropic written, workload left (estimate)", anthropic: true, body: nonStreamingRequest,
 			client: blockingServer(received, 0),
 			drive:  func(run *caseRun) { <-received; run.clock.Advance(4 * time.Second); run.cancel() }},
@@ -693,6 +783,9 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 		{name: "row 9/anthropic written, call deadline", anthropic: true, body: nonStreamingRequest, grant: oneSecondCall,
 			client: blockingServer(received, 0),
 			drive:  func(*caseRun) { <-received }},
+		{name: "row 9/anthropic written, call deadline, settlement refused (unsettled)", anthropic: true, body: nonStreamingRequest,
+			grant: oneSecondCall, ledger: settleFails, client: blockingServer(received, 0),
+			drive: func(*caseRun) { <-received }},
 		{name: "row 9/anthropic written, provider header timeout", anthropic: true, body: nonStreamingRequest,
 			client: blockingServer(received, 50*time.Millisecond),
 			drive:  func(*caseRun) { <-received }},
@@ -705,6 +798,26 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 				})}
 			},
 			drive: func(run *caseRun) { <-received; run.cancel() }},
+		{name: "row 10/openai not written, workload left, with a failing release (unsettled)", path: testResponsesPath, body: chatBody,
+			ledger: releaseFails,
+			client: func(run *caseRun) *http.Client {
+				return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					received <- struct{}{}
+					<-r.Context().Done()
+					return nil, r.Context().Err()
+				})}
+			},
+			drive: func(run *caseRun) { <-received; run.cancel() }},
+		{name: "row 11/anthropic not written, gateway stopping, with a failing release (unsettled)", anthropic: true, body: messagesBody,
+			useDrain: true, ledger: releaseFails,
+			client: func(run *caseRun) *http.Client {
+				return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					received <- struct{}{}
+					<-r.Context().Done()
+					return nil, context.Cause(r.Context())
+				})}
+			},
+			drive: func(run *caseRun) { <-received; shutdown(run) }},
 		{name: "row 11/anthropic not written, gateway stopping", anthropic: true, body: messagesBody, useDrain: true,
 			client: func(run *caseRun) *http.Client {
 				return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -734,6 +847,8 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 		// Provider non-2xx (rows 13-15).
 		{name: "row 13/openai non-2xx body read failed", path: chatPath, body: chatBody,
 			client: respondFailing(http.StatusInternalServerError, `{"error":`)},
+		{name: "row 13/openai non-2xx body read failed with a failing release (Q1)", path: chatPath, body: chatBody,
+			ledger: releaseFails, client: respondFailing(http.StatusInternalServerError, `{"error":`)},
 		{name: "row 14/anthropic non-2xx replaced", anthropic: true, body: messagesBody,
 			client: respond(http.StatusTooManyRequests, "application/json", `{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`)},
 		{name: "row 14/anthropic non-2xx with a failing release (Q1)", anthropic: true, body: messagesBody,
@@ -742,6 +857,30 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 		{name: "row 15/openai non-2xx relayed", path: chatPath, body: chatBody,
 			client: respond(http.StatusTooManyRequests, "application/json", `{"error":{"message":"slow down"}}`)},
 
+		{name: "row 15/openai non-2xx relayed with a failing release (Q1)", path: chatPath, body: chatBody, ledger: releaseFails,
+			client: respond(http.StatusTooManyRequests, "application/json", `{"error":{"message":"slow down"}}`)},
+		{name: "row 14/anthropic written, then 429 replaced", anthropic: true, body: messagesBody,
+			client: respondWritten(http.StatusTooManyRequests, `{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`)},
+		{name: "row 14/anthropic written, then 500 replaced", anthropic: true, body: messagesBody,
+			client: respondWritten(http.StatusInternalServerError, `{"type":"error","error":{"type":"api_error","message":"boom"}}`)},
+		{name: "row 15/openai written, then 429 relayed", path: chatPath, body: chatBody,
+			client: respondWritten(http.StatusTooManyRequests, `{"error":{"message":"slow down"}}`)},
+		{name: "row 15/openai written, then 500 relayed", path: chatPath, body: chatBody,
+			client: respondWritten(http.StatusInternalServerError, `{"error":{"message":"boom"}}`)},
+		{name: "row 15/openai written, then 429 relayed with a failing release (Q1)", path: chatPath, body: chatBody,
+			ledger: releaseFails,
+			client: respondWritten(http.StatusTooManyRequests, `{"error":{"message":"slow down"}}`)},
+		// The provider reads the whole request and then fails, and the
+		// transport never reports the write: released, not estimated. This
+		// is not the race where the write is reported late.
+		{name: "row 12/openai provider read the request and failed, write never reported (released)", path: chatPath, body: chatBody,
+			client: func(*caseRun) *http.Client {
+				return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					_, _ = io.ReadAll(r.Body)
+					return nil, errors.New("connection reset by peer")
+				})}
+			}},
+
 		// Relay (rows 16-30).
 		{name: "row 16/openai stream with the wrong content type", path: testResponsesPath, body: responsesStreamRequest,
 			client: respond(http.StatusOK, "application/json", responsesStream)},
@@ -749,6 +888,10 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 			client: respond(http.StatusOK, "text/plain", anthropicStream)},
 		{name: "row 17/anthropic first flush failed", anthropic: true, body: messagesBody, failFlush: true},
 		{name: "row 18/anthropic JSON relay write failed after the whole body", anthropic: true, body: messagesBody, failWrite: true},
+		{name: "row 18/openai JSON relay write failed before the whole body (estimate)", path: chatPath, body: chatBody,
+			failAfter: 1, client: respond(http.StatusOK, "application/json", largeJSON[:40<<10])},
+		{name: "row 18/openai JSON relay write failed past the parse bound (reservation)", path: chatPath, body: chatBody,
+			failAfter: 8 << 20, client: respond(http.StatusOK, "application/json", largeJSON)},
 		{name: "row 19/openai stream relay write failed", path: testResponsesPath, body: responsesStreamRequest,
 			failWrite: true, client: respond(http.StatusOK, eventStream, responsesStream)},
 		{name: "row 20/openai event over the parse bound, write failed", path: testResponsesPath,
@@ -757,14 +900,34 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 		{name: "row 20/openai event over the parse bound, relayed", path: testResponsesPath,
 			body:   responsesStreamRequest,
 			client: respond(http.StatusOK, eventStream, responsesEvents[0]+largeEvent+responsesEvents[len(responsesEvents)-1])},
+		{name: "row 20/openai event over the parse bound, a later write failed", path: testResponsesPath,
+			body: responsesStreamRequest, failAfter: 8<<20 + 32<<10,
+			client: respond(http.StatusOK, eventStream, responsesEvents[0]+largeEvent+responsesTerminal+padding)},
 		{name: "row 21/anthropic provider error event", anthropic: true, body: anthropicStreamRequest,
 			client: respond(http.StatusOK, eventStream, anthropicEvents[0]+anthropicEvents[7]+anthropicFailure)},
+		{name: "row 21/openai responses error event", path: testResponsesPath, body: responsesStreamRequest,
+			client: respond(http.StatusOK, eventStream, responsesEvents[0]+
+				"event: error\ndata: {\"type\":\"error\",\"code\":\"server_error\",\"message\":\"boom\"}\n\n")},
 		{name: "row 22/anthropic message_stop settles provider usage", anthropic: true, body: anthropicStreamRequest,
 			client: respond(http.StatusOK, eventStream, anthropicStream)},
 		{name: "row 22/anthropic message_stop without message_delta", anthropic: true, body: anthropicStreamRequest,
 			client: respond(http.StatusOK, eventStream, strings.Join(anthropicEvents[:12], "")+anthropicEvents[len(anthropicEvents)-1])},
+		{name: "row 22/anthropic message_stop write failed (provider usage)", anthropic: true, body: anthropicStreamRequest,
+			failAfter: len(anthropicStream) - len(anthropicStop), client: respond(http.StatusOK, eventStream, anthropicStream)},
 		{name: "row 23/openai responses completed", path: testResponsesPath, body: responsesStreamRequest,
 			client: respond(http.StatusOK, eventStream, responsesStream)},
+		{name: "row 23/openai responses completed without a content type", path: testResponsesPath, body: responsesStreamRequest,
+			client: respond(http.StatusOK, "", responsesStream)},
+		{name: "row 23/openai responses completed, the rest relayed unparsed", path: testResponsesPath, body: responsesStreamRequest,
+			client: respond(http.StatusOK, eventStream, responsesStream+padding)},
+		{name: "row 23/openai terminal write failed (provider usage)", path: testResponsesPath, body: responsesStreamRequest,
+			failAfter: len(responsesStream) - len(responsesTerminal), client: respond(http.StatusOK, eventStream, responsesStream)},
+		{name: "row 23/openai write after the terminal event failed, same read", path: testResponsesPath,
+			body: responsesStreamRequest, failAfter: len(responsesStream),
+			client: respond(http.StatusOK, eventStream, responsesStream+padding)},
+		{name: "row 23/openai write after the terminal event failed, later read", path: testResponsesPath,
+			body: responsesStreamRequest, failAfter: 32 << 10,
+			client: respond(http.StatusOK, eventStream, responsesStream+padding)},
 		{name: "row 23/openai responses failed", path: testResponsesPath, body: responsesStreamRequest,
 			client: respond(http.StatusOK, eventStream, strings.Join(responsesEvents[:len(responsesEvents)-1], "")+responsesFailed)},
 		{name: "row 23/openai responses terminal without usage", path: testResponsesPath, body: responsesStreamRequest,
@@ -779,9 +942,20 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 			client: respond(http.StatusOK, eventStream, anthropicEvents[0]+anthropicEvents[6]+strings.Repeat(
 				"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\""+
 					strings.Repeat("z", 400)+"\"}}\n\n", 3))},
+		{name: "row 24/openai quiet stream cut at its reservation by the clock", path: testResponsesPath, body: responsesStreamRequest,
+			limits: budgetOf(100, 0), bubble: true, client: pipeClient(eventStream, &pipe),
+			prepare: func(run *caseRun) {
+				if err := run.tracker.Meter(recordAccount, api.EndpointBudget{MaxUnits: 100}).Spend(t.Context(), 95, 0); err != nil {
+					t.Fatal(err)
+				}
+			}},
 		{name: "row 25/openai idle timeout", path: testResponsesPath, body: responsesStreamRequest,
 			client: pipeClient(eventStream, &pipe),
 			config: func(_ *caseRun, c *model.HandlerConfig) { c.IdleTimeout = 50 * time.Millisecond }},
+		{name: "row 25/openai idle after the terminal event (provider usage)", path: testResponsesPath, body: responsesStreamRequest,
+			bubble: true, client: pipeClient(eventStream, &pipe),
+			config: func(_ *caseRun, c *model.HandlerConfig) { c.IdleTimeout = 50 * time.Millisecond },
+			drive:  func(run *caseRun) { send(run, responsesStream) }},
 		{name: "row 26/anthropic stream, workload left", anthropic: true, body: anthropicStreamRequest,
 			client: pipeClient(eventStream, &pipe),
 			drive: func(run *caseRun) {
@@ -795,6 +969,20 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 			drive: func(run *caseRun) {
 				send(run, anthropicSuccess)
 				run.writer.waitFor(t, `"end_turn"`)
+				run.cancel()
+			}},
+		{name: "row 26/openai partial JSON, workload left (estimate)", path: chatPath, body: chatBody,
+			client: pipeClient("application/json", &pipe),
+			drive: func(run *caseRun) {
+				send(run, `{"id":"chatcmpl-1",`)
+				run.writer.waitFor(t, `"chatcmpl-1"`)
+				run.cancel()
+			}},
+		{name: "row 26/openai terminal, then workload left (provider usage)", path: testResponsesPath, body: responsesStreamRequest,
+			client: pipeClient(eventStream, &pipe),
+			drive: func(run *caseRun) {
+				send(run, responsesStream)
+				run.writer.waitFor(t, "response.completed")
 				run.cancel()
 			}},
 		{name: "row 26/anthropic stream, gateway stopping", anthropic: true, body: anthropicStreamRequest, useDrain: true,
@@ -812,6 +1000,10 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 			}},
 		{name: "row 27/openai body read error after headers", path: chatPath, body: chatBody,
 			client: respondFailing(http.StatusOK, `{"id":"chatcmpl-1",`)},
+		{name: "row 27/openai terminal, then body read error (provider usage)", path: testResponsesPath,
+			body: responsesStreamRequest, client: respondFailingAs(http.StatusOK, eventStream, responsesStream)},
+		{name: "row 28/openai stream ended inside an event", path: testResponsesPath, body: responsesStreamRequest,
+			client: respond(http.StatusOK, eventStream, responsesEvents[0]+"event: response.output_text.delta\ndata: {")},
 		{name: "row 28/openai stream ended without its terminal event", path: testResponsesPath,
 			body:   responsesStreamRequest,
 			client: respond(http.StatusOK, eventStream, strings.Join(responsesEvents[:len(responsesEvents)-1], ""))},

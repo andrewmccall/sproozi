@@ -275,22 +275,31 @@ type modelCall struct {
 	stream      bool
 
 	cancelUpstream context.CancelFunc
-	diagnostic     *ResponseDiagnostic
-	credential     string
+	// stopRelay, while copy relays the body, ends the relay before end
+	// records the call.
+	stopRelay func()
+	// checkOwner is set only in test builds (newOwnerCheck).
+	checkOwner func()
+	// headersSent is set once the provider's response headers are written
+	// to the workload.
+	headersSent bool
+	diagnostic  *ResponseDiagnostic
+	credential  string
 
 	// startedAt times the estimate: when the request was fully written, as
 	// the provider works from then, or when the response headers arrived if
 	// the transport does not report the write. A call that does not stream
 	// sends its headers only once generation has finished.
-	startedAt   time.Time
-	written     atomic.Pointer[time.Time]
-	visible     int64
-	relayed     int
-	anthropic   *anthropicStream
-	responses   *responsesStream
-	settled     bool
+	startedAt time.Time
+	written   atomic.Pointer[time.Time]
+	visible   int64
+	relayed   int
+	anthropic *anthropicStream
+	responses *responsesStream
+	// phase is read and written only by the goroutine that owns the call
+	// (end.go), so it has no lock.
+	phase       callPhase
 	passthrough bool
-	tokensUsed  int64
 }
 
 func (c *modelCall) now() time.Time {
@@ -304,6 +313,7 @@ func (c *modelCall) now() time.Time {
 // arrives. A streamed response is relayed one whole event at a time, so the
 // gateway can end it with an error event; a JSON response is relayed as read.
 func (c *modelCall) relay(resp *http.Response) {
+	c.mark(eventAnswered)
 	c.startedAt = c.now()
 	if at := c.written.Load(); at != nil {
 		c.startedAt = *at
@@ -325,8 +335,7 @@ func (c *modelCall) relay(resp *http.Response) {
 		}
 		if typeErr != nil {
 			c.observeFailure(typeErr.Error())
-			c.settleInterrupted(endUpstreamError)
-			c.h.deny(c.r.Context(), c.w, c.e, http.StatusBadGateway, "unsupported provider response", "server_error", "upstream_error")
+			c.end(ending{kind: endingUnsupported})
 			return
 		}
 	}
@@ -335,13 +344,12 @@ func (c *modelCall) relay(resp *http.Response) {
 		c.w.Header().Set("Content-Type", eventStreamMediaType)
 	}
 	c.w.WriteHeader(resp.StatusCode)
+	c.headersSent = true
 	if !c.flush() {
-		c.settleInterrupted(endClientCancelled)
-		c.finish()
+		c.end(ending{kind: endingInterrupted, reason: endClientCancelled})
 		return
 	}
 	c.copy(resp.Body)
-	c.finish()
 }
 
 func (c *modelCall) flush() bool {
@@ -363,11 +371,10 @@ type readResult struct {
 }
 
 // copy relays the body until it ends, the call ends or the workload leaves.
+// Every return follows end.
 func (c *modelCall) copy(body io.Reader) {
 	reads := make(chan readResult)
 	stopped := make(chan struct{})
-	defer close(stopped)
-	defer c.cancelUpstream()
 	go func() {
 		for {
 			buffer := make([]byte, readChunkBytes)
@@ -389,9 +396,23 @@ func (c *modelCall) copy(body io.Reader) {
 		idleTimeout = DefaultIdleTimeout
 	}
 	idle := time.NewTimer(idleTimeout)
-	defer idle.Stop()
 	tick := time.NewTicker(time.Second)
-	defer tick.Stop()
+	// stopRelay stops the timers, cancels the provider request and stops the
+	// reader, in that order. end runs it after the charge and before the
+	// record, so every exit records once the provider request is cancelled;
+	// the deferred call does nothing then.
+	var relayStopped bool
+	c.stopRelay = func() {
+		if relayStopped {
+			return
+		}
+		relayStopped = true
+		tick.Stop()
+		idle.Stop()
+		c.cancelUpstream()
+		close(stopped)
+	}
+	defer func() { c.stopRelay(); c.stopRelay = nil }()
 	var scanner eventScanner
 	var buffered []byte
 	for {
@@ -420,7 +441,7 @@ func (c *modelCall) copy(body io.Reader) {
 			}
 		case <-idle.C:
 			c.observeFailure("provider response was idle too long")
-			c.settleInterrupted(endUpstreamError)
+			c.end(ending{kind: endingInterrupted, reason: endUpstreamError})
 			return
 		case <-c.ctx.Done():
 			c.interrupted(buffered)
@@ -429,13 +450,17 @@ func (c *modelCall) copy(body io.Reader) {
 	}
 }
 
-// interrupted settles a call that ended before its response did. A JSON
-// body that had already arrived whole still settles from its usage.
+// interrupted ends a call that ended before its response did. A JSON body
+// that had already arrived whole still settles from its usage.
 func (c *modelCall) interrupted(buffered []byte) {
-	if !c.stream && !c.passthrough && c.settleJSON(buffered, c.cancelReason()) {
-		return
+	if !c.stream && !c.passthrough {
+		reason := c.cancelReason()
+		if usage, ok := c.jsonUsage(buffered); ok {
+			c.end(ending{kind: endingUsage, reason: reason, usage: usage})
+			return
+		}
 	}
-	c.settleInterrupted(c.cancelReason())
+	c.end(ending{kind: endingInterrupted, reason: c.cancelReason()})
 }
 
 // cancelReason distinguishes the call's own deadline from a workload that
@@ -450,7 +475,7 @@ func (c *modelCall) cancelReason() string {
 	return endClientCancelled
 }
 
-// ended settles a response body that ended or failed to read.
+// ended ends a call whose response body ended or failed to read.
 func (c *modelCall) ended(err error, scanner *eventScanner, buffered []byte) {
 	if c.ctx.Err() != nil {
 		c.interrupted(buffered)
@@ -458,32 +483,36 @@ func (c *modelCall) ended(err error, scanner *eventScanner, buffered []byte) {
 	}
 	if !errors.Is(err, io.EOF) {
 		c.observeFailure("provider response failed after its headers")
-		c.settleInterrupted(endUpstreamError)
+		c.end(ending{kind: endingInterrupted, reason: endUpstreamError})
 		return
 	}
 	if c.stream {
 		if rest := scanner.rest(); len(rest) > 0 {
 			c.write(rest)
 		}
-		if !c.settled {
-			c.observeFailure("provider stream ended before its terminal event")
-			c.settleInterrupted(endUpstreamError)
+		if c.phase == callSettled {
+			c.end(ending{kind: endingRelayed})
+			return
 		}
+		c.observeFailure("provider stream ended before its terminal event")
+		c.end(ending{kind: endingInterrupted, reason: endUpstreamError})
 		return
 	}
 	if c.passthrough {
-		c.settleInterrupted(endParseLimit)
+		c.end(ending{kind: endingInterrupted, reason: endParseLimit})
 		return
 	}
-	if !c.settleJSON(buffered, endCompleted) {
-		c.observeFailure("completed response omitted required token usage")
-		c.settleInterrupted(endUpstreamError)
+	if usage, ok := c.jsonUsage(buffered); ok {
+		c.end(ending{kind: endingUsage, reason: endCompleted, usage: usage})
+		return
 	}
+	c.observeFailure("completed response omitted required token usage")
+	c.end(ending{kind: endingInterrupted, reason: endUpstreamError})
 }
 
-// settleJSON settles a whole JSON body from its usage, reporting false when
-// the body is incomplete or has no valid usage.
-func (c *modelCall) settleJSON(buffered []byte, reason string) bool {
+// jsonUsage reads a whole JSON body's usage, reporting false when the body
+// is incomplete or has no valid usage.
+func (c *modelCall) jsonUsage(buffered []byte) (providerUsage, bool) {
 	if c.diagnostic != nil {
 		format := describeResponse(&http.Response{StatusCode: c.e.UpstreamStatus, Header: http.Header{}}, buffered, c.credential)
 		c.diagnostic.BodyFormat, c.diagnostic.Events, c.diagnostic.TerminalEvent = format.BodyFormat, format.Events, format.TerminalEvent
@@ -492,17 +521,15 @@ func (c *modelCall) settleJSON(buffered []byte, reason string) bool {
 	if c.h.protocol == anthropicProtocol {
 		usage, err := decodeAnthropicUsage(buffered, false, "")
 		if err != nil {
-			return false
+			return providerUsage{}, false
 		}
-		c.settleProvider(anthropicResponseUsage(usage), usage, reason)
-		return true
+		return providerUsage{usage: anthropicResponseUsage(usage), anthropic: usage}, true
 	}
 	usage, err := decodeUsage(buffered, c.r.URL.Path, false, "")
 	if err != nil || invalidTokenUsage(usage, nil, c.limits) {
-		return false
+		return providerUsage{}, false
 	}
-	c.settleProvider(usage, anthropicUsage{}, reason)
-	return true
+	return providerUsage{usage: usage}, true
 }
 
 // relayJSON relays a JSON chunk as read and keeps the body for its usage.
@@ -525,11 +552,9 @@ func (c *modelCall) relayJSON(buffered *[]byte, chunk []byte) bool {
 // relayEvents relays each whole event in chunk. An event larger than the
 // parser's bound turns the rest of the response into an unparsed relay.
 func (c *modelCall) relayEvents(scanner *eventScanner, chunk []byte) bool {
-	if c.passthrough || c.settled {
+	if c.passthrough || c.phase == callSettled {
 		if !c.write(chunk) {
-			if !c.settled {
-				c.settleInterrupted(endClientCancelled)
-			}
+			c.end(ending{kind: endingInterrupted, reason: endClientCancelled})
 			return false
 		}
 		return true
@@ -542,9 +567,10 @@ func (c *modelCall) relayEvents(scanner *eventScanner, chunk []byte) bool {
 		if !c.relayEvent(frame) {
 			return false
 		}
-		if c.settled {
+		if c.phase == callSettled {
 			// Relay whatever follows the terminal event unparsed.
 			if rest := scanner.rest(); len(rest) > 0 && !c.write(rest) {
+				c.end(ending{kind: endingInterrupted, reason: endClientCancelled})
 				return false
 			}
 			return true
@@ -562,7 +588,7 @@ func (c *modelCall) overflow(rest []byte) bool {
 	c.passthrough = true
 	c.observeFailure(reasonParseLimit)
 	if !c.write(rest) {
-		c.settleInterrupted(endClientCancelled)
+		c.end(ending{kind: endingInterrupted, reason: endClientCancelled})
 		return false
 	}
 	return true
@@ -586,20 +612,16 @@ func (c *modelCall) relayEvent(raw []byte) bool {
 		// The provider's own error event still reaches the workload.
 		c.write(raw)
 		c.observeFailure(err.Error())
-		c.settleInterrupted(endUpstreamError)
+		c.end(ending{kind: endingInterrupted, reason: endUpstreamError})
 		return false
 	}
-	if c.anthropic != nil && c.anthropic.stopped() {
-		if !c.write(raw) {
-			c.settleCompleted()
-			return false
-		}
-		c.settleCompleted()
-		return true
-	}
-	if c.responses != nil && c.responses.terminal != "" {
+	if c.anthropic != nil && c.anthropic.stopped() || c.responses != nil && c.responses.terminal != "" {
+		// The terminal event is relayed, then settles the call.
 		ok := c.write(raw)
 		c.settleCompleted()
+		if !ok {
+			c.end(ending{kind: endingInterrupted, reason: endClientCancelled})
+		}
 		return ok
 	}
 	if c.overReservation() {
@@ -607,35 +629,43 @@ func (c *modelCall) relayEvent(raw []byte) bool {
 		return false
 	}
 	if !c.write(raw) {
-		c.settleInterrupted(endClientCancelled)
+		c.end(ending{kind: endingInterrupted, reason: endClientCancelled})
 		return false
 	}
 	return true
 }
 
-// settleCompleted settles a stream that reached its terminal event.
+// settleCompleted settles a stream that reached its terminal event. The
+// rest of the response is relayed unparsed and charges nothing more.
 func (c *modelCall) settleCompleted() {
+	if err := c.settle(c.completion()); err != nil {
+		c.h.logger().Error("Refused model call settlement", "runID", c.e.RunID, "runUID", c.e.RunUID,
+			"error", err.Error())
+	}
+}
+
+// completion is how a stream that reached its terminal event ends: with its
+// usage, or interrupted when the usage is missing or invalid.
+func (c *modelCall) completion() ending {
 	if c.anthropic != nil {
 		usage, err := c.anthropic.finish()
 		if err != nil {
 			c.observeFailure(err.Error())
-			c.settleInterrupted(endUpstreamError)
-			return
+			return ending{kind: endingInterrupted, reason: endUpstreamError}
 		}
-		c.settleProvider(anthropicResponseUsage(usage), usage, endCompleted)
-		return
+		return ending{kind: endingUsage, reason: endCompleted,
+			usage: providerUsage{usage: anthropicResponseUsage(usage), anthropic: usage}}
 	}
 	usage, err := c.responses.finish()
 	if err != nil || invalidTokenUsage(usage, nil, c.limits) {
 		c.observeFailure("terminal event omitted required token usage")
-		c.settleInterrupted(endUpstreamError)
-		return
+		return ending{kind: endingInterrupted, reason: endUpstreamError}
 	}
 	reason := endCompleted
 	if c.responses.terminal == responseFailedEvent {
 		reason = endUpstreamError
 	}
-	c.settleProvider(usage, anthropicUsage{}, reason)
+	return ending{kind: endingUsage, reason: reason, usage: providerUsage{usage: usage}}
 }
 
 func anthropicResponseUsage(usage anthropicUsage) responseUsage {
@@ -654,7 +684,7 @@ func (c *modelCall) cut() {
 	}
 	c.write([]byte(event))
 	c.observeFailure(reasonBudgetCut)
-	c.chargeReservation(endBudgetCut, reasonBudgetCut)
+	c.end(ending{kind: endingCut})
 }
 
 func (c *modelCall) observeFailure(reason string) {
@@ -670,7 +700,7 @@ func (c *modelCall) observeFailure(reason string) {
 // input and the output bound the provider enforces, and usage above it
 // settles as exceeded.
 func (c *modelCall) overReservation() bool {
-	if c.reservation == nil || c.plan.bounded || c.settled || c.passthrough || !c.plan.sizable {
+	if c.reservation == nil || c.plan.bounded || c.phase != callRelaying || c.passthrough || !c.plan.sizable {
 		return false
 	}
 	heldUnits, heldCost := c.reservation.Held()
@@ -754,19 +784,15 @@ func ceilDiv(value, divisor, multiplier int64) int64 {
 
 // settleProvider settles the provider's reported usage. Usage above the
 // reservation was already relayed: it is charged up to the reservation and
-// the allowance, and audited as exceeded.
+// the allowance, and audited as exceeded. Usage that cannot be priced under
+// a cost cap is charged the whole reservation instead.
 func (c *modelCall) settleProvider(usage responseUsage, anthropic anthropicUsage, reason string) {
-	if c.settled {
-		return
-	}
-	c.settled = true
 	tokens := *usage.Usage.TotalTokens
 	c.e.InputTokens, c.e.OutputTokens = splitTokens(usage.Usage)
 	var cost int64
 	if c.limits.MaxCostMicros > 0 {
 		var err error
 		if cost, err = c.h.providerCost(c.body, usage, anthropic); err != nil {
-			c.settled = false
 			c.chargeReservation(reason, reasonUnpriced)
 			return
 		}
@@ -780,16 +806,13 @@ func (c *modelCall) settleProvider(usage responseUsage, anthropic anthropicUsage
 			return
 		}
 	}
-	c.e.UsageSource, c.e.TokensUsed, c.tokensUsed = usageProvider, tokens, tokens
+	c.e.UsageSource, c.e.TokensUsed = usageProvider, tokens
 }
 
 // settleInterrupted charges an interrupted call the estimate E, capped at its
 // reservation, or the whole reservation when the request's input cannot be
 // sized or an event outgrew the parser.
 func (c *modelCall) settleInterrupted(reason string) {
-	if c.settled {
-		return
-	}
 	if c.passthrough {
 		c.chargeReservation(endParseLimit, reasonParseLimit)
 		return
@@ -798,7 +821,6 @@ func (c *modelCall) settleInterrupted(reason string) {
 		c.chargeReservation(reason, reasonUnsizable)
 		return
 	}
-	c.settled = true
 	units, cost, inputSource := c.estimate()
 	heldUnits, heldCost := c.reservation.Held()
 	if heldUnits > 0 {
@@ -817,20 +839,16 @@ func (c *modelCall) settleInterrupted(reason string) {
 	c.h.logger().Info("Charged estimated model usage", "runID", c.e.RunID, "runUID", c.e.RunUID,
 		"endReason", reason, "units", units, "costMicros", cost, "inputSource", inputSource,
 		"visibleBytes", c.visible, "elapsed", max(c.now().Sub(c.startedAt), 0).String())
-	c.e.UsageSource, c.e.EndReason, c.e.TokensUsed, c.tokensUsed = usageEstimated, reason, units, units
+	c.e.UsageSource, c.e.EndReason, c.e.TokensUsed = usageEstimated, reason, units
 }
 
 func (c *modelCall) chargeReservation(reason, why string) {
-	if c.settled {
-		return
-	}
-	c.settled = true
 	c.e.UsageSource, c.e.EndReason = usageReservation, reason
 	c.h.forfeit(&c.e, c.reservation, why)
-	c.tokensUsed = c.e.TokensUsed
 }
 
-// finish audits the relayed call once it has settled.
+// finish audits a call that was served, or that the workload left, once it
+// has settled. Its tokens used are the ones its settlement recorded.
 func (c *modelCall) finish() {
 	if c.diagnostic != nil {
 		c.diagnostic.BodyBytes = c.relayed
@@ -838,7 +856,7 @@ func (c *modelCall) finish() {
 			c.diagnostic.BodyFormat = sseFormat
 		}
 	}
-	c.h.auditModelSuccess(c.r.Context(), c.e, c.e.UpstreamStatus, c.tokensUsed, budget.FromContext(c.r.Context()), c.limits)
+	c.h.auditModelSuccess(c.r.Context(), c.e, c.e.UpstreamStatus, c.e.TokensUsed, budget.FromContext(c.r.Context()), c.limits)
 }
 
 // eventScanner splits an event stream into whole events, keeping only the

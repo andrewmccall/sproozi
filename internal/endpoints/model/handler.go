@@ -301,6 +301,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	plan := h.planReservation(bodyBytes, limits)
 	call := &modelCall{h: h, ctx: callCtx, w: w, r: r, e: e, limits: limits,
 		plan: plan, body: bodyBytes, stream: check.Stream}
+	call.claim()
 	reservation, endAdmission, err := budget.FromContext(ctx).ReserveRequest(callCtx, plan.units, plan.costMicros,
 		plan.bounded, call.recovery())
 	if err != nil {
@@ -355,39 +356,36 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 	limits sprooziv1alpha1.EndpointBudget, bodyBytes []byte, providerAuth modelauth.Authenticator, call *modelCall,
 ) {
 	ctx := r.Context()
-	var reservation *budget.Reservation
 	if call != nil {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(call.ctx)
 		defer cancel()
-		call.cancelUpstream, reservation = cancel, call.reservation
+		call.cancelUpstream = cancel
 	}
-	release := func() {
-		event := &e
+	// unsent ends a request that never reached the provider.
+	unsent := func(reply errorReply) {
 		if call != nil {
-			event = &call.e
+			call.end(ending{kind: endingUnsent, reply: reply})
+			return
 		}
-		h.release(event, reservation)
+		h.denyReply(r.Context(), w, e, reply)
 	}
 	upstreamReq, err := http.NewRequestWithContext(
 		ctx, r.Method, h.Config.UpstreamURL+h.upstreamTarget(r), bytes.NewReader(bodyBytes),
 	)
 	if err != nil {
-		release()
-		h.deny(r.Context(), w, e, http.StatusInternalServerError,
-			"failed to build upstream request", "server_error", "upstream_error")
+		unsent(internalFailureReply)
 		return
 	}
 	h.copyProviderHeaders(upstreamReq.Header, r.Header, providerAuth.Mode() == modelauth.WorkloadMode)
 	if err = providerAuth.Authorize(upstreamReq); err != nil {
-		release()
 		message := "provider authentication is unavailable"
 		// A failed refresh of the gateway's ChatGPT sign-in names its cause
 		// and what to do; its text carries no provider body or token.
 		if refreshErr := (*modelauth.RefreshError)(nil); errors.As(err, &refreshErr) {
 			message += ": " + refreshErr.Error()
 		}
-		h.deny(r.Context(), w, e, http.StatusServiceUnavailable, message, "server_error", "provider_auth_unavailable")
+		unsent(errorReply{http.StatusServiceUnavailable, message, serverError, "provider_auth_unavailable"})
 		return
 	}
 	// Let the trusted Go transport negotiate and decode compression. Forwarding
@@ -412,44 +410,11 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 	}
 	resp, err := providerClient.Do(upstreamReq)
 	if err != nil {
-		if call != nil && call.written.Load() != nil {
-			call.startedAt = *call.written.Load()
-			call.observeFailure("provider call ended before its response headers")
-			reason := endUpstreamError
-			if call.ctx.Err() != nil {
-				reason = call.cancelReason()
-			}
-			call.settleInterrupted(reason)
-			if reason == endClientCancelled {
-				// The harness left; nothing failed and no one reads a reply.
-				call.e.Outcome = audit.Cancelled
-				call.finish()
-				return
-			}
-			if reason == endGatewayRestart {
-				h.deny(r.Context(), w, call.e, http.StatusServiceUnavailable, gatewayStoppingMessage, "server_error", gatewayStoppingCode)
-				return
-			}
-			h.deny(r.Context(), w, call.e, http.StatusBadGateway,
-				"upstream request failed", "server_error", "upstream_error")
+		if call != nil {
+			call.noResponse()
 			return
 		}
-		// The provider never received the whole request, so it did no work:
-		// release the reservation so a retry can use it.
-		release()
-		if call != nil && call.cancelReason() == endClientCancelled && call.ctx.Err() != nil {
-			// The harness left while the request was written; nothing failed.
-			call.e.EndReason, call.e.Outcome = endClientCancelled, audit.Cancelled
-			call.finish()
-			return
-		}
-		if call != nil && call.cancelReason() == endGatewayRestart && call.ctx.Err() != nil {
-			call.e.EndReason = endGatewayRestart
-			h.deny(r.Context(), w, call.e, http.StatusServiceUnavailable, gatewayStoppingMessage, "server_error", gatewayStoppingCode)
-			return
-		}
-		h.deny(r.Context(), w, e, http.StatusBadGateway,
-			"upstream request failed", "server_error", "upstream_error")
+		h.denyReply(r.Context(), w, e, upstreamFailedReply)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -472,14 +437,29 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 		call.relay(resp)
 		return
 	}
-	// Provider errors and model discovery are small and carry no model
-	// output; relay them whole. Provider errors do not represent successful
-	// model consumption, so release the admission for a retry.
-	release()
+	if call != nil {
+		// A provider error is not model consumption: end releases the
+		// admission for a retry.
+		if call.written.Load() != nil {
+			call.mark(eventWrote)
+		}
+		call.end(ending{kind: endingRejected, response: resp})
+		return
+	}
+	h.relayWhole(w, r, e, resp, diagnostic, credential, limits)
+}
+
+// relayWhole answers with a provider error or model discovery, which are
+// small and carry no model output, so they are read and relayed whole. An
+// Anthropic provider's error is replaced, not relayed.
+func (h *Handler) relayWhole(w http.ResponseWriter, r *http.Request, e audit.Event, resp *http.Response,
+	diagnostic *ResponseDiagnostic, credential string, limits sprooziv1alpha1.EndpointBudget,
+) {
 	body, err := readBounded(resp.Body, maxModelBodyBytes)
 	if diagnostic != nil {
+		runUID := diagnostic.RunUID
 		*diagnostic = describeResponse(resp, body, credential)
-		diagnostic.RunUID = identity.Execution.UID
+		diagnostic.RunUID = runUID
 	}
 	if err != nil {
 		if diagnostic != nil {
@@ -490,7 +470,6 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 		return
 	}
 	if h.protocol == anthropicProtocol {
-		// The provider's error is replaced, not relayed.
 		e.Outcome = audit.UpstreamFailed
 		h.deny(r.Context(), w, e, resp.StatusCode, "provider rejected request", "api_error", "provider_rejected")
 		return
@@ -655,6 +634,11 @@ func (h *Handler) deny(ctx context.Context, w http.ResponseWriter, e audit.Event
 	}
 	gateway.Record(ctx, h.Config.AuditLogger, e)
 	h.writeError(w, status, message, errType, code)
+}
+
+// denyReply refuses with an error reply the gateway writes itself.
+func (h *Handler) denyReply(ctx context.Context, w http.ResponseWriter, e audit.Event, reply errorReply) {
+	h.deny(ctx, w, e, reply.status, reply.message, reply.errType, reply.code)
 }
 
 // chatGPTRefusalOutcome is the outcome of a refused ChatGPT request: a dollar
