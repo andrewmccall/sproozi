@@ -176,14 +176,30 @@ func sandboxPod(t *testing.T, kube client.Client, runUID string) (*corev1.Pod, b
 }
 
 // assertRefusesPreparation checks a later Prepare of the aborted launch is
-// refused before it creates anything.
+// refused before it creates anything: as a start that can never succeed,
+// so a coordinator whose end of it was unproven replays the abort (ADR
+// 0067), and as a conflict for another launch of the same allocation.
 func assertRefusesPreparation(t *testing.T, p *Placement, kube *admissionClient, l session.Launch, data []byte) {
 	t.Helper()
 	runs := kube.runCreates
 	_, err := p.Prepare(t.Context(), l, data)
+	if !errors.Is(err, session.ErrStartRefused) || kube.runCreates != runs {
+		t.Fatalf("aborted preparation prepared again: %v, runs %d then %d", err, runs, kube.runCreates)
+	}
+	other := l
+	other.OperationID = uuid.NewString()
+	_, err = p.Prepare(t.Context(), other, data)
 	var rejection *profile.Rejection
 	if !errors.As(err, &rejection) || rejection.Code != profile.CodeConflict || kube.runCreates != runs {
-		t.Fatalf("aborted preparation prepared again: %v, runs %d then %d", err, runs, kube.runCreates)
+		t.Fatalf("another launch of the aborted allocation: %v, runs %d then %d", err, runs, kube.runCreates)
+	}
+	// Every caller's abort succeeded, yet Inspect still says preparing: only
+	// AbortPreparation proves the end (ADR 0067).
+	if o, err := p.Inspect(t.Context(), l); err != nil || o.State != session.PlacementPreparing {
+		t.Fatalf("Inspect of the settled aborted preparation: %+v %v", o, err)
+	}
+	if _, err = p.Inspect(t.Context(), other); !errors.As(err, &rejection) || rejection.Code != profile.CodeConflict {
+		t.Fatalf("Inspect of another launch of the aborted allocation: %v", err)
 	}
 }
 

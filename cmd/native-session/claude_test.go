@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -139,6 +140,84 @@ func TestClaudeHookBoundedPinnedPayload(t *testing.T) {
 		t.Fatalf("large MCP output: %v", err)
 	}
 }
+
+// A hook reports as soon as its payload is complete. Claude Code ends a
+// hook's input after writing it, but the hook must not depend on that: one
+// that waits for the end of its input instead reports only when the input
+// closes, as late as Claude Code's hook timeout, or never once that timeout
+// kills it.
+func TestClaudeHookReportsACompletePayloadWithoutEndOfInput(t *testing.T) {
+	raw := `{"session_id":"` + selected + `","hook_event_name":"Stop","stop_hook_active":false}` + "\n"
+	// Whole, and in two writes.
+	for _, parts := range [][]string{{raw}, {raw[:20], raw[20:]}} {
+		input, writer := io.Pipe()
+		go func() {
+			for _, part := range parts {
+				_, _ = io.WriteString(writer, part)
+			}
+		}()
+		read := make(chan error, 1)
+		go func() {
+			h, err := readClaudeHook(input)
+			if err == nil && h.Event != claudeStop {
+				err = errors.New("wrong event " + h.Event)
+			}
+			read <- err
+		}()
+		select {
+		case err := <-read:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("hook waited for the end of its input after a complete payload")
+		}
+		_ = writer.Close()
+	}
+}
+
+// sizedHook is a Stop payload of exactly size bytes.
+func sizedHook(size int) string {
+	head, tail := `{"hook_event_name":"Stop","pad":"`, `"}`
+	return head + strings.Repeat("x", size-len(head)-len(tail)) + tail
+}
+
+// The bound counts the object and any whitespace read with it, as the
+// reader that read to the end of input did; an incomplete payload and an
+// oversized one are told apart.
+func TestClaudeHookBoundIsExact(t *testing.T) {
+	if _, err := readClaudeHook(strings.NewReader(sizedHook(claudeHookMaxBytes))); err != nil {
+		t.Fatalf("payload of exactly the limit: %v", err)
+	}
+	for name, payload := range map[string]string{
+		"object one byte over":   sizedHook(claudeHookMaxBytes + 1),
+		"newline past the limit": sizedHook(claudeHookMaxBytes) + "\n",
+	} {
+		_, err := readClaudeHook(strings.NewReader(payload))
+		if err == nil || !strings.Contains(err.Error(), "exceeds limit") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if _, err := readClaudeHook(strings.NewReader(`{"hook_event_name":"Stop"`)); err == nil ||
+		!strings.Contains(err.Error(), "incomplete") {
+		t.Errorf("incomplete payload: %v", err)
+	}
+	// One byte over, with input that never ends: refused at once.
+	input, writer := io.Pipe()
+	defer func() { _ = writer.Close() }()
+	go func() { _, _ = io.WriteString(writer, sizedHook(claudeHookMaxBytes+1)) }()
+	read := make(chan error, 1)
+	go func() { _, err := readClaudeHook(input); read <- err }()
+	select {
+	case err := <-read:
+		if err == nil || !strings.Contains(err.Error(), "exceeds limit") {
+			t.Fatalf("oversized open payload: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("oversized payload waited for the end of its input")
+	}
+}
+
 func TestExplicitHarnessContractAndClaudeOptionBoundary(t *testing.T) {
 	c := config{Harness: harness.NativeClaude, Deadline: time.Now().Add(time.Minute), Instructions: instructions,
 		InstructionDigest: digest(), ClientConfig: testClients, Env: []string{testPathEnvironment},

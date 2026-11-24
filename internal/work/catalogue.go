@@ -131,12 +131,27 @@ func (o *Owner) ids() ([]string, error) {
 
 // readRecord reads id's record file. A session with a removal mark reads as
 // missing, finished or not, so no action and no driver takes it up again;
-// only Remove and Open's finishing of removals look past the mark.
+// only Remove and Open's finishing of removals look past the mark. A mark
+// that cannot be checked is that error: the record is not taken up.
 func (o *Owner) readRecord(id string) ([]byte, error) {
-	if o.wasRemoved(id) {
+	if marked, err := o.removed(id); err != nil {
+		return nil, err
+	} else if marked {
 		return nil, &fs.PathError{Op: "read", Path: o.path(id, ".json"), Err: fs.ErrNotExist}
 	}
 	return privatefs.ReadFile(o.path(id, ".json"), maxRecordBytes)
+}
+
+// recordBytes is readRecord for a command that read the session before:
+// a removed session's record, gone or being removed, is invalid, as entry
+// answers, so a removal since that read answers as one that came first. Any
+// other missing record is os.ErrNotExist.
+func (o *Owner) recordBytes(id string) ([]byte, error) {
+	b, err := o.readRecord(id)
+	if os.IsNotExist(err) && o.wasRemoved(id) {
+		return nil, &profile.Rejection{Code: profile.CodeInvalid}
+	}
+	return b, err
 }
 
 // entry reads id's record in either format.
@@ -151,6 +166,7 @@ func (o *Owner) entry(id string) (entry, error) {
 	if err != nil {
 		return entry{}, err
 	}
+	defer o.interleaveAt(stepEntry, id)
 	var probe struct {
 		Version int `json:"version"`
 	}
@@ -165,13 +181,15 @@ func (o *Owner) entry(id string) (entry, error) {
 	return entry{current: &r}, err
 }
 
-// read reads id's version 2 record. A missing record is os.ErrNotExist; a
-// version 1 record is refused, since nothing executes it any more.
+// read reads id's version 2 record through recordBytes, so a removed
+// session's record is invalid and any other missing record is
+// os.ErrNotExist. A version 1 record is refused, since nothing executes it
+// any more.
 func (o *Owner) read(id string) (record, error) {
 	if !CanonicalID(id) {
 		return record{}, &profile.Rejection{Code: profile.CodeInvalid}
 	}
-	b, err := o.readRecord(id)
+	b, err := o.recordBytes(id)
 	if err != nil {
 		return record{}, err
 	}
@@ -245,10 +263,22 @@ func (o *Owner) save(r record) error {
 }
 
 // execution reads the coordinator's record of the session's current
-// execution, or nil when the coordinator has not received it.
+// execution, or nil when the coordinator has not received it. When the
+// execution is missing because the session was removed after r was read, it
+// answers invalid, as entry does for a removed session, rather than nil,
+// which would describe the session as preparing. Remove marks the session
+// before it deletes any journal, and the mark stays. A mark that cannot be
+// checked is that error: a missing journal then proves neither a removal
+// nor an execution not received yet.
 func (o *Owner) execution(r record) (*session.Record, error) {
 	rec, err := o.config.Coordinator.Inspect(r.Current)
 	if os.IsNotExist(err) {
+		switch marked, markErr := o.removed(r.ID); {
+		case markErr != nil:
+			return nil, markErr
+		case marked:
+			return nil, &profile.Rejection{Code: profile.CodeInvalid}
+		}
 		return nil, nil
 	}
 	if err != nil {
@@ -259,9 +289,12 @@ func (o *Owner) execution(r record) (*session.Record, error) {
 
 // replay answers a repeated submission from its retained session. replayed is
 // false only when no session exists yet. A removed session's request is a
-// conflict, so it never starts again.
+// conflict, so it never starts again; a mark that cannot be checked refuses
+// with that error.
 func (o *Owner) replay(id, digest string) (View, bool, error) {
-	if o.wasRemoved(id) {
+	if marked, err := o.removed(id); err != nil {
+		return View{}, true, err
+	} else if marked {
 		return View{}, true, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	if _, err := os.Lstat(o.path(id, ".json")); os.IsNotExist(err) {
@@ -274,11 +307,18 @@ func (o *Owner) replay(id, digest string) (View, bool, error) {
 	if err == nil && (e.legacy != nil || e.current.IntentDigest != digest) {
 		err = &profile.Rejection{Code: profile.CodeConflict}
 	}
+	var v View
+	if err == nil {
+		v, err = o.entryView(e)
+	}
+	if err != nil && o.wasRemoved(id) {
+		// Removed since the check above: answered as if removed first.
+		err = &profile.Rejection{Code: profile.CodeConflict}
+	}
 	if err != nil {
 		return View{}, true, err
 	}
-	v, err := o.entryView(e)
-	return v, true, err
+	return v, true, nil
 }
 
 func (o *Owner) entryView(e entry) (View, error) {
@@ -329,14 +369,18 @@ func (o *Owner) List(ctx context.Context, q SessionQuery) ([]View, error) {
 			return nil, ctx.Err()
 		}
 		e, err := o.entry(id)
-		if err != nil {
-			return nil, err
+		var v View
+		if err == nil {
+			a := e.association()
+			if o.access(a) != nil || q.Project != "" && a.Project != q.Project {
+				continue
+			}
+			v, err = o.entryView(e)
 		}
-		a := e.association()
-		if o.access(a) != nil || q.Project != "" && a.Project != q.Project {
+		if err != nil && o.wasRemoved(id) {
+			// Removed since it was listed: absent, as if removed first.
 			continue
 		}
-		v, err := o.entryView(e)
 		if err != nil {
 			return nil, err
 		}
@@ -371,6 +415,13 @@ func (o *Owner) view(r record, rec *session.Record) View {
 	}
 	if v.Problem == "" {
 		v.Problem = executionProblem(*rec, r.Intent.Mode == ModeInteractive)
+	}
+	if v.Problem == "" && rec.Phase == session.PhaseIdle && startEnded(*rec) {
+		// The driver did not record why the start ended (ADR 0067).
+		v.Problem = problemRefusedUnknown
+		if o.config.Coordinator.PastDeadline(*rec) {
+			v.Problem = problemExpired
+		}
 	}
 	return v
 }

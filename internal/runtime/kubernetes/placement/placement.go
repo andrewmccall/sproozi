@@ -94,6 +94,12 @@ type Placement struct {
 	lock           *os.File
 	// abortWait bounds one AbortPreparation (abortPreparationWait).
 	abortWait time.Duration
+	// fenceWait bounds a cancellation's wait for its Pod's agent container
+	// to be seen to stop (fenceCancelledWait).
+	fenceWait time.Duration
+	// helperEndWait bounds a stop's wait, after its finish failed, for the
+	// Pod to show the checkpoint helper ended (helperEndWait).
+	helperEndWait time.Duration
 }
 
 // Open holds one filesystem owner lock for the configured profile. Kubernetes
@@ -137,7 +143,8 @@ func Open(config Config) (*Placement, error) {
 		_ = lock.Close()
 		return nil, err
 	}
-	return &Placement{config: config, registry: store, ledger: budgetkube.NewLedger(config.Kube, config.BudgetNamespace), exec: executor, lock: lock, abortWait: abortPreparationWait}, nil
+	return &Placement{config: config, registry: store, ledger: budgetkube.NewLedger(config.Kube, config.BudgetNamespace), exec: executor, lock: lock, abortWait: abortPreparationWait,
+		fenceWait: fenceCancelledWait, helperEndWait: helperEndWait}, nil
 }
 func validateConfig(config Config) error {
 	if config.Harness.Validate() != nil || config.Kube == nil || config.RESTConfig == nil || len(validation.IsDNS1123Label(config.Namespace)) != 0 || len(validation.IsDNS1123Label(config.BudgetNamespace)) != 0 || config.AgentNamespace != runtimekube.AgentsNamespace || len(validation.IsDNS1123Subdomain(config.TemplateName)) != 0 || config.Principal == "" || config.Name == "" || !digestValid(config.InstructionDigest) || config.MaxDuration < 0 || config.MaxCheckpointBytes <= 0 || config.MaxCheckpointBytes > 256<<20 || !filepath.IsAbs(config.Directory) || len(config.Allowances) == 0 || len(config.Allowances) > 32 {
@@ -324,7 +331,11 @@ func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) 
 	}
 	defer unlock()
 	if local, err := p.load(l); err == nil && local.PreparationAborted {
-		return session.Incarnation{}, &profile.Rejection{Code: profile.CodeConflict}
+		// An aborted preparation never starts. Its own launch is refused,
+		// so a coordinator whose end of it was unproven replays the abort
+		// (ADR 0067). load answers conflict for any other launch of the
+		// allocation.
+		return session.Incarnation{}, p.abortedRefusal(ctx, local)
 	}
 	if l.ThreadID == "" && l.CheckpointDigest == "" {
 		return p.prepareWorkspace(ctx, l, data)
@@ -431,6 +442,13 @@ func (p *Placement) prepare(ctx context.Context, local retained, r registry.Reco
 	if r.Phase != registry.Creating && r.Phase != registry.Bound {
 		return session.Incarnation{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
+	if r.RunUID != "" {
+		// A registration that bound a run never gets another: a run that
+		// ended, was deleted or was replaced refuses the start (ADR 0067).
+		if refused := p.startRefused(ctx, r); refused != nil {
+			return session.Incarnation{}, refused
+		}
+	}
 	run, err := p.ensureRun(ctx, r)
 	if err != nil {
 		return session.Incarnation{}, err
@@ -487,18 +505,22 @@ func (p *Placement) ensureRun(ctx context.Context, r registry.Record) (*api.Agen
 		task = fixedTask
 	}
 	wanted := &api.AgentRun{ObjectMeta: metav1.ObjectMeta{Namespace: p.config.Namespace, Name: r.IntendedRunName}, Spec: api.AgentRunSpec{TemplateRef: api.AgentTemplateReference{Name: p.config.TemplateName}, Task: task, Capabilities: caps}}
-	err := p.config.Kube.Create(ctx, wanted)
-	if err == nil {
-		return wanted, nil
-	}
-	if apierrors.IsInvalid(err) {
-		return nil, invalidRun(wanted.Name, err)
-	}
-	if !apierrors.IsAlreadyExists(err) {
-		return nil, err
+	// Only a registration with no run yet creates one: a bound run that is
+	// gone is never created again (ADR 0067).
+	if r.RunUID == "" {
+		err := p.config.Kube.Create(ctx, wanted)
+		if err == nil {
+			return wanted, nil
+		}
+		if apierrors.IsInvalid(err) {
+			return nil, invalidRun(wanted.Name, err)
+		}
+		if !apierrors.IsAlreadyExists(err) {
+			return nil, err
+		}
 	}
 	var existing api.AgentRun
-	if err = p.config.Kube.Get(ctx, client.ObjectKeyFromObject(wanted), &existing); err != nil {
+	if err := p.config.Kube.Get(ctx, client.ObjectKeyFromObject(wanted), &existing); err != nil {
 		return nil, err
 	}
 	if existing.Spec.TemplateRef != wanted.Spec.TemplateRef || existing.Spec.Task != task || !slices.Equal(existing.Spec.Capabilities, caps) || len(existing.Spec.EventContext) != 0 || existing.Spec.Cancel || r.RunUID != "" && string(existing.UID) != r.RunUID {

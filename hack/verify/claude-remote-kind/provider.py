@@ -6,8 +6,9 @@ so no host address has to be reachable from Kind. It uses only the standard
 library, as the native image's Python runs it. Each conversation turn is chosen
 by the marker in its newest prompt; the reply is scripted, and requests that
 lack the history a turn requires are refused, so a resumed conversation that
-lost its history fails. Every request is recorded, without bodies, in
-/tmp/fixture/requests.json for the driver to read with kubectl exec.
+lost its history fails. Every request is recorded, without bodies but with
+the time it arrived, in /tmp/fixture/requests.json for the driver to read
+with kubectl exec.
 
 The fixture accepts the public placeholder key the gateway holds, or the public
 placeholder OAuth access token of a fixture sign-in (ADR 0047). Neither is a
@@ -19,6 +20,7 @@ from pathlib import Path
 import ssl
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
@@ -49,6 +51,12 @@ SCENARIOS = {
              "answer": "CLAUDE_REMOTE_TASK_RESULT cobalt-wren-517", "history": []},
     "tools": {"prompt": "Call the sproozi diagnose tool, then load the remote-check profile skill, then report.",
               "answer": "CLAUDE_REMOTE_TOOLS_COMPLETE", "history": []},
+    "refresh-before": {"prompt": "Answer while the sandbox still holds its first gateway token.",
+                       "answer": "CLAUDE_REMOTE_REFRESH_BEFORE_COMPLETE", "history": []},
+    "refresh-after": {"prompt": "Answer now that the sandbox's first gateway token has expired.",
+                      "answer": "CLAUDE_REMOTE_REFRESH_AFTER_COMPLETE",
+                      "history": ["Answer while the sandbox still holds its first gateway token.",
+                                  "CLAUDE_REMOTE_REFRESH_BEFORE_COMPLETE"]},
 }
 # Claude Code connects MCP servers after its first request, so the tools turn
 # waits with Bash until the diagnose tool is offered, at most this often.
@@ -222,6 +230,8 @@ class Recorder:
         with self.lock:
             if len(self.records) >= 512:
                 raise Refused("request bound")
+            # When the request reached the fixture, by the cluster's clock.
+            record.setdefault("at", round(time.time(), 3))
             self.records.append(record)
             self.persist()
             return len(self.records) - 1

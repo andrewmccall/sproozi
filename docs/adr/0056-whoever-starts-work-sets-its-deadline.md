@@ -64,6 +64,20 @@ when the launch has a projected gateway binding.
   sessions after a fixed lifetime, so clients reconnect regularly and pick up a
   refreshed token on the next tunnel.
 
+Corrected 2026-11-17: until the controller mounted the token volume's
+directory, it mounted the gateway token through `subPath`, and Kubernetes
+never refreshes a projected file mounted that way. The forwarder read the same
+token for every tunnel, so it did not have the effect described: a Kubernetes
+sandbox still lost the gateway two hours after its Pod started. The
+verification listed under Consequences ran the forwarder against a local file,
+not a sandbox Pod, so it could not show this. The controller now mounts
+`/var/run/sproozi/tokens/gateway`, and `make verify-claude-remote-kind` with
+`SPROOZI_TOKEN_REFRESH=1` takes a turn after a sandbox's first token has
+expired. The harness runs in the same container, so it can now always read a
+currently valid token, where before the only token it could read stopped
+working two hours after its Pod started; read the comparison with "a much
+longer projected token" under Alternatives with that in mind.
+
 Docker sessions keep the literal proxy:
 
 - Their gateway grant does not expire.

@@ -592,6 +592,16 @@ any turn completed. `stop` ends it without waiting for a turn and keeps no
 checkpoint; the session keeps the workspace it started from. See
 [ADR 0032](docs/adr/0032-stopping-a-visit-with-no-native-conversation.md).
 
+### Refused start
+
+A move or first visit whose placement can never prepare it, because what it
+would start from has ended: a Kubernetes AgentRun that failed, timed out, was
+cancelled or deleted, or lost its session registration, before its sandbox Pod
+existed. The coordinator ends it as `abandoned`, deadline or none, keeping the
+execution's last checkpoint; the placement protocol answers it `refused`. A
+queued or quota-blocked run is not refused. See
+[ADR 0067](docs/adr/0067-a-start-ends-when-its-run-has-ended.md).
+
 ### Exit cause
 
 Why a visit's harness ended without a graceful stop: `exited` (by itself),

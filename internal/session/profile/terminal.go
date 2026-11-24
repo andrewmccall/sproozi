@@ -106,12 +106,12 @@ func (h *handler) attach(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err = h.validateAdmission(actionActivate, input.Launch); err != nil {
-		h.fail(w, err)
+		h.fail(w, actionAttach, err)
 		return
 	}
 	o, err := h.config.Backend.Inspect(r.Context(), input.Launch)
 	if err != nil {
-		h.fail(w, err)
+		h.fail(w, actionAttach, err)
 		return
 	}
 	if !sameLaunch(o.Launch, input.Launch) || o.State != session.PlacementActive || o.Incarnation != *input.Incarnation {

@@ -246,6 +246,12 @@ Do the AgentRun steps first, then:
    is the registry's `Executable`; add a variable for it and for its native
    home to `cmd/native-session/homes.go`, and add its graceful-stop wait text
    to `waitingFor` in `cmd/native-session/main.go`.
+   If the client reports turns through hooks that run a `native-session`
+   command, as Claude Code's `observe-claude` does, that command must report
+   once its payload is whole, not wait for the end of its input: the client
+   may close the hook's input late, and a hook its timeout kills reports
+   nothing, which leaves the turn running. Test it with input that stays
+   open, as `TestClaudeHookReportsACompletePayloadWithoutEndOfInput` does.
 4. Add its native state capture, validation and restore in
    [`internal/checkpoint/artifact.go`](../../internal/checkpoint/artifact.go)
    and `internal/harness`, with captured transcript fixtures.

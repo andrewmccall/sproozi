@@ -85,6 +85,15 @@ func (p *Placement) AbortPreparation(ctx context.Context, l session.Launch) erro
 		return err
 	}
 	r, found, err := p.preparationRegistration(ctx, local)
+	var unproven *unprovenEnd
+	if errors.As(err, &unproven) && !unseen {
+		// A deleted registration cannot be fenced, but the launch is still
+		// never prepared again: the tombstone makes its Prepare refuse it,
+		// so each recover repeats this check and says why (ADR 0067).
+		if saveErr := p.saveTombstone(&local, false, r, false); saveErr != nil {
+			return errors.Join(err, saveErr)
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -221,9 +230,12 @@ func (p *Placement) preparationRegistration(ctx context.Context, local retained)
 		}
 	}
 	if errors.Is(err, registry.ErrGone) {
-		return r, false, fmt.Errorf("placement: the session registration %s for AgentRun %s was deleted, so its Pod cannot be fenced; "+
-			"an administrator must confirm no Pod labelled %s remains for that run in %s: %w",
-			registry.NameForRun(name), name, runtimekube.RunUIDLabel, p.config.AgentNamespace, &profile.Rejection{Code: profile.CodeConflict})
+		// Nothing restores a deleted registration's reference, so this
+		// holds for good (ADR 0067).
+		return r, false, administratorCheck(fmt.Sprintf("the session registration %s for AgentRun %s was deleted, so its Pod cannot be "+
+			"fenced and the executor can never show that nothing runs for it; an administrator must confirm no Pod labelled %s "+
+			"remains for that run in %s; cancel leaves the session unknown-stop, and no owner command ends it",
+			registry.NameForRun(name), name, runtimekube.RunUIDLabel, p.config.AgentNamespace))
 	}
 	if err != nil {
 		return r, false, semantic(err)
@@ -239,6 +251,13 @@ func (p *Placement) preparationRegistration(ctx context.Context, local retained)
 		// This abort's own replay, or a cancellation that already fenced the
 		// writer and sealed no usage. A receipt with usage belongs to an
 		// abort with the incarnation, which reports it.
+	case r.Phase == registry.Cancelled && r.PodUID == "" && r.Receipt == nil:
+		// Cancelled before any Pod was bound to it, so before it was ever
+		// prepared or active: it never had authority, and this abort fences
+		// it as one of its own (ADR 0067). Nothing in this executor cancels
+		// a launch's registration while another operation holds its lock;
+		// an administrator, or another executor's abort of a launch whose
+		// local record was lost, can.
 	default:
 		return r, false, fmt.Errorf("placement: the session registration for AgentRun %s is %s, not a preparation; "+
 			"only a stop or an abort with its incarnation can end it: %w", name, r.Phase, &profile.Rejection{Code: profile.CodeConflict})
@@ -276,10 +295,26 @@ func (p *Placement) cancelRun(ctx context.Context, r registry.Record) error {
 // the run it bound: an administrator deleted and recreated it. The answer is
 // a conflict, never a fence.
 func replacedRun(r registry.Record, run api.AgentRun) error {
-	return fmt.Errorf("placement: AgentRun %s now has UID %s, but its session registration bound UID %s; "+
-		"an administrator replaced it, so confirm no Pod labelled %s=%s remains: %w",
-		r.IntendedRunName, run.UID, r.RunUID, runtimekube.RunUIDLabel, r.RunUID, &profile.Rejection{Code: profile.CodeConflict})
+	return administratorCheck(fmt.Sprintf("AgentRun %s now has UID %s, but its session registration bound UID %s; "+
+		"an administrator replaced it: confirm no Pod labelled %s=%s remains, then delete AgentRun %s and recover this session",
+		r.IntendedRunName, run.UID, r.RunUID, runtimekube.RunUIDLabel, r.RunUID, r.IntendedRunName))
 }
+
+// unprovenEnd is a conflict that keeps a preparation's end unproven until an
+// administrator acts. It is a session.UnprovenEnd, so the executor's driver
+// can state its cause alone (ADR 0067).
+type unprovenEnd struct{ cause string }
+
+// administratorCheck is the conflict cause describes.
+func administratorCheck(cause string) error { return &unprovenEnd{cause: cause} }
+
+func (e *unprovenEnd) Error() string {
+	return "placement: " + e.cause + ": " + (&profile.Rejection{Code: profile.CodeConflict}).Error()
+}
+func (e *unprovenEnd) Unwrap() error       { return &profile.Rejection{Code: profile.CodeConflict} }
+func (e *unprovenEnd) UnprovenEnd() string { return e.cause }
+
+var _ session.UnprovenEnd = (*unprovenEnd)(nil)
 
 // awaitSandboxSettled waits until the controller can no longer create the
 // run's Pod: the run is gone, terminal, or has recorded its sandbox Pod. The

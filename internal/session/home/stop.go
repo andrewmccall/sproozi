@@ -126,7 +126,7 @@ func (s *Service) endLate(ctx context.Context, r *localSession) error {
 		return err
 	}
 	if st.overdue {
-		if _, err = s.coordinator.Recover(ctx, execution.ID); err != nil && !errors.Is(err, session.ErrDeadlinePassed) {
+		if _, err = s.coordinator.Recover(ctx, execution.ID); err != nil && !errors.Is(err, session.ErrStartEnded) {
 			return err
 		}
 	}

@@ -111,9 +111,10 @@ const (
 	// evFinalized: a finalization's stop committed; nothing starts.
 	evFinalized event = "finalized"
 	// evAbandoned: the deadline passed before a move's or a first visit's
-	// destination became active, and no writer exists or can come to exist
-	// there. The operation ends without a new visit; the execution keeps its
-	// last checkpoint (ADR 0060).
+	// destination became active (ADR 0060), or its placement refused it for
+	// good (ADR 0067), and no writer exists or can come to exist there. The
+	// operation ends without a new visit; the execution keeps its last
+	// checkpoint.
 	evAbandoned event = "abandoned"
 	// evCancelretains cancellation intent.
 	evCancel event = "cancel"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
@@ -19,7 +20,66 @@ const (
 	problemRevoked = "its project no longer admits this installation"
 	// problemUndecided: the driver has no rule for the session's state.
 	problemUndecided = "the executor has no rule for this session's state; it keeps retrying, and the executor's log names the state"
+	// problemRefused begins the problem of a session whose placement
+	// refused its first visit for good; the placement's reason follows
+	// (ADR 0067).
+	problemRefused = "it can never start"
+	// endTask is how a problem tells the owner to end a task.
+	endTask = "cancel this session"
 )
+
+// problemRefusedUnknown is the problem of a start its placement refused
+// whose reason the driver did not record: the journal keeps none.
+const problemRefusedUnknown = problemRefused + ": its placement refused it"
+
+// refusedProblem is the problem the placement's refusal err records for
+// session r: its reason and, while the start is not yet ended, what
+// happens next.
+func refusedProblem(r record, err error) string {
+	problem := problemRefusedUnknown
+	var refused *session.StartRefused
+	if errors.As(err, &refused) && refused.Reason != "" {
+		problem = problemRefused + ": " + refused.Reason
+	}
+	if errors.Is(err, session.ErrStartEnded) {
+		return problem
+	}
+	interactive := r.Intent.Mode == ModeInteractive
+	if cause := unprovenCause(err); cause != "" {
+		// Only an administrator clears this, and the cause says how and
+		// what follows; the driver waits for the owner's recover.
+		return problem + "; the executor cannot show that nothing runs there: " + cause
+	}
+	next := " and tries again"
+	if interactive {
+		next = ", so recover or cancel this session"
+	}
+	return problem + "; the executor has not yet shown that nothing runs there" + next
+}
+
+// forgetUnproven drops the causes logged for session id, once its start
+// ended or it is removed.
+func (o *Owner) forgetUnproven(id string) {
+	o.unproven.Range(func(key, _ any) bool {
+		if strings.HasPrefix(key.(string), id+"\x00") {
+			o.unproven.Delete(key)
+		}
+		return true
+	})
+}
+
+// unprovenCause is the cause, stated alone, that keeps err's end unproven
+// when only an administrator can settle it, or "".
+func unprovenCause(err error) string {
+	var unproven session.UnprovenEnd
+	if errors.As(err, &unproven) {
+		return unproven.UnprovenEnd()
+	}
+	return ""
+}
+
+// refusalProblem reports a problem refusedProblem recorded.
+func refusalProblem(problem string) bool { return strings.HasPrefix(problem, problemRefused+": ") }
 
 // actionTaskComplete derives the operation of a task's completion wait: the
 // stop the driver asks for at once, which the supervisor carries out only
@@ -203,9 +263,34 @@ func (o *Owner) carryOut(ctx context.Context, r record, rec *session.Record, act
 		// of starting: it stays stopped with what its earlier execution
 		// committed, and resume continues it (ADR 0060).
 		_, err := coordinator.Recover(ctx, rec.ID)
-		if errors.Is(err, session.ErrDeadlinePassed) {
+		switch {
+		case errors.Is(err, session.ErrDeadlinePassed):
 			o.note(r.ID, problemExpired)
 			return nextAgain
+		case errors.Is(err, session.ErrStartRefused):
+			// The placement can never start it, so its start ends now with
+			// the reason, deadline or none (ADR 0067): an interactive
+			// session stays stopped with its work, and the next step
+			// cancels a task. A start not yet shown to have ended is
+			// recovered again, which refuses it again and repeats the
+			// proof: after the backoff for a task, and by its owner for an
+			// interactive session.
+			o.note(r.ID, refusedProblem(r, err))
+			if cause := unprovenCause(err); cause != "" {
+				if _, seen := o.unproven.LoadOrStore(r.ID+"\x00"+cause, struct{}{}); !seen {
+					o.logf("Could not end the refused start of work session %s: %s", r.ID, cause)
+				}
+			}
+			switch {
+			case errors.Is(err, session.ErrStartEnded):
+				o.forgetUnproven(r.ID)
+				return nextAgain
+			case r.Intent.Mode == ModeInteractive, unprovenCause(err) != "":
+				// An end only an administrator can clear is not retried:
+				// the owner's recover checks it again.
+				return nextDone
+			}
+			return nextWait
 		}
 		return o.after(ctx, r, err, nextDone)
 	case actComplete:
@@ -242,6 +327,15 @@ func (o *Owner) carryOut(ctx context.Context, r record, rec *session.Record, act
 		return o.end(ctx, r, "deadline-expired", problemExpired)
 	case actEndRevoked:
 		return o.end(ctx, r, "project-revoked", problemRevoked)
+	case actEndRefused:
+		// A task its placement refused has no result: nothing ran. Its
+		// problem names the refusal, unless the executor stopped before
+		// recording it.
+		problem := r.Problem
+		if !refusalProblem(problem) {
+			problem = problemRefusedUnknown
+		}
+		return o.end(ctx, r, "start-refused", problem)
 	case actNothing:
 	}
 	return nextDone
@@ -302,7 +396,7 @@ func (o *Owner) after(ctx context.Context, r record, err error, onError next) ne
 func failureProblem(r record, err error) string {
 	var contradiction session.RecordContradiction
 	if errors.Is(err, session.ErrRecordContradicted) && errors.As(err, &contradiction) {
-		end := "cancel this session"
+		end := endTask
 		if r.Intent.Mode == ModeInteractive {
 			end = "stop or cancel this session"
 		}

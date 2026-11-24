@@ -32,7 +32,7 @@ so CI does not run `make test`. `Lint` and `E2E` are separate workflows.
 | `make verify-deps` | `go.mod` and `go.sum` are tidy, and the pinned `govulncheck` finds no known vulnerability reachable from Sproozi code. | Lint (`verify-deps` step) | Go; network for the vulnerability database |
 | `make verify-protocol` | Pinned `gh` and `git` clients produce the GitHub protocol the gateway inspects. Zero matched or skipped tests fail. | Tests (`checks`) | Downloads the checksum-pinned `gh` |
 | `make verify-mcp` | MCP and gateway packages pass under race, every `examples/*/servers.json` example is consistent, the live MCP verifier's safety and failure reports pass offline, and `hack/mcp-tools.py` handles JSON, SSE and legacy-SSE servers. | Tests: `checks` runs the two Python checks, `hack/verify/mcp-live-test.py` and `hack/mcp_tools_test.py`; the race shards cover the Go tests | Go, Python 3 |
-| `make verify-workflow-fixtures` | Session-mobility and Claude remote-executor protocol fixtures, the Claude executor proof's rendering of the shipped example, quickstart ownership and CRD checks, Kind bootstrap readiness ordering, Kind image import and build cache selection, demo setup credential preservation and registry wiring, and `make demo` input
+| `make verify-workflow-fixtures` | Session-mobility and Claude remote-executor protocol fixtures, the Claude executor proof's rendering of the shipped example, quickstart ownership and CRD checks, Kind bootstrap readiness ordering, Kind image import (including a stalled node, a failed save or node, and two images that share a layer) and build cache selection, demo setup credential preservation and registry wiring, and `make demo` input
 checks before cluster creation and cleanup after a setup failure. Stubs replace Docker and Kind. | Tests (`checks`) | Python 3, Bash; fetches the pinned Calico manifest into `.local/cni` on first run |
 | `make verify-docs` | Local Markdown links resolve and no private-plan paths are referenced. It does not establish that documentation is current. | Tests (`checks`) | Python 3 |
 | `make lint` | golangci-lint reports no issues; `make lint-config` checks its configuration. | Lint | Go; downloads the checksum-pinned golangci-lint release |
@@ -45,7 +45,7 @@ checks before cluster creation and cleanup after a setup failure. Stubs replace 
 | `make verify-mcp-kind` | Configured MCP providers work with stock Codex in an owned Kind cluster, including denials, budgets and revocation. Real model requests. | No | See [Configured MCP in Kind](#configured-mcp-in-kind) |
 | `make verify-local-onboarding` | On this computer's Docker engine, `init` provisions Codex and adds Claude Code and Copilot, `doctor` passes, one stock terminal turn per harness completes through `attach`, every stop binds its native UUID, each harness's profile instructions reach its provider, a renewed certificate reaches the running gateway, and a configured kubeconfig receives no calls. Every model request carries the gateway's key; with `SIGN_IN=1` Codex and Claude Code sign in themselves from fixture sign-ins seeded in their default login stores and every request carries those instead (Copilot's own sign-in is covered by `verify-harness-process`). Deterministic local providers. See [Local onboarding](#local-onboarding). | No | Docker with Buildx, Go, Python 3, OpenSSL |
 | `make verify-kubernetes-release` | In an owned Kind cluster with enforcing CNI, the rendered release assets install as documented; the provider-free first check passes with permitted, denied and blocked paths; renewal reaches the running gateway; a CA rotation passes through new immutable trust objects; and the certificate controller lacks other rights. See [Kubernetes release assets](#kubernetes-release-assets). | No | Docker with Buildx, Kind, kubectl, Python 3 |
-| `make verify-claude-remote-kind` | In an owned Kind cluster with enforcing CNI, the [Claude Code executor example](../../examples/portable-workflows/kubernetes/claude/kustomization.yaml) runs stock Claude Code through the public CLI and `sproozi-cli` context: a session from the approved repository and one from an uploaded `PATH` reach the prompt with no dialog; a turn, `stop` and `resume` keep one conversation in a retained Claude checkpoint; `/exit` before a turn, after one and in a resumed visit is retained without `unknown-stop`; a `--task` completes with Claude's final reply; and a turn calls `diagnose` and loads a profile skill. A deterministic in-cluster Anthropic fixture; the runtime's sign-in claim holds a fixture sign-in. Not yet run. See [Claude Code on the cluster](#claude-code-on-the-cluster). | No | Docker with Buildx, Kind, kubectl, Go, Python 3 with PyYAML, OpenSSL |
+| `make verify-claude-remote-kind` | In an owned Kind cluster with enforcing CNI, the [Claude Code executor example](../../examples/portable-workflows/kubernetes/claude/kustomization.yaml) runs stock Claude Code through the public CLI and `sproozi-cli` context: a session from the approved repository and one from an uploaded `PATH` reach the prompt with no dialog; a turn, `stop` and `resume` keep one conversation in a retained Claude checkpoint; `/exit` before a turn, after one and in a resumed visit is retained without `unknown-stop`; a `--task` completes with Claude's final reply; and a turn calls `diagnose` and loads a profile skill. The first session's sandbox has a refreshable gateway token directory. With `SPROOZI_TOKEN_REFRESH=1`, only a session that takes a turn, through a tunnel admitted with a refreshed token, once every tunnel its sandbox's first gateway token could open has closed. A deterministic in-cluster Anthropic fixture; the runtime's sign-in claim holds a fixture sign-in. The `refresh` scenario passed on 2026-11-17; no run of the other scenarios is recorded here. See [Claude Code on the cluster](#claude-code-on-the-cluster). | No | Docker with Buildx, Kind, kubectl, Go, Python 3 with PyYAML, OpenSSL |
 | `make verify-live` | One real AgentRun on a provisioned cluster opens a scoped PR in `SPROOZI_DEMO_REPO`. Denial probes run inside its sandbox and fail closed, and a second Pod using the run's identity is refused by the gateway. | No | Provisioned cluster and credentials; creates a PR |
 | `make verify-public-tree` | No private local material is tracked. | No | Git |
 | `make verify-release` | Release inputs are pinned, then `test`, `lint`, every `Tests` row, `test-e2e`, `verify-kubernetes-release`, `verify-live` and `verify-public-tree` pass and the release image builds. A missing prerequisite fails. No push. | No | Everything above; `RELEASE_BUILD=1`, `SPROOZI_DEMO_REPO` |
@@ -148,8 +148,18 @@ failed cluster for investigation.
 
 `hack/verify/kind.sh` builds the images and compiles the suite while the
 cluster starts. Once the cluster is up, both nodes pull the digest-pinned Hermes
-image themselves while the built images are loaded into both nodes at once. The
-first of these jobs to fail stops the run and prints its log. The suite then
+image themselves while the built images are loaded. `build.py` streams one
+`docker save` into both nodes' `ctr images import` at once, one image at a
+time: two images that share a layer, imported into the same containerd
+together, can block each other for good. An import attempt that moves no byte
+for 120 seconds, or whose `ctr` has not exited 300 seconds after the stream
+ended, is stopped on the host and inside the nodes and retried from a new
+`docker save`, three attempts in all. Each failed attempt prints a line such
+as `Kind image import of docker.io/sproozi-kind/clients:acceptance failed,
+attempt 1: no byte moved for 120 s, blocked writing to <node>; docker save
+produced <n> bytes; <node> accepted <n> bytes, …`, and the load fails with
+every attempt's line once the attempts are spent. The first of these jobs to
+fail stops the run and prints its log. The suite then
 skips its own image step, because `kind.sh` sets `SPROOZI_E2E_IMAGES_LOADED=1`.
 `make test-e2e-existing` builds and loads the images inside the suite, using
 `build.py` without arguments.
@@ -296,6 +306,16 @@ deletes the cluster when it finishes; set `SPROOZI_PRESERVE_ON_FAILURE=1` to
 keep a failed one. Read
 `.local/verification/claude-remote-kind/<run>/proof/report.json`. See the
 [driver's README](../../hack/verify/claude-remote-kind/README.md).
+
+`SPROOZI_TOKEN_REFRESH=1 make verify-claude-remote-kind` runs only the
+`refresh` scenario, which proves a session keeps the gateway after the gateway
+token its sandbox Pod started with has expired, through a tunnel the API
+server's audit log shows was admitted with a refreshed token. The cluster's API
+server caps ServiceAccount tokens at 3607 seconds, so that token expires about
+an hour after the Pod starts; no Sproozi setting changes. The run takes about
+70 minutes longer than the others. It passed on 2026-11-17; the
+[driver's README](../../hack/verify/claude-remote-kind/README.md) records the
+run and the failure of the same scenario against a controller without the fix.
 
 ## Retained work and Projects in Kind
 

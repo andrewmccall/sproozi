@@ -23,12 +23,17 @@ import (
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var errWriterFenceUnknown = errors.New("placement: writer fence remains unknown")
+
+// errRunUnavailable is a read of a visit's Pod whose run is not the bound one
+// or has no sandbox: queued, or ended before its sandbox started.
+var errRunUnavailable = errors.New("placement: exact admitted run unavailable")
 
 // podStopWait bounds a stop's wait for the native container to end after the
 // supervisor's graceful handoff, within the stop's settle allowance
@@ -176,12 +181,26 @@ func ceilingsMatch(l session.Launch, ceilings map[api.CapabilityKind]api.Endpoin
 	return true
 }
 func (p *Placement) pod(ctx context.Context, r registry.Record) (*corev1.Pod, error) {
+	run, err := p.readRun(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	return p.podOf(ctx, r, run)
+}
+
+// readRun reads the AgentRun r names.
+func (p *Placement) readRun(ctx context.Context, r registry.Record) (*api.AgentRun, error) {
 	var run api.AgentRun
 	if err := p.config.Kube.Get(ctx, client.ObjectKey{Namespace: p.config.Namespace, Name: r.IntendedRunName}, &run); err != nil {
 		return nil, err
 	}
+	return &run, nil
+}
+
+// podOf reads the exact Pod of run, the AgentRun r names.
+func (p *Placement) podOf(ctx context.Context, r registry.Record, run *api.AgentRun) (*corev1.Pod, error) {
 	if string(run.UID) != r.RunUID || run.Status.Identity.SandboxName == "" {
-		return nil, errors.New("placement: exact admitted run unavailable")
+		return nil, errRunUnavailable
 	}
 	var pod corev1.Pod
 	if err := p.config.Kube.Get(ctx, client.ObjectKey{Namespace: p.config.AgentNamespace, Name: run.Status.Identity.SandboxName}, &pod); err != nil {
@@ -221,8 +240,13 @@ func (p *Placement) waitPod(ctx context.Context, r registry.Record, wantRunning 
 	defer cancel()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
-	for {
-		pod, err := p.pod(ctx, r)
+	for poll := 0; ; poll++ {
+		run, runErr := p.readRun(ctx, r)
+		var pod *corev1.Pod
+		err := runErr
+		if err == nil {
+			pod, err = p.podOf(ctx, r, run)
+		}
 		if err == nil {
 			seen := sandboxpod.Observe(pod)
 			if wantRunning && seen.Agent.Running && seen.Capture.Running && !seen.Deleting {
@@ -235,6 +259,20 @@ func (p *Placement) waitPod(ctx context.Context, r registry.Record, wantRunning 
 		if err != nil && !apierrors.IsNotFound(err) && r.PodUID != "" {
 			return nil, err
 		}
+		if wantRunning {
+			// A start whose run can no longer get a Pod would otherwise wait
+			// for the deadline, or for ever without one (ADR 0067). The run
+			// read above serves; the registration, which only an
+			// administrator or a lost local record changes meanwhile, is read
+			// once a second.
+			refused := runRefusal(r, run, runErr)
+			if refused == nil && poll%registrationPolls == 0 {
+				refused = p.registrationRefusal(ctx, r)
+			}
+			if refused != nil {
+				return nil, refused
+			}
+		}
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -242,6 +280,138 @@ func (p *Placement) waitPod(ctx context.Context, r registry.Record, wantRunning 
 		}
 	}
 }
+
+// registrationPolls is how many of waitPod's 100-millisecond polls pass
+// between its reads of the registration.
+const registrationPolls = 10
+
+// refuse is a start refusal with the reason format describes.
+func refuse(format string, args ...any) error {
+	return &session.StartRefused{Reason: session.RefusalReason(fmt.Sprintf(format, args...))}
+}
+
+// startRefused is the refusal of a start whose bound run can no longer get
+// a running Pod, or nil while it still can: runRefusal of the run read now,
+// then registrationRefusal.
+func (p *Placement) startRefused(ctx context.Context, r registry.Record) error {
+	run, err := p.readRun(ctx, r)
+	if refused := runRefusal(r, run, err); refused != nil {
+		return refused
+	}
+	return p.registrationRefusal(ctx, r)
+}
+
+// runRefusal is the refusal of a start whose bound run, read as run or
+// failing with err, can no longer get a running Pod, or nil while it still
+// can. A run can no longer get one once it is terminal, cancelled, deleted
+// or replaced: the controller creates a Pod only for a live run that a bound
+// registration names. A run that is queued under a cap, admitted while a
+// ResourceQuota refuses its Pod, or that named a Pod not yet created, can
+// still get one, so it is not refused. A read that fails is no evidence
+// either way: the wait reads again.
+func runRefusal(r registry.Record, run *api.AgentRun, err error) error {
+	switch {
+	case apierrors.IsNotFound(err):
+		return refuse("AgentRun %s was deleted before its sandbox started", r.IntendedRunName)
+	case err != nil:
+		return nil
+	case string(run.UID) != r.RunUID:
+		return refuse("AgentRun %s was replaced before its sandbox started: it now has UID %s, not %s",
+			r.IntendedRunName, run.UID, r.RunUID)
+	case run.Status.Phase.IsTerminal():
+		return refuse("%s", runEnded(run))
+	case run.Spec.Cancel:
+		return refuse("AgentRun %s was cancelled before its sandbox started", r.IntendedRunName)
+	}
+	return nil
+}
+
+// registrationRefusal is the refusal of a start whose registration has left
+// Creating and Bound, or was deleted, or nil. While Prepare holds the
+// launch's lock nothing in the executor changes it: only an administrator,
+// or another executor's abort of a launch whose local record was lost,
+// does. A read that fails is no evidence either way.
+func (p *Placement) registrationRefusal(ctx context.Context, r registry.Record) error {
+	current, err := p.registry.Get(ctx, r.Reference)
+	switch {
+	case errors.Is(err, registry.ErrGone):
+		return refuse("the session registration for AgentRun %s was deleted before its sandbox started", r.IntendedRunName)
+	case err != nil:
+		return nil
+	case current.Phase != registry.Creating && current.Phase != registry.Bound:
+		return refuse("the session registration for AgentRun %s is %s, so its sandbox can never start",
+			r.IntendedRunName, current.Phase)
+	}
+	return nil
+}
+
+// abortedRefusal is the refusal of a launch whose preparation local's
+// tombstone records as aborted. It says what became of the run the
+// registration bound, as a waiting Prepare would: deleted, replaced, ended
+// or cancelled, or that the registration was deleted; when none of these
+// can be read, only that the preparation was aborted.
+func (p *Placement) abortedRefusal(ctx context.Context, local retained) error {
+	name := runName(local.Launch)
+	if local.Reference.UID != "" {
+		r, err := p.registry.Get(ctx, local.Reference)
+		if errors.Is(err, registry.ErrGone) {
+			return refuse("the session registration for AgentRun %s was deleted before its sandbox started", name)
+		}
+		if err == nil && r.RunUID != "" {
+			run, err := p.readRun(ctx, r)
+			if refused := runRefusal(r, run, err); refused != nil {
+				return refused
+			}
+		}
+	}
+	return refuse("the preparation of AgentRun %s was aborted before its sandbox started", name)
+}
+
+// runEnded says how a terminal run ended before its sandbox started, with
+// the reason and message of its Ready condition when it has one.
+func runEnded(run *api.AgentRun) string {
+	how := map[api.AgentRunPhase]string{api.AgentRunPhaseFailed: "failed", api.AgentRunPhaseTimedOut: "timed out",
+		api.AgentRunPhaseCancelled: "was cancelled", api.AgentRunPhaseSucceeded: "succeeded"}[run.Status.Phase]
+	s := fmt.Sprintf("AgentRun %s %s before its sandbox started", run.Name, how)
+	if ready := apimeta.FindStatusCondition(run.Status.Conditions, readyCondition); ready != nil && ready.Reason != "" {
+		s += ": " + ready.Reason
+		if ready.Message != "" {
+			s += ": " + ready.Message
+		}
+	}
+	return s
+}
+
+// abortedObservation is Inspect's observation of l when its preparation was
+// aborted, and false for any other launch; load refuses another launch of
+// the allocation. An aborted preparation is always preparing, even once its
+// abort has settled: only AbortPreparation proves that nothing runs, which
+// a coordinator still pending on the launch reaches through Prepare's
+// refusal, so Inspect claims no more than that (ADR 0067). A registration
+// that may have had authority, not cancelled or cancelled with spent usage,
+// is left to the existing path, which answers conflict.
+func (p *Placement) abortedObservation(ctx context.Context, l session.Launch) (session.Observation, bool) {
+	local, err := p.load(l)
+	if err != nil || !local.PreparationAborted {
+		return session.Observation{}, false
+	}
+	o := session.Observation{Launch: local.Launch, State: session.PlacementPreparing}
+	if local.Reference.UID == "" {
+		return o, true
+	}
+	r, err := p.registry.Get(ctx, local.Reference)
+	switch {
+	case err != nil, r.Phase == registry.Creating, r.Phase == registry.Bound, r.Phase == registry.Prepared,
+		r.Phase == registry.Cancelled && unspent(r.Receipt):
+		return o, true
+	}
+	return session.Observation{}, false
+}
+
+// readyCondition is the AgentRun condition that carries the controller's
+// reason for the run's phase.
+const readyCondition = "Ready"
+
 func (p *Placement) Activate(ctx context.Context, l session.Launch, i session.Incarnation) error {
 	unlock, err := p.lockOperation(l)
 	if err != nil {
@@ -289,6 +459,9 @@ func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Obse
 		return session.Observation{}, err
 	}
 	defer unlock()
+	if o, aborted := p.abortedObservation(ctx, l); aborted {
+		return o, nil
+	}
 	local, r, err := p.observing(ctx, l)
 	if os.IsNotExist(err) {
 		var cm corev1.ConfigMap
@@ -316,7 +489,9 @@ func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Obse
 			o.Incarnation = session.Incarnation{}
 		}
 		pod, err := p.pod(ctx, r)
-		if apierrors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) || r.PodUID == "" && errors.Is(err, errRunUnavailable) {
+			// No Pod is bound yet: recovery calls Prepare again, which waits
+			// for one or refuses a run that can never get it (ADR 0067).
 			o.State = session.PlacementPreparing
 			return o, nil
 		}
@@ -464,7 +639,7 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	if err != nil {
 		return s, err
 	}
-	if _, err = p.control(ctx, pod, runtimekube.CaptureContainer, []string{helperPath, helperFinish}, nil, 64<<10); err != nil {
+	if err = p.finish(ctx, local, r, pod); err != nil {
 		return session.Stopped{}, err
 	}
 	if err = p.releaseWriterFence(ctx, local, r); err != nil {
@@ -571,6 +746,13 @@ func (p *Placement) ended(ctx context.Context, local retained, r registry.Record
 	local.Turnless = local.thread(r) == ""
 	return local, r, nil
 }
+
+// helperEndWait bounds a stop's wait, after its finish exec failed, for a
+// read of the Pod to show the checkpoint helper ended. The helper ends within
+// its own reply grace (finishReplyGrace in cmd/checkpoint, 10 seconds) of the
+// request, and the kubelet reports a container's end at its next relist,
+// about a second later; the caller's context still ends the wait sooner.
+const helperEndWait = 15 * time.Second
 
 // lostReplyWait bounds a stop's wait, after its quiesce reply was lost, for
 // the native container to be seen to end, as the Docker placement waits for
@@ -856,11 +1038,90 @@ func (p *Placement) finishStopped(ctx context.Context, local retained, r registr
 		return err
 	}
 	if sandboxpod.Observe(pod).Capture.Running {
-		if _, err = p.control(ctx, pod, runtimekube.CaptureContainer, []string{helperPath, helperFinish}, nil, 64<<10); err != nil {
+		if err = p.finish(ctx, local, r, pod); err != nil {
 			return err
 		}
 	}
 	return p.releaseWriterFence(ctx, local, r)
+}
+
+// finish ends the capture helper of pod, the Pod of the stopped
+// registration r, once local retains its fence, checkpoint and receipt: the
+// last fixed command of a stop. The helper is its container's main process,
+// so its own end can cut the exec that carries finish's exit status, and the
+// acknowledgement is lost although the finish happened. A failed finish is
+// therefore done when a fresh read proves it (helperFinished); otherwise it
+// fails as before, and the stop stays unproven (ADR 0068).
+func (p *Placement) finish(ctx context.Context, local retained, r registry.Record, pod *corev1.Pod) error {
+	_, err := p.control(ctx, pod, runtimekube.CaptureContainer, []string{helperPath, helperFinish}, nil, 64<<10)
+	if err == nil {
+		return nil
+	}
+	proof, ok := p.helperFinished(ctx, local, r)
+	if !ok {
+		return err
+	}
+	p.logf("Treated the finish of the checkpoint helper in Pod %s/%s as done, because %s: %v", pod.Namespace, pod.Name, proof, err)
+	return nil
+}
+
+// helperFinished reports what proves that the capture helper of r's exact
+// Pod has finished, and whether anything does. The registration must be
+// stopped with its receipt and local's writer fenced, which that receipt
+// proves (ADR 0066). Then it reads the Pod afresh, every 100 milliseconds
+// for at most p.helperEndWait, since the kubelet reports a container's end
+// only at its next relist, until either the Pod is gone, so no helper is
+// left to finish, as the replay of a stopped visit takes it (finishStopped),
+// or the reading proves the finish (finishReading). A reading that can no
+// longer become proof (a helper ended with another code, a replaced Pod)
+// ends the wait at once. A helper still running when the wait ends, a
+// termination the runtime did not report for that container, or reads that
+// fail prove nothing.
+func (p *Placement) helperFinished(ctx context.Context, local retained, r registry.Record) (string, bool) {
+	if r.Phase != registry.Stopped || r.Receipt == nil || !local.WriterFenced {
+		return "", false
+	}
+	ctx, cancel := context.WithTimeout(ctx, p.helperEndWait)
+	defer cancel()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		pod, err := p.exactPod(ctx, r)
+		var rejection *profile.Rejection
+		switch {
+		case apierrors.IsNotFound(err):
+			return "the Pod is gone", true
+		case errors.As(err, &rejection):
+			return "", false
+		case err == nil:
+			proven, final := finishReading(pod)
+			if proven {
+				return "the helper ended with code 0", true
+			}
+			if final {
+				return "", false
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return "", false
+		case <-ticker.C:
+		}
+	}
+}
+
+// finishReading reports whether one reading of a stopped visit's Pod proves
+// that its capture helper finished, and whether the reading is final: it can
+// never become proof. The helper's container ended, by the runtime's own
+// report, with code 0, which the helper returns only from a finish it
+// acknowledged: its deadline, SIGTERM and every error exit 1, and the Pod
+// never restarts a container. Ended with another code is final.
+func finishReading(pod *corev1.Pod) (proven, final bool) {
+	helper := sandboxpod.Observe(pod).Capture
+	if !helper.Ended() {
+		return false, false
+	}
+	return helper.Terminated.ExitCode == 0, true
 }
 func (p *Placement) exactPod(ctx context.Context, r registry.Record) (*corev1.Pod, error) {
 	var pod corev1.Pod
@@ -922,6 +1183,17 @@ func (p *Placement) Abort(ctx context.Context, l session.Launch, i session.Incar
 	return o, nil
 }
 
+// fenceCancelledWait bounds fenceCancelled's wait for the agent container of
+// a deleted Pod to be seen to stop. It covers the Pod's default termination
+// grace of 30 seconds and the seal, and stays under the home's 2-minute wait
+// for an abort (abortWait in profile), so a remote caller receives the
+// executor's answer. A container never seen to stop, as on a lost node,
+// whose Pod the writer-fence finalizer keeps, would otherwise hold the
+// cancellation, and a caller with no deadline such as the executor's
+// driver, for ever: past the bound the fence is reported unknown, the
+// coordinator records unknown-stop and a recover waits again.
+const fenceCancelledWait = 90 * time.Second
+
 // fenceCancelled forcibly stops the exact Pod bound to a cancelled
 // registration and returns once its writer is fenced: its native container
 // was observed terminated, or the Pod was never scheduled. It then seals the
@@ -941,6 +1213,8 @@ func (p *Placement) fenceCancelled(ctx context.Context, local *retained, r regis
 	} else if !local.WriterFenced {
 		return r, errors.New("placement: absent Pod has no retained writer fence")
 	}
+	ctx, cancel := context.WithTimeout(ctx, p.fenceWait)
+	defer cancel()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {

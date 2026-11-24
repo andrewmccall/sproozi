@@ -17,6 +17,7 @@ import sys
 import time
 from build import build_source_hashes, kind_nodes
 from clock import check_node_clocks
+from serviceaccount import wait_for_default_service_account
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -1043,7 +1044,11 @@ for host,port in [(PROVIDER_IP,8443),(os.environ['KUBERNETES_SERVICE_HOST'],443)
  except TimeoutError:blocked+=1
 check(blocked==2,blocked)
 check(not Path('/var/run/secrets/kubernetes.io/serviceaccount/token').exists())
-print(json.dumps({'gatewayAuthenticated':True,'missingIdentityDenied':True,'unknownAuthorityDenied':True,'namesUnresolved':True,'proxiedNameReached':True,'directProviderAndKubernetesBlocked':True,'noKubernetesCredential':True}))
+# The kubelet refreshes the token only through a directory mount: the token is
+# its ..data link, never a file mounted through subPath.
+tokens=Path('/var/run/sproozi/tokens/gateway')
+check(os.readlink(tokens/'token')=='..data/token' and (tokens/'..data').is_symlink(),'gateway token is not refreshable')
+print(json.dumps({'gatewayTokenRefreshable':True,'gatewayAuthenticated':True,'missingIdentityDenied':True,'unknownAuthorityDenied':True,'namesUnresolved':True,'proxiedNameReached':True,'directProviderAndKubernetesBlocked':True,'noKubernetesCredential':True}))
 """
     provider_ip = k("get", "service", "orchestration-provider", "-n", SYSTEM, "-o", "jsonpath={.spec.clusterIP}").strip()
     check(provider_ip, "orchestration-provider has no cluster IP")
@@ -1712,6 +1717,7 @@ def kubernetes_worker_proof(images):
     target_namespace = "sproozi-kubernetes-proof"
     case_id = "hermes-kubernetes"
     apply(obj("Namespace", target_namespace, namespace=None))
+    wait_for_default_service_account(k, target_namespace)
     pod = obj(
         "Pod",
         "orchestration-observed",

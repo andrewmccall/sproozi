@@ -342,10 +342,11 @@ func (c *Client) call(ctx context.Context, action string, input request) (respon
 		if answer := unrecognized(data, r.StatusCode); answer != nil {
 			return response{}, answer
 		}
-		if !errorResponse(output, r.StatusCode) || output.Error == CodeTurnPending && action != actionStop {
+		if !errorResponse(output, r.StatusCode) || output.Error == CodeTurnPending && action != actionStop ||
+			output.Error == CodeRefused && action != actionPrepare {
 			return response{}, errors.New("profile: invalid error response")
 		}
-		return response{}, &RemoteError{Code: output.Error, Status: r.StatusCode, Waiting: output.Waiting}
+		return response{}, &RemoteError{Code: output.Error, Status: r.StatusCode, Waiting: output.Waiting, Reason: output.Reason}
 	}
 	if err = validateResponse(action, input, output, c.maxCheckpoint); err != nil {
 		return response{}, err
@@ -401,12 +402,15 @@ func errorResponse(r response, status int) bool {
 	if (r.Error == CodeTurnPending) != (r.Waiting != "") || r.Waiting != "" && waitingText(r.Waiting) != r.Waiting {
 		return false
 	}
+	if r.Reason != "" && (r.Error != CodeRefused || session.RefusalReason(r.Reason) != r.Reason) {
+		return false
+	}
 	switch r.Error {
 	case CodeInvalid:
 		return status == http.StatusBadRequest || status == http.StatusNotFound || status == http.StatusRequestEntityTooLarge || status == http.StatusUnsupportedMediaType
 	case CodeDenied:
 		return status == http.StatusUnauthorized || status == http.StatusForbidden || status == http.StatusUpgradeRequired
-	case CodeConflict:
+	case CodeConflict, CodeRefused:
 		return status == http.StatusConflict
 	case CodeExpired:
 		return status == http.StatusGone

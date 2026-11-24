@@ -127,6 +127,16 @@ otherwise, with one exception: a `Running` run whose sandbox Pod a ResourceQuota
 rejected has `Ready` `False` with reason `QuotaExceeded` until the Pod is
 created.
 
+A remote executor's session whose run is terminal, cancelled or deleted
+before its sandbox Pod exists shows the run's phase, reason and message as
+its problem, `it can never start: AgentRun NAME failed
+before its sandbox started: REASON: MESSAGE`; a task is then cancelled and an
+interactive session retained. A `Queued` or `QuotaExceeded` run is not
+ended: a task stays `preparing` with no problem until its Pod runs or its
+deadline passes; an interactive session's start gives up waiting after 2
+minutes and shows the executor's `unavailable` problem until `recover`
+([ADR 0067](../adr/0067-a-start-ends-when-its-run-has-ended.md)).
+
 | Reason | Phase | Meaning | What to do |
 | --- | --- | --- | --- |
 | `Initialized` | `Queued` | Created and waiting for its first admission check. | Nothing. |

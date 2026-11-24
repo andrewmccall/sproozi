@@ -105,6 +105,16 @@ Once the placement has retained the artifact and finalized usage receipt:
 `finish` acknowledges termination to the helper's private PID 1. It supplies no
 proof that the agent stopped and must not precede capture/receipt retention.
 
+The helper's exit ends its container, which can kill the `finish` command
+before its exit status reaches the placement. So after it replies, the helper
+waits for `finish` to read the reply and close, at most 10 seconds, and then
+exits 0. It exits 0 only after a finish: its deadline, `SIGTERM` and every
+error exit 1. `finish` keeps its connection open for writing until it has
+read the reply; the helper half-closes after replying, which ends that read.
+A Kubernetes stop whose `finish` exec fails anyway is complete when the Pod
+shows this container terminated with code 0 within 15 seconds
+([ADR 0068](../../docs/adr/0068-a-lost-finish-is-proven-by-the-helpers-end.md)).
+
 ## Inert restore and limits
 
 For a separate controlled inspection, restore a checkpoint into an absent

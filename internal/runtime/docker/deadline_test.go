@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -54,13 +55,17 @@ func endExpiredPreparedDockerVisit(t *testing.T, refusedByDocker bool) {
 	if !refusedByDocker {
 		placement = unactivated{p}
 	}
-	c, err := session.Open(coordinatorDir, map[string]session.Placement{localVolumeDriver: placement}, 1<<20)
+	l := fixtureLaunch(t, data)
+	// The placement and the coordinator read one clock, which stands before
+	// the deadline while the visit is set up and passes it on pastDeadline.
+	clock, pastDeadline := deadlineClock(l)
+	p.now = clock
+	c, err := session.Open(coordinatorDir, map[string]session.Placement{localVolumeDriver: placement}, 1<<20,
+		session.WithClock(clock))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
-	l := fixtureLaunch(t, data)
-	l.Deadline = time.Now().UTC().Add(3 * time.Second)
 	if _, err = c.Create(l, data, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +76,7 @@ func endExpiredPreparedDockerVisit(t *testing.T, refusedByDocker bool) {
 	}
 	a.activateErr = nil
 	agent := pending.Operations[0].Incarnation.ResourceUID
-	time.Sleep(time.Until(l.Deadline))
+	pastDeadline()
 	// The prepared supervisor stops itself at its deadline.
 	f.containers[agent].State.Running, f.containers[agent].State.Pid = false, 0
 	f.containers[agent].State.Status = exitedStatus
@@ -110,7 +115,8 @@ func TestExitedStopsAnAgentPastItsDeadline(t *testing.T) {
 	f.capture = data
 	p := openFixture(t, testutil.PrivateDir(t), f, &fakeAuthority{engine: f})
 	l := fixtureLaunch(t, data)
-	l.Deadline = time.Now().UTC().Add(3 * time.Second)
+	clock, pastDeadline := deadlineClock(l)
+	p.now = clock
 	i, err := p.Prepare(t.Context(), l, data)
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +127,7 @@ func TestExitedStopsAnAgentPastItsDeadline(t *testing.T) {
 	if exited, err := p.Exited(t.Context(), l, i); err != nil || exited {
 		t.Fatalf("exited before the deadline: %v %v", exited, err)
 	}
-	time.Sleep(time.Until(l.Deadline))
+	pastDeadline()
 	if exited, err := p.Exited(t.Context(), l, i); err != nil || !exited {
 		t.Fatalf("running past the deadline: exited %v %v", exited, err)
 	}
@@ -129,4 +135,32 @@ func TestExitedStopsAnAgentPastItsDeadline(t *testing.T) {
 	if err != nil || stopped.Exit == nil || !stopped.Exit.Deadline {
 		t.Fatalf("deadline stop: %+v %v", stopped.Exit, err)
 	}
+}
+
+// The deadline tests replace the placement's clock; an opened placement's
+// own clock is the machine's, read at the moment it judges a deadline.
+func TestPlacementJudgesDeadlinesOnTheMachineClock(t *testing.T) {
+	t.Parallel()
+	f := newFakeDocker()
+	p := openFixture(t, testutil.PrivateDir(t), f, &fakeAuthority{engine: f})
+	before := time.Now()
+	now := p.now()
+	after := time.Now()
+	if now.Before(before) || now.After(after) {
+		t.Fatalf("placement clock read %s, want between %s and %s", now, before, after)
+	}
+}
+
+// deadlineClock is a clock for launch l that reads an hour before its
+// deadline, which fixtureLaunch sets, until pastDeadline moves it a second
+// past the deadline. The test, not the machine's speed, decides when the
+// deadline passes.
+func deadlineClock(l session.Launch) (clock func() time.Time, pastDeadline func()) {
+	var past atomic.Bool
+	return func() time.Time {
+		if past.Load() {
+			return l.Deadline.Add(time.Second)
+		}
+		return l.Deadline.Add(-time.Hour)
+	}, func() { past.Store(true) }
 }

@@ -284,6 +284,9 @@ type fakePlacement struct {
 	abortUnreachable, abortSealed bool
 	corruptReceipt                func(*Receipt)
 	charge                        budget.TrustedUsage
+	// refuse makes Prepare refuse every launch with it, as a placement
+	// whose run ended before its sandbox started does.
+	refuse error
 }
 
 func newPlacement(data []byte, digest string) *fakePlacement {
@@ -291,6 +294,9 @@ func newPlacement(data []byte, digest string) *fakePlacement {
 }
 func (p *fakePlacement) Prepare(_ context.Context, l Launch, data []byte) (Incarnation, error) {
 	p.prepareCalls++
+	if p.refuse != nil {
+		return Incarnation{}, p.refuse
+	}
 	if l.CheckpointDigest == "" && len(data) == 0 || l.CheckpointDigest != "" && (l.CheckpointDigest != p.digest || string(data) != string(p.data)) {
 		return Incarnation{}, errors.New("wrong checkpoint")
 	}

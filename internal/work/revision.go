@@ -24,6 +24,7 @@ func (o *Owner) revisionSource(source RevisionSource, target project.Association
 	if err != nil {
 		return nil, err
 	}
+	o.interleaveAt(stepSourceRecord, source.SessionID)
 	if err = o.access(e.association()); err != nil {
 		return nil, err
 	}
@@ -42,6 +43,7 @@ func (o *Owner) revisionSource(source RevisionSource, target project.Association
 		if err != nil {
 			return nil, err
 		}
+		o.interleaveAt(stepSourceExecution, source.SessionID)
 		if !derivePhase(r, rec).stopped() {
 			return nil, &profile.Rejection{Code: profile.CodeConflict}
 		}
@@ -67,5 +69,62 @@ func (o *Owner) revisionSource(source RevisionSource, target project.Association
 	if source.Revision == "" || source.Revision != meta.Workspace.Revision {
 		return nil, &profile.Rejection{Code: profile.CodeInvalid}
 	}
+	o.interleaveAt(stepSourceCheckpoint, source.SessionID)
 	return data, nil
+}
+
+// checkSource checks the session a submission starts from before the
+// submission is admitted. It reads the source without the locks Remove holds,
+// so a removal can delete the source part way through the read. Remove marks
+// the session removed before it deletes anything, and the mark stays, so a
+// read that failed while the source went is answered as one that found it
+// removed. The check under o.retention answers a removal after the read.
+func (o *Owner) checkSource(source RevisionSource, target project.Association) error {
+	_, err := o.revisionSource(source, target)
+	if err != nil && CanonicalID(source.SessionID) && o.wasRemoved(source.SessionID) {
+		return &profile.Rejection{Code: profile.CodeInvalid}
+	}
+	return err
+}
+
+// sourceKept checks, under o.retention, that the session a submission starts
+// from is still kept: not removed and still recorded. A mark that cannot be
+// checked refuses with that error, so a removed source is never taken as
+// kept.
+func (o *Owner) sourceKept(id string) error {
+	marked, err := o.removed(id)
+	if err != nil {
+		return err
+	}
+	if marked || !o.recorded(id) {
+		return &profile.Rejection{Code: profile.CodeInvalid}
+	}
+	return nil
+}
+
+// The steps at which Config.interleave runs, each with the ID of the
+// session the step read. revisionSource reads the session new work starts
+// from: its catalogue record, the coordinator's record of its execution, and
+// its checkpoint, read and checked. stepEntry follows every read of a
+// catalogue record by entry; stepStopBound follows the save of a stop's
+// binding, before the coordinator finalizes the execution;
+// stepRecoverExecution follows an interactive recover's read of the
+// execution, before the coordinator recovers it; stepExitRead follows the
+// exit sweep's read of a record, before it reads the execution.
+const (
+	stepSourceRecord     = "record"
+	stepSourceExecution  = "execution"
+	stepSourceCheckpoint = "checkpoint"
+	stepEntry            = "entry"
+	stepStopBound        = "stop-bound"
+	stepRecoverExecution = "recover-execution"
+	stepExitRead         = "exit-read"
+)
+
+// interleaveAt runs the test hook Config.interleave, if set, after step read
+// session id.
+func (o *Owner) interleaveAt(step, id string) {
+	if o.config.interleave != nil {
+		o.config.interleave(step, id)
+	}
 }

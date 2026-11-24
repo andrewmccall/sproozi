@@ -94,6 +94,16 @@ type Config struct {
 	// exitInterval is how often the exit sweep looks for interactive
 	// sessions whose harness ended; zero takes exitWatchInterval.
 	exitInterval time.Duration
+	// interleave, when set, runs at each named step (the step constants in
+	// revision.go) with the ID of the session the step read. Only tests set
+	// it, to remove that session between two steps of a command. stepEntry
+	// also runs with o.retention or a jobs lock held (admitRetention,
+	// checkNoDependants, Remove's own entry, the replay under the lock), so a
+	// hook must not call Remove there. The tests' interleaving fires once,
+	// for the one session it names, and is armed only when nothing else runs
+	// on the owner, so the step that fires it is the command's own, taken
+	// without either lock; it is disarmed before Remove's own entry.
+	interleave func(step, id string)
 }
 
 // Terminal attaches to an active visit's native terminal and reports a
@@ -207,13 +217,16 @@ type Owner struct {
 	// native turn.
 	jobs session.JournalLocks
 	// retention serializes the retention check with the save it admits.
-	retention  sync.Mutex
-	lock       *os.File
-	ctx        context.Context
-	stopAll    context.CancelFunc
-	running    map[string]*driver
-	wg         sync.WaitGroup
-	closeOnce  sync.Once
+	retention sync.Mutex
+	lock      *os.File
+	ctx       context.Context
+	stopAll   context.CancelFunc
+	running   map[string]*driver
+	wg        sync.WaitGroup
+	closeOnce sync.Once
+	// unproven holds each session and cause of an unproven end of a
+	// refused start already logged.
+	unproven   sync.Map
 	closeError error
 }
 
@@ -364,7 +377,7 @@ func (o *Owner) SubmitAs(ctx context.Context, caller Caller, q Submit) (View, er
 		}
 	}
 	if q.WorkspaceFrom != nil {
-		if _, err = o.revisionSource(*q.WorkspaceFrom, association); err != nil {
+		if err = o.checkSource(*q.WorkspaceFrom, association); err != nil {
 			return View{}, err
 		}
 	}
@@ -380,9 +393,10 @@ func (o *Owner) SubmitAs(ctx context.Context, caller Caller, q Submit) (View, er
 	}
 	// Removal holds the same lock: the session this one starts from is
 	// still there, and is now kept until this one has started.
-	if q.WorkspaceFrom != nil && (o.wasRemoved(q.WorkspaceFrom.SessionID) ||
-		!o.recorded(q.WorkspaceFrom.SessionID)) {
-		return View{}, &profile.Rejection{Code: profile.CodeInvalid}
+	if q.WorkspaceFrom != nil {
+		if err = o.sourceKept(q.WorkspaceFrom.SessionID); err != nil {
+			return View{}, err
+		}
 	}
 	if len(upload) > 0 {
 		// Kept until the coordinator retains it as the first visit's input.

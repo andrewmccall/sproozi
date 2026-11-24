@@ -409,22 +409,53 @@ func needsRecovery(err error, id, continueWith string) error {
 		return rejectedError(fmt.Sprintf("%v; run \"sproozi recover %s\" to finish the cancellation", err, id))
 	case errors.Is(err, session.ErrSessionCancelled):
 		return cancelledProblem(id)
-	case errors.Is(err, session.ErrDeadlinePassed):
-		return deadlineProblem(id)
 	case errors.Is(err, session.ErrEndUnproven):
 		return unprovenProblem(id, err)
+	case errors.Is(err, session.ErrStartRefused):
+		return refusedProblem(id, err)
+	case errors.Is(err, session.ErrDeadlinePassed):
+		return deadlineProblem(id)
 	}
 	return err
 }
 
-// unprovenProblem says a start or move reached its deadline but could not
-// be ended yet, because the placement has not shown that nothing runs at the
-// destination, and how each way on works (ADR 0060).
+// unprovenProblem says a start or move reached its deadline, or was refused
+// by its destination, but could not be ended yet, because the placement has
+// not shown that nothing runs at the destination, and how each way on works
+// (ADRs 0060 and 0067).
 func unprovenProblem(id string, err error) error {
-	return rejectedError(fmt.Sprintf("session %s reached its deadline before it started, but %s; repeat the command "+
+	why, unproven := fmt.Sprintf("session %s reached its deadline before it started", id), err.Error()
+	var refused *session.StartRefused
+	if errors.As(err, &refused) {
+		// The refusal leads the reply; what is unproven follows once.
+		why = fmt.Sprintf("session %s can never start at its destination: %s", id, refusalReason(err))
+		unproven = strings.TrimSuffix(unproven, ": "+refused.Error())
+	}
+	return rejectedError(fmt.Sprintf("%s, but %s; repeat the command "+
 		"once Docker or the cluster is reachable to end the start with the work kept, or run \"sproozi cancel %s\", "+
 		"which records the cancellation now and finishes it once the placement can show that nothing runs there",
-		id, strings.TrimPrefix(err.Error(), "session: "), id))
+		why, strings.TrimPrefix(unproven, "session: "), id))
+}
+
+// refusalReason is the reason of the placement's refusal err carries, or
+// what it says without one; "" when err carries none.
+func refusalReason(err error) string {
+	var refused *session.StartRefused
+	if !errors.As(err, &refused) {
+		return ""
+	}
+	if refused.Reason == "" {
+		return strings.TrimPrefix(session.ErrStartRefused.Error(), "session: ")
+	}
+	return refused.Reason
+}
+
+// refusedProblem says the destination refused a start or move for good, so
+// the session stopped with its work kept, and names the one command that
+// continues it (ADR 0067).
+func refusedProblem(id string, err error) error {
+	return rejectedError(fmt.Sprintf("session %s can never start at its destination: %s, so it is stopped with its "+
+		"work kept; continue it on this machine with \"sproozi resume %s\"", id, refusalReason(err), id))
 }
 
 // deadlineProblem says a start or move reached its deadline first, so the

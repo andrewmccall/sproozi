@@ -193,6 +193,30 @@ new release's CRDs and overlay as in [Install](#install), and reapply
 `kubectl apply` does not delete objects a new release no longer ships. The
 release notes' "Breaking changes" name any you must delete and how.
 
+Sandbox Pods that a controller from before the gateway token's directory
+mount created keep the token they started with, and lose the gateway two hours
+after they started. Upgrading leaves them running. List them:
+
+```bash
+kubectl get pods -n sproozi-agents -l sproozi.com/managed-by=sproozi-controller -o json \
+  | jq -r '.items[] | select(any(.spec.containers[].volumeMounts[]?; .name == "gateway-token" and .subPath == "token")) | .metadata.name'
+```
+
+Stop and resume a session to give it a new Pod; an AgentRun whose command
+reads the token once is bounded by the token either way. A run whose Pod the
+old controller created but had not yet recorded when you upgraded stays where
+it is, and the controller logs `existing sandbox ... has unsafe Pod settings:
+containers` for it; cancel and resubmit the AgentRun, or stop and resume the
+session. See
+[security hardening](../reference/security-hardening.md#protect-transport-and-identities).
+
+The workload container now mounts the directory `/var/run/sproozi/tokens/gateway`
+rather than the file inside it. An AgentRuntime whose `podTemplate` mounts a
+volume at that directory now makes every sandbox Pod invalid, because two
+mounts share a path; move that mount elsewhere. A template mount at
+`/var/run/sproozi/tokens/gateway/token`, which the API server refused before,
+would now be accepted and hide the token.
+
 ## Uninstall
 
 Delete the runs in every namespace first, while the controller is still

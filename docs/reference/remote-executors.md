@@ -77,7 +77,11 @@ client certificate. Whatever context you use, the executor sees the
 
 The service and the executor upgrade together. A placement request that fails
 answers with one of these codes; status and messages never carry the
-executor's own error text.
+executor's own error text. The one exception is a `refused` answer's
+`reason`, which names the AgentRun and its `Ready` condition. A session the
+executor owns also shows its owner, in its problem, the cause of an end only
+an administrator can clear, which names the agent namespace and a Pod label;
+that is the session's own owner, so it is shown.
 
 | Code | HTTP status | Meaning |
 | --- | --- | --- |
@@ -87,6 +91,7 @@ executor's own error text.
 | `expired` | 410 | The execution's deadline has passed. |
 | `unsupported` | 422 | The executor cannot take this launch, such as a profile it does not keep. |
 | `unavailable` | 503 | The executor could not answer. A stop is then unproven: the session becomes `unknown-stop` until `recover` or another `stop` proves it. |
+| `refused` | 409 | Only `prepare`: the executor can never prepare this launch, because what it would start from has ended, such as an AgentRun that failed, was deleted or lost its registration before its Pod. Its `reason` field says why, in at most 512 printable bytes. Repeating it never helps: the service ends the start, keeping the session's work, and `resume` continues it ([ADR 0067](../adr/0067-a-start-ends-when-its-run-has-ended.md)). A service older than this code reports it as unavailable. |
 | `turn_pending` | 503 | A stop is still waiting for the agent's turn, about two minutes after it asked. Its `waiting` field says what for, in at most 160 printable bytes. The session stays `stopping`, as on this machine, and `stop`, `move` or `recover` again keeps waiting. |
 
 A code this Sproozi does not know counts as `unavailable`, so a stop is never
@@ -153,7 +158,7 @@ the answer to arrive
 | --- | --- | --- |
 | Placement `stop`; owner `stop` and `recover` | 9 minutes 43 seconds: two 2-minute waits for a first visit's conversation and turn, the supervisor's 30-second wait for the agent to quit, 3 seconds after killing one that did not, and 10 seconds for its reply to be read ([native control](native-control.md)), then 5 minutes to end the container (at most 1 minute), seal usage and capture the checkpoint | 10 minutes 43 seconds |
 | Placement `prepare` | 2 minutes for an interactive visit's Pod to run, plus sending and restoring the checkpoint | 8 minutes |
-| Placement `abort`; owner `cancel` | The Pod's termination grace period, 30 seconds by default, and sealing usage | 2 minutes |
+| Placement `abort`; owner `cancel` | The Pod's termination grace period, 30 seconds by default, and sealing usage. A wait for a deleted Pod's agent container to be seen to stop ends after 90 seconds, as on a lost node; the cancellation is then `unknown-stop`, and `recover` waits again ([ADR 0067](../adr/0067-a-start-ends-when-its-run-has-ended.md)) | 2 minutes |
 | Placement `abort-preparation` | 30 seconds once no other operation on the same visit holds it ([cancelling a preparation](#cancelling-a-preparation)) | 2 minutes |
 | Everything else, including placement `exited`, and the wait for an `attach` to be admitted | A few API calls | 45 seconds |
 
@@ -244,6 +249,27 @@ empty keeps the submission's choice. The executor's `maxDuration` caps it, so
 An interactive session does not recover by itself. When the executor cannot
 prove a stop or seal usage, the session stays `unknown-stop` or
 `unknown-usage`, after a restart too, until `recover` retries it once.
+
+A stop's last fixed command ends the sandbox's checkpoint helper. When that
+command's reply is lost, the executor reads the Pod for up to 15 seconds,
+since the kubelet reports a container's end about a second late. If the Pod
+shows the helper's container terminated with code 0, or the Pod is gone, the
+stop is complete, and the executor logs `Treated the finish of the checkpoint
+helper in Pod NAMESPACE/NAME as done, because …` with the lost command's
+error ([ADR 0068](../adr/0068-a-lost-finish-is-proven-by-the-helpers-end.md)).
+Otherwise the session stays `unknown-stop`, and `recover` (or, for a task,
+the executor's next retry) completes it once the helper has ended, whatever
+its exit code. The wait comes out of the stop's own time: the exit sweep
+gives one session 30 seconds for the check and the whole stop, and a stop
+that runs out of time stays unproven. While it waits, other commands on the
+same session wait too. A failed fixed command's error in the executor's log
+names the command, its container and what the exec reported, such as
+`placement: fixed command unavailable: checkpoint finish in container
+checkpoint: command terminated with exit code 137`, on one line of at most
+512 bytes. It never includes the exec request or its URL, which carries the
+command's arguments, or the command's output: a failed exec request is
+reported as `Post request: ` and the connection's error. Text the API server,
+kubelet or container runtime returned is kept as it comes.
 
 ### Starting from an approved repository or an upload
 
@@ -342,9 +368,20 @@ session's, and `pullFinished`, which a pulled session needs.
 
 A removed session leaves a mark of about 50 bytes, outside `retainedBytes`
 and the session count, so its ID never starts again: a `run` that repeats its
-`requestId` answers `conflict`, and so does a `run` whose `workspaceFrom`
-names it. Removing it again answers `{"id":"..."}`. An ID the executor never
-held answers `invalid_request`.
+`requestId` answers `conflict`. A `run` whose `workspaceFrom` names it answers
+`invalid_request`, also when the removal lands while the `run` is still
+reading it; a `run` the executor kept before the removal began keeps the
+source instead (the `workspaceFrom` row above). Removing it again answers
+`{"id":"..."}`. An ID the executor never held answers `invalid_request`, and
+so does every other command on a removed session (`info`, `recover`, `stop`,
+`resume`, `cancel`, `attach`, `begin`, `claim`); `list` leaves it out. A
+command that reads the session after its removal began answers the same,
+whatever it read before. One whose last read of the session came before the
+removal answers from that read: `recover` of a `retained` session that is
+then removed returns it `retained`. If the executor cannot check a session's
+mark, for example because its catalogue directory cannot be read, the
+command answers `unavailable` rather than treating the session as removed or
+kept.
 
 Removal does not wait for other sessions: it takes only the removed
 session's executions, and waits at most five seconds for an operation on one

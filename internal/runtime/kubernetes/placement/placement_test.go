@@ -151,15 +151,32 @@ type admissionClient struct {
 	// podRead, when set, changes each Pod a Get reads, as a Pod the
 	// kubelet or a deletion changed between reads would read.
 	podRead atomic.Pointer[func(*corev1.Pod)]
+	// runRead, when set, is called with each AgentRun a Get reads, so a
+	// test can count the reads of a wait.
+	runRead atomic.Pointer[func(*api.AgentRun)]
+	// getErr, when set, is called with each object a Get is about to read,
+	// and a non-nil result fails that Get, as an API server that cannot
+	// answer does.
+	getErr atomic.Pointer[func(client.Object) error]
 }
 
 func (c *admissionClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, options ...client.GetOption) error {
+	if fail := c.getErr.Load(); fail != nil {
+		if err := (*fail)(obj); err != nil {
+			return err
+		}
+	}
 	if err := c.Client.Get(ctx, key, obj, options...); err != nil {
 		return err
 	}
 	if pod, ok := obj.(*corev1.Pod); ok {
 		if read := c.podRead.Load(); read != nil {
 			(*read)(pod)
+		}
+	}
+	if run, ok := obj.(*api.AgentRun); ok {
+		if read := c.runRead.Load(); read != nil {
+			(*read)(run)
 		}
 	}
 	return nil
@@ -268,6 +285,10 @@ type protocolExecutor struct {
 	captureInvalid bool
 	captures       int
 	captureArgs    []string
+	// finishOutcome, when set, carries out finish in place of the helper
+	// ending with code 0 and the exec reporting success: it changes the Pod
+	// as the helper's end would and returns what the exec reports.
+	finishOutcome func(ctx context.Context, namespace, pod string) error
 	// logs is the native container's output, where the supervisor writes
 	// its exit report.
 	logs []byte
@@ -347,6 +368,9 @@ func (e *protocolExecutor) helper(ctx context.Context, namespace, pod string, ar
 		return true, err
 	case helperFinish:
 		e.finishes++
+		if e.finishOutcome != nil {
+			return true, e.finishOutcome(ctx, namespace, pod)
+		}
 		var actual corev1.Pod
 		if err := e.kube.Get(ctx, client.ObjectKey{Namespace: namespace, Name: pod}, &actual); err != nil {
 			return true, err
@@ -756,6 +780,12 @@ func setupKind(t *testing.T, kind harness.NativeKind) (*Placement, *admissionCli
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = p.Close() })
+	// An opened placement waits the production bound; a helper the fixture
+	// never ends is not waited for long.
+	if p.helperEndWait != helperEndWait {
+		t.Fatalf("an opened placement waits %s for the helper's end, not %s", p.helperEndWait, helperEndWait)
+	}
+	p.helperEndWait = 300 * time.Millisecond
 	data, meta := fixtureArtifactKind(t, kind)
 	executor := &protocolExecutor{kube: kube, data: data, meta: meta, state: harness.NativePrepared}
 	p.exec = executor

@@ -7,7 +7,9 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -89,67 +91,188 @@ def kind_nodes():
     ).splitlines()
 
 
+# An import that moves no byte for this long is stuck, not slow: a full load
+# moves several GB in a minute or two, and the stalls seen on Docker Desktop
+# never recovered (10 and 19 minutes at 0% CPU).
+IMPORT_STALL_SECONDS = 120
+# Once every byte is sent, each node's ctr still commits and unpacks.
+IMPORT_EXIT_SECONDS = 300
+IMPORT_ATTEMPTS = 3
+# ctr images import writes each archive entry under the ingest ref
+# "tar-<entry name>", and a node's containerd lets one writer hold a ref while
+# others wait without reading. The clients and native images share their Node
+# base layers, so two images streamed at once can each hold a shared layer on
+# a different node; each tee then blocks on the node where its import waits,
+# and neither lock is ever released. One import at a time in this process.
+IMPORT_LOCK = threading.Lock()
+IMPORT_MARKER = "SPROOZI_KIND_IMPORT"
+# Kill the ctr processes a killed `docker exec` client leaves in the node,
+# found by the marker in their environment.
+STOP_MARKED = (
+    'for p in /proc/[0-9]*; do grep -qzxF "$1" "$p/environ" 2>/dev/null'
+    ' && kill -9 "${p#/proc/}" && echo "stopped ${p#/proc/}"; done; true'
+)
+
+
+class ImportAttemptFailed(RuntimeError):
+    pass
+
+
 def import_archive(tag, nodes, platform):
     """Stream one docker save into every node's containerd import.
 
     Returns the SHA-256 of the archive. The archive is never written to disk,
-    and each node receives exactly the bytes that were hashed.
+    and each node receives exactly the bytes that were hashed. An attempt
+    that fails, or moves no byte for IMPORT_STALL_SECONDS, is stopped on the
+    host and in the nodes and retried from a fresh save, up to
+    IMPORT_ATTEMPTS times; the checksum is of the attempt every node accepted.
     """
-    save = subprocess.Popen(["docker", "save", tag], stdout=subprocess.PIPE)
-    imports = []
-    for node in nodes:
-        log = tempfile.TemporaryFile()
-        command = [
-            "docker",
-            "exec",
-            "-i",
-            node,
-            "ctr",
-            "-n",
-            "k8s.io",
-            "images",
-            "import",
-            "--platform",
-            platform,
-            "--digests",
-            "-",
-        ]
-        process = subprocess.Popen(
-            command, stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT
-        )
-        imports.append((node, command, process, log))
-    checksum = hashlib.sha256()
-    try:
-        while chunk := save.stdout.read(1 << 20):
-            checksum.update(chunk)
-            for _, _, process, _ in imports:
-                process.stdin.write(chunk)
-    except BrokenPipeError:
-        pass
-    finally:
-        save.stdout.close()
-        for _, _, process, _ in imports:
+    reports = []
+    with IMPORT_LOCK:
+        for attempt in range(1, IMPORT_ATTEMPTS + 1):
+            marker = IMPORT_MARKER + "=" + uuid.uuid4().hex
             try:
-                process.stdin.close()
-            except BrokenPipeError:
-                pass
-    failures = []
-    if save.wait() != 0:
-        failures.append("docker save " + tag + " exited " + str(save.returncode))
-    for node, command, process, log in imports:
-        if process.wait() != 0:
-            log.seek(0)
-            failures.append(
-                " ".join(command)
-                + " exited "
-                + str(process.returncode)
-                + ": "
-                + log.read().decode(errors="replace")
+                return import_attempt(tag, nodes, platform, marker)
+            except ImportAttemptFailed as failed:
+                stopped = [stop_marked_imports(node, marker) for node in nodes]
+                reports.append(
+                    "attempt " + str(attempt) + ": " + str(failed)
+                    + "".join(note for note in stopped if note)
+                )
+                print("Kind image import of " + tag + " failed, " + reports[-1],
+                      file=sys.stderr, flush=True)
+    raise RuntimeError(
+        "Kind image import of " + tag + " failed after "
+        + str(IMPORT_ATTEMPTS) + " attempts: " + "; ".join(reports)
+    )
+
+
+def stop_marked_imports(node, marker):
+    """Stop this attempt's ctr processes left inside a node; return a note."""
+    try:
+        stopped = subprocess.run(
+            ["docker", "exec", node, "sh", "-c", STOP_MARKED, "sh", marker],
+            capture_output=True, text=True, timeout=60, check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return " (could not stop leftover imports on " + node + ": timed out)"
+    if stopped.returncode != 0:
+        return (" (could not stop leftover imports on " + node + ": "
+                + (stopped.stdout + stopped.stderr).strip() + ")")
+    pids = stopped.stdout.split()[1::2]
+    return " (stopped ctr " + ", ".join(pids) + " on " + node + ")" if pids else ""
+
+
+def import_attempt(tag, nodes, platform, marker):
+    save_log = tempfile.TemporaryFile()
+    save = subprocess.Popen(
+        ["docker", "save", tag], stdout=subprocess.PIPE, stderr=save_log
+    )
+    children = [save]
+    imports = []
+    progress = {"moved": time.monotonic(), "read": 0, "writing": None}
+    accepted = dict.fromkeys(nodes, 0)
+    stalled = []
+    done = threading.Event()
+
+    def stop_children():
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+        for child in children:
+            child.wait()
+
+    def watch():
+        # Killing the children unblocks the tee: a blocked write to a killed
+        # reader raises BrokenPipeError and a killed save reads as EOF.
+        while not done.wait(min(1.0, IMPORT_STALL_SECONDS / 4)):
+            if time.monotonic() - progress["moved"] >= IMPORT_STALL_SECONDS:
+                stalled.append(stream_report())
+                stop_children()
+                return
+
+    def stream_report():
+        where = (
+            "blocked writing to " + progress["writing"]
+            if progress["writing"] else "waiting for docker save"
+        )
+        return (
+            "no byte moved for " + str(IMPORT_STALL_SECONDS) + " s, " + where
+            + "; docker save produced " + str(progress["read"]) + " bytes; "
+            + ", ".join(node + " accepted " + str(n) + " bytes"
+                        for node, n in accepted.items())
+        )
+
+    try:
+        for node in nodes:
+            log = tempfile.TemporaryFile()
+            command = [
+                "docker", "exec", "-i", "-e", marker, node,
+                "ctr", "-n", "k8s.io", "images", "import",
+                "--platform", platform, "--digests", "-",
+            ]
+            process = subprocess.Popen(
+                command, stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT
             )
-        log.close()
-    if failures:
-        raise RuntimeError("Kind image import failed: " + "; ".join(failures))
-    return checksum.hexdigest()
+            children.append(process)
+            imports.append((node, command, process, log))
+        watcher = threading.Thread(target=watch, daemon=True)
+        watcher.start()
+        checksum = hashlib.sha256()
+        try:
+            while chunk := save.stdout.read(1 << 20):
+                progress["read"] += len(chunk)
+                progress["moved"] = time.monotonic()
+                checksum.update(chunk)
+                for node, _, process, _ in imports:
+                    progress["writing"] = node
+                    process.stdin.write(chunk)
+                    accepted[node] += len(chunk)
+                    progress["moved"] = time.monotonic()
+                progress["writing"] = None
+        except BrokenPipeError:
+            # A consumer exited, or was stopped by the watcher.
+            pass
+        finally:
+            done.set()
+            watcher.join()
+            save.stdout.close()
+            for _, _, process, _ in imports:
+                try:
+                    process.stdin.close()
+                except OSError:
+                    pass
+        if stalled:
+            raise ImportAttemptFailed(stalled[0])
+        failures = []
+        deadline = time.monotonic() + IMPORT_EXIT_SECONDS
+        for name, child, log in [("docker save " + tag, save, save_log)] + [
+            (" ".join(command), process, log) for _, command, process, log in imports
+        ]:
+            try:
+                child.wait(max(0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                failures.append(
+                    name + " did not exit within " + str(IMPORT_EXIT_SECONDS)
+                    + " s after the stream ended ("
+                    + ", ".join(node + " accepted " + str(n) + " bytes"
+                                for node, n in accepted.items()) + ")"
+                )
+                continue
+            if child.returncode != 0:
+                log.seek(0)
+                failures.append(
+                    name + " exited " + str(child.returncode) + ": "
+                    + log.read().decode(errors="replace").strip()
+                )
+        if failures:
+            raise ImportAttemptFailed("; ".join(failures))
+        return checksum.hexdigest()
+    finally:
+        stop_children()
+        save_log.close()
+        for _, _, _, log in imports:
+            log.close()
 
 
 def resolve_on_node(tag, node):
@@ -395,7 +518,8 @@ def main(argv):
     pull-hermes: have each KIND_CLUSTER node pull the pinned Hermes image;
     writes hermes.json. load: import the images that build recorded, and use
     pull-hermes's record when it matches these nodes (otherwise pull now).
-    Without an argument, each image is loaded as soon as it is ready.
+    Without an argument, each image is loaded as soon as it is ready and no
+    other image is importing.
     """
     mode = argv[0] if argv else "all"
     if mode not in ["all", "build", "load", "pull-hermes"]:
@@ -418,7 +542,8 @@ def main(argv):
         return
     source_snapshot, hermes = start()
     # The builds, the Hermes pull and each image's import are independent;
-    # every image still passes the same digest and CRI checks.
+    # every image still passes the same digest and CRI checks. The imports
+    # themselves take turns (IMPORT_LOCK).
     with ThreadPoolExecutor(max_workers=len(IMAGES) + 1) as pool:
         if mode == "build":
             futures = {

@@ -4,7 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"net/url"
+	"path"
+	"regexp"
+	"strings"
 
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	corev1 "k8s.io/api/core/v1"
@@ -87,17 +92,67 @@ func (p *Placement) control(ctx context.Context, pod *corev1.Pod, container stri
 	err := p.exec.Execute(ctx, pod.Namespace, pod.Name, container, args, reader, output, errout)
 	if err != nil {
 		code, ok := checkpoint.HelperExitCode(err)
-		return nil, &commandFailed{code: code, exited: ok}
+		return nil, &commandFailed{code: code, exited: ok, command: operation(args), container: container, cause: execCause(err)}
 	}
 	return output.Bytes(), nil
 }
 
 // commandFailed is a fixed command that failed. exited reports that the
 // command ran and ended with code, as the exec reported it; otherwise the
-// exec or its stream failed. The command's own error text is not kept.
+// exec or its stream failed. cause is the exec's own error text, which says
+// which (execCause). The command's output, which the sandbox can write to,
+// is never kept.
 type commandFailed struct {
-	code   int
-	exited bool
+	code      int
+	exited    bool
+	command   string
+	container string
+	cause     string
 }
 
-func (*commandFailed) Error() string { return "placement: fixed command unavailable" }
+func (f *commandFailed) Error() string {
+	return fmt.Sprintf("placement: fixed command unavailable: %s in container %s: %s", f.command, f.container, f.cause)
+}
+
+// operation names a fixed command by its executable and operation, leaving
+// out its arguments, such as the files a capture selects.
+func operation(args []string) string {
+	if len(args) < 2 {
+		return strings.Join(args, " ")
+	}
+	return path.Base(args[0]) + " " + args[1]
+}
+
+// maxCause bounds the exec error text a failed command keeps.
+const maxCause = 512
+
+// requestURL matches what the text of an exec error may hold of its request:
+// an http, https, ws or wss URL, quoted or not, or any word with the exec
+// query's shape, command= or its percent-encoded command%3D. The exec
+// request's URL carries every argument of the command in its query, such as
+// the files a capture selects, its thread and the instruction digest. A
+// runtime's own identifiers, such as containerd:// container IDs and unix://
+// sockets, and other quoted text are left as they come.
+var requestURL = regexp.MustCompile(`"?(?i:https?|wss?)://[^\s"]*"?|[^\s"]*(?i:command(?:=|%3D))[^\s"]*`)
+
+// execCause is err's text on one line, at most maxCause bytes, without the
+// exec request's URL. It comes from the exec client, the API server, the
+// kubelet and the container runtime: an exit code, a broken or reset stream,
+// a refused connection, a container that is gone, a timeout, never the
+// command's own output, which travels on its own streams. A *url.Error in the
+// chain keeps its operation and inner error; client-go also folds one into
+// plain text (spdy.Negotiate's "error sending request: %v"), so any URL left
+// in the text is replaced as well.
+func execCause(err error) string {
+	text := err.Error()
+	var request *url.Error
+	if errors.As(err, &request) {
+		text = request.Op + " request: " + request.Err.Error()
+	}
+	text = requestURL.ReplaceAllString(text, "request")
+	cause := strings.ToValidUTF8(strings.Join(strings.Fields(text), " "), "?")
+	if len(cause) > maxCause {
+		cause = strings.ToValidUTF8(cause[:maxCause], "") + "…"
+	}
+	return cause
+}

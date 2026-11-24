@@ -47,11 +47,13 @@ const (
 	trustBundlePath     = "/etc/sproozi/trust/ca-bundle.pem"
 	kubeconfigPath      = "/etc/sproozi/kubeconfig"
 	maxTrustBundleBytes = 1 << 20
-	// AgentPolicy caps executions at one hour. The runner currently reads the
-	// projected token once when it configures its clients, so request a token
-	// that covers that bound plus an equal allowance for scheduling and cleanup.
-	// Gateway authorization still re-reads the live AgentRun on every request,
-	// so cancellation and terminal-state revocation do not depend on token expiry.
+	// The kubelet refreshes the projected gateway token before it expires.
+	// A managed session's gateway forwarder reads the current token for each
+	// connection, so it outlives any one token. A runtime command that reads
+	// the token once, as the ordinary AgentRun examples do, keeps the gateway
+	// for this long after its Pod starts. Gateway authorization re-reads the
+	// live AgentRun on every request, so cancellation and terminal-state
+	// revocation do not depend on token expiry.
 	gatewayTokenExpirationSeconds int64 = 2 * 60 * 60
 )
 
@@ -604,7 +606,7 @@ func BuildPodSpec(run *sprooziv1alpha1.AgentRun, rt *sprooziv1alpha1.AgentRuntim
 			corev1.VolumeMount{Name: "client-trust", MountPath: "/etc/sproozi/trust", ReadOnly: true},
 			corev1.VolumeMount{Name: workspaceVolume, MountPath: workspaceDirectory}, corev1.VolumeMount{Name: "tmp", MountPath: "/tmp"},
 			corev1.VolumeMount{Name: "agent-home", MountPath: "/home/agent"},
-			corev1.VolumeMount{Name: gatewayTokenVolumeName, MountPath: gatewayTokenPath, SubPath: "token", ReadOnly: true})
+			gatewayTokenMount())
 	}
 
 	// Make API defaults explicit so re-reconciliation compares the admitted

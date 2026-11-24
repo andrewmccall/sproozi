@@ -182,7 +182,20 @@ def login_seed(native_image):
     return [claim, pod]
 
 
-def render(control_image, native_image, ca, auth):
+def lengthen(documents, profile, duration):
+    """Raises the example's 30-minute cap, the executor's maxDuration and the
+    policy's maxExecutionDuration, to duration, for a scenario that must
+    outlive a gateway token."""
+    if not re.fullmatch(r"[1-9][0-9]*[mh]", duration):
+        raise ValueError("--max-duration must be a whole number of minutes or hours, such as 90m")
+    policies = [d for d in documents if d["kind"] == "AgentPolicy"]
+    if len(policies) != 1:
+        raise ValueError("The example must hold exactly one AgentPolicy")
+    policies[0]["spec"]["maxExecutionDuration"] = duration
+    profile["maxDuration"] = duration
+
+
+def render(control_image, native_image, ca, auth, max_duration=None):
     if not IMAGE.fullmatch(control_image) or not IMAGE.fullmatch(native_image):
         raise ValueError("Both images must be canonical repository@sha256 references")
     if len(ca.encode()) > 1 << 20 or not re.fullmatch(
@@ -199,6 +212,8 @@ def render(control_image, native_image, ca, auth):
     shipped = example(native_image, trust, auth)
     profile = executor_profile()
     check_profile(profile, shipped)
+    if max_duration:
+        lengthen(shipped, profile, max_duration)
     documents += shipped
     documents += [KUBE.object_("ConfigMap", "sproozi-work-profile", SESSIONS, immutable=True,
                                data={"profile.json": json.dumps(profile, indent=2)}),
@@ -216,8 +231,10 @@ def main():
     parser.add_argument("--native-image", required=True)
     parser.add_argument("--ca-file", type=Path, required=True)
     parser.add_argument("--auth", choices=["sign-in", "gateway-key"], default="sign-in")
+    parser.add_argument("--max-duration", help="raise the example's executor and policy duration caps to this")
     args = parser.parse_args()
-    documents, _ = render(args.control_image, args.native_image, args.ca_file.read_text(), args.auth)
+    documents, _ = render(args.control_image, args.native_image, args.ca_file.read_text(), args.auth,
+                          args.max_duration)
     sys.stdout.write(yaml.safe_dump_all(documents, sort_keys=False))
 
 

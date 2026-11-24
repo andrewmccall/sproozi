@@ -81,8 +81,9 @@ for ownership checks and retained state.
 
 ## Gateway revocation
 
-The projected gateway token lasts two hours; an AgentPolicy's optional
-`maxExecutionDuration` can limit execution and has no default. The demo reads the token once. The gateway does not wait for token expiry
+The projected gateway token lasts two hours, and the kubelet refreshes it in
+the mounted token directory before it expires; an AgentPolicy's optional
+`maxExecutionDuration` can limit execution and has no default. The demo reads the token once, so it keeps the gateway for two hours after its Pod starts. The gateway does not wait for token expiry
 to revoke access. It checks run identity and policy on every new connection and
 request, and rechecks open connections every second by default. On Kubernetes,
 the checks after the first read a watch cache, confirm any change live and run

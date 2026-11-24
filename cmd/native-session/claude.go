@@ -412,17 +412,49 @@ func installClaudeJSON(path string, value any) error {
 // completion rather than settling it.
 const claudeHookMaxBytes = 4 << 20
 
+// readClaudeHook returns as soon as one whole JSON object has arrived, not
+// at the end of the input: the hook's report must not depend on when Claude
+// Code closes the hook's stdin. Input that never completes an object holds
+// the hook until Claude Code's hook timeout kills it; without an object there
+// is nothing to report sooner. Bytes already read after the object, other
+// than whitespace, refuse the payload. The bound counts every byte read: the
+// object and whatever was read with it.
 func readClaudeHook(input io.Reader) (*claudeHook, error) {
-	data, err := io.ReadAll(io.LimitReader(input, claudeHookMaxBytes+1))
-	if err != nil || len(data) > claudeHookMaxBytes {
+	counted := &countingReader{r: io.LimitReader(input, claudeHookMaxBytes+1)}
+	decoder := json.NewDecoder(counted)
+	var raw json.RawMessage
+	err := decoder.Decode(&raw)
+	if counted.n > claudeHookMaxBytes {
 		return nil, errors.New("claude hook payload exceeds limit")
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil, errors.New("claude hook payload is incomplete")
+	}
+	if err != nil {
+		return nil, err
+	}
+	trailing, _ := io.ReadAll(decoder.Buffered())
+	if len(bytes.TrimSpace(trailing)) != 0 {
+		return nil, errors.New("claude hook payload has trailing data")
 	}
 	var h claudeHook
 	// Pinned hook payloads also contain tool-input and tool-output fields.
 	// They are opaque; only the selected lifecycle identity, the tool's name
 	// and ID, and a submitted prompt (compared with a task) are consumed here.
-	if err = json.Unmarshal(data, &h); err != nil {
+	if err := json.Unmarshal(raw, &h); err != nil {
 		return nil, err
 	}
 	return &h, nil
+}
+
+// countingReader counts the bytes read through it.
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
 }

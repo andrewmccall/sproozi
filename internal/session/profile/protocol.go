@@ -106,6 +106,12 @@ const (
 	// changed, the writer runs with input gated and repeating the stop waits
 	// again. Only a stop answers with it, together with what it waits for.
 	CodeTurnPending Code = "turn_pending"
+	// CodeRefused is a preparation the executor can never make: what the
+	// launch would start from has ended, such as an AgentRun that failed
+	// before its sandbox started. Repeating it never helps, so the home
+	// ends the start (ADR 0067). Only a prepare answers with it, together
+	// with the reason. A client older than it reads it as unavailable.
+	CodeRefused Code = "refused"
 	// CodeSessionsFull and CodeRetentionFull are a remote executor's owner
 	// refusing to start or resume work because it keeps as many sessions,
 	// or as many bytes, as it may. Nothing changed; removing sessions or
@@ -166,12 +172,16 @@ type RemoteError struct {
 	Transport    error
 	Waiting      string
 	Unrecognized Code
+	// Reason is why a refused preparation can never be made.
+	Reason string
 }
 
 func (r *RemoteError) Error() string {
 	switch {
 	case r.Code == CodeTurnPending:
 		return (&harness.NativeTurnPending{Waiting: r.Waiting}).Error()
+	case r.Code == CodeRefused:
+		return fmt.Sprintf("session profile: %s (HTTP %d): %v", r.Code, r.Status, &session.StartRefused{Reason: r.Reason})
 	case r.Status == 0:
 		return fmt.Sprintf("session profile: %s (no HTTP response)", r.Code)
 	case r.Unrecognized != "":
@@ -183,10 +193,15 @@ func (r *RemoteError) Error() string {
 }
 
 // Unwrap makes a turn_pending answer read as harness.ErrNativeTurnPending, so
-// the coordinator keeps the stop pending exactly as it does for a local one.
+// the coordinator keeps the stop pending exactly as it does for a local one,
+// and a refused answer as session.StartRefused, so it ends the start as it
+// does for a local refusal.
 func (r *RemoteError) Unwrap() error {
-	if r.Code == CodeTurnPending {
+	switch r.Code {
+	case CodeTurnPending:
 		return &harness.NativeTurnPending{Waiting: r.Waiting}
+	case CodeRefused:
+		return &session.StartRefused{Reason: r.Reason}
 	}
 	return nil
 }
@@ -194,7 +209,7 @@ func (r *RemoteError) Unwrap() error {
 // knownCode reports an outcome code this version of the protocol defines.
 func knownCode(c Code) bool {
 	switch c {
-	case CodeInvalid, CodeDenied, CodeConflict, CodeExpired, CodeUnsupported, CodeUnavailable, CodeTurnPending:
+	case CodeInvalid, CodeDenied, CodeConflict, CodeExpired, CodeUnsupported, CodeUnavailable, CodeTurnPending, CodeRefused:
 		return true
 	}
 	return false
@@ -251,6 +266,9 @@ type response struct {
 	Exited bool `json:"exited,omitempty"`
 	// Waiting is what a turn_pending stop waits for, and nothing else.
 	Waiting string `json:"waiting,omitempty"`
+	// Reason is why a refused preparation can never be made, and nothing
+	// else.
+	Reason string `json:"reason,omitempty"`
 }
 
 func bodyLimit(max int64) (int64, error) {

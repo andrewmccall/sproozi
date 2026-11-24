@@ -325,6 +325,69 @@ func TestRemoveRacesASubmissionFromIt(t *testing.T) {
 	}
 }
 
+// A submission whose source session is removed while the submission reads
+// it, at any step before the submission is retained, is answered as one
+// whose source was removed first: invalid, with the same message, never a
+// filesystem error or conflict, and nothing of it is kept. The removal runs
+// to completion inside Config.interleave after the named step, so the
+// interleaving does not depend on timing:
+//
+//   - record: after the source's catalogue record, before Coordinator.Inspect,
+//     which then finds no journal (was conflict);
+//   - execution: after Coordinator.Inspect, before stoppedVisit's
+//     Coordinator.Checkpoint, which then fails to open the journal (was a raw
+//     filesystem error);
+//   - checkpoint: after the whole read, before Submit takes o.retention; the
+//     check under that lock answers it.
+func TestSubmissionFromASourceRemovedWhileItIsRead(t *testing.T) {
+	t.Parallel()
+	for _, step := range []string{stepSourceRecord, stepSourceExecution, stepSourceCheckpoint} {
+		t.Run(step, func(t *testing.T) {
+			t.Parallel()
+			c, _ := projectFixture(t)
+			var o *Owner
+			var source View
+			var removed bool
+			var removeErr error
+			// The source steps run only in revisionSource, in this test's
+			// goroutine: sources start from nothing, and no driver runs a
+			// dependant. Every other step returns before reading anything.
+			c.interleave = func(at, _ string) {
+				if at != step || removed {
+					return
+				}
+				removed = true
+				_, removeErr = o.Remove(t.Context(), source.ID, false)
+			}
+			o = openOwner(t, c)
+			v, err := o.Submit(t.Context(), projectRequest("sproozi-dev"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			source = waitPhase(t, o, v.ID, phaseRetained)
+			o.stopAll()
+			q := projectRequest("sproozi-dev")
+			q.WorkspaceFrom = &RevisionSource{SessionID: source.ID, Digest: source.CheckpointDigest,
+				Revision: source.CheckpointInfo.Workspace.Revision}
+			_, submitErr := o.Submit(t.Context(), q)
+			if !removed || removeErr != nil {
+				t.Fatalf("removal at the %s step: ran %t, %v", step, removed, removeErr)
+			}
+			if code(submitErr) != profile.CodeInvalid {
+				t.Fatalf("submission from a source removed after its %s step: %v", step, submitErr)
+			}
+			assertRemoved(t, c, o, source.ID, source.ExecutionID)
+			if id := o.sessionID(q.RequestID); o.recorded(id) || o.wasRemoved(id) {
+				t.Fatalf("a refused submission kept session %s", id)
+			}
+			q.RequestID = uuid.NewString()
+			if _, after := o.Submit(t.Context(), q); after == nil || after.Error() != submitErr.Error() {
+				t.Fatalf("submission after the removal: %v, during it: %v", after, submitErr)
+			}
+		})
+	}
+}
+
 // A removal Open cannot finish is logged, not fatal: the executor starts,
 // the session is neither listed nor started again, and a later remove
 // retries it.

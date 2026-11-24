@@ -86,6 +86,7 @@ func (o *Owner) stop(ctx context.Context, id, operation string) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
+	o.interleaveAt(stepStopBound, id)
 	_, err = o.config.Coordinator.Finalize(ctx, execution, operation)
 	switch {
 	case errors.Is(err, harness.ErrNativeTurnPending):
@@ -93,6 +94,9 @@ func (o *Owner) stop(ctx context.Context, id, operation string) (View, error) {
 		return o.Info(ctx, id)
 	case errors.Is(err, session.ErrSessionCancelled):
 		return View{}, &profile.Rejection{Code: profile.CodeConflict}
+	case err != nil && o.wasRemoved(id):
+		// Removed after the binding, which left the lock: its journal is gone.
+		return View{}, &profile.Rejection{Code: profile.CodeInvalid}
 	case err != nil:
 		o.logf("Could not stop work session %s: %v", id, err)
 		return View{}, err
@@ -276,12 +280,16 @@ func (o *Owner) recoverInteractive(ctx context.Context, r record, v View) (View,
 	if err != nil {
 		return View{}, err
 	}
+	o.interleaveAt(stepRecoverExecution, r.ID)
 	if rec == nil || rec.CancelOperation == "" && rec.Phase.Starting() {
 		o.wake(r.ID)
 		return v, nil
 	}
 	if _, err = o.config.Coordinator.Recover(ctx, rec.ID); errors.Is(err, harness.ErrNativeTurnPending) {
 		o.setProblem(r.ID, problemTurnPending)
+	} else if err != nil && o.wasRemoved(r.ID) {
+		// Settled and removed since the execution was read: its journal is gone.
+		return View{}, &profile.Rejection{Code: profile.CodeInvalid}
 	} else if err != nil {
 		return View{}, err
 	} else {
@@ -370,7 +378,12 @@ func (o *Owner) settleExit(ctx context.Context, id string) (bool, error) {
 	if err != nil || r.Intent.Mode != ModeInteractive || r.Transfer != "" {
 		return false, nil
 	}
+	o.interleaveAt(stepExitRead, id)
 	rec, err := o.execution(r)
+	if err != nil && o.wasRemoved(id) {
+		// Removed since the read: nothing exited.
+		return false, nil
+	}
 	if err != nil || rec == nil || rec.Phase != session.PhaseActive || rec.Active == nil || o.config.Terminal == nil {
 		return false, err
 	}
@@ -457,7 +470,8 @@ func (o *Owner) removeKeptUploads() {
 			if _, err = o.config.Coordinator.Inspect(r.Current); os.IsNotExist(err) {
 				continue
 			}
-		} else if err != nil && !os.IsNotExist(err) {
+		} else if err != nil && !os.IsNotExist(err) && !o.wasRemoved(id) {
+			// A removed session's upload goes; read answers it invalid.
 			continue
 		}
 		o.removeUpload(id)

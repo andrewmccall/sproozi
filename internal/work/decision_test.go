@@ -17,19 +17,21 @@ import (
 var driverPhases = append([]session.Phase{phaseNotReceived}, session.Phases()...)
 
 var driverActions = []action{actNothing, actStart, actRecoverStart, actComplete, actRecover, actFinish,
-	actEndExpired, actEndRevoked}
+	actEndExpired, actEndRevoked, actEndRefused}
 
 // allSituations is every combination of phase, mode and pending request.
 func allSituations() []situation {
 	bools := []bool{false, true}
-	all := make([]situation, 0, len(driverPhases)*16)
+	all := make([]situation, 0, len(driverPhases)*32)
 	for _, phase := range driverPhases {
 		for _, interactive := range bools {
 			for _, cancel := range bools {
 				for _, revoked := range bools {
 					for _, late := range bools {
-						all = append(all, situation{phase: phase, interactive: interactive, cancel: cancel,
-							revoked: revoked, lateStart: late})
+						for _, refused := range bools {
+							all = append(all, situation{phase: phase, interactive: interactive, cancel: cancel,
+								revoked: revoked, lateStart: late, refused: refused})
+						}
 					}
 				}
 			}
@@ -84,7 +86,8 @@ func TestDecisionTableDecidesEverySituationOnce(t *testing.T) {
 // journal's structure (describe in internal/session/phase.go) holds one only
 // in cancelling, cancelled, unknown-stop and unknown-usage, and always in
 // cancelling and cancelled. situationOf sets lateStart only before the first
-// visit started or once it ended idle.
+// visit started or once it ended idle, and refused only once it is idle,
+// never with lateStart: the deadline decides which of the two ended it.
 func possible(s situation) bool {
 	held := []session.Phase{session.PhaseCancelling, session.PhaseCancelled, session.PhaseUnknownStop,
 		session.PhaseUnknownUsage}
@@ -92,6 +95,9 @@ func possible(s situation) bool {
 	case s.cancel && !slices.Contains(held, s.phase):
 		return false
 	case !s.cancel && (s.phase == session.PhaseCancelling || s.phase == session.PhaseCancelled):
+		return false
+	}
+	if s.refused && (s.phase != session.PhaseIdle || s.lateStart) {
 		return false
 	}
 	return !s.lateStart || s.phase == phaseNotReceived || s.phase.Starting() || s.phase == session.PhaseIdle
@@ -145,7 +151,7 @@ func checkProgressRules(t *testing.T, s situation, act action) {
 // late start decide s.
 func checkRequestRules(t *testing.T, s situation, act action) {
 	t.Helper()
-	if s.cancel && (act == actEndRevoked || act == actEndExpired) {
+	if s.cancel && (act == actEndRevoked || act == actEndExpired || act == actEndRefused) {
 		t.Errorf("%+v: a held cancellation is replaced: %s", s, act)
 	}
 	if s.cancel && !s.interactive {
@@ -162,8 +168,17 @@ func checkRequestRules(t *testing.T, s situation, act action) {
 			t.Errorf("%+v: the deadline decides after the start: %s, %s", s, act, again)
 		}
 	}
-	if act == actEndExpired && !s.lateStart || act == actEndRevoked && !s.revoked {
+	if act == actEndExpired && !s.lateStart || act == actEndRevoked && !s.revoked || act == actEndRefused && !s.refused {
 		t.Errorf("%+v: ends without its reason: %s", s, act)
+	}
+	// A placement's refusal is the true reason a start ended, whatever the
+	// deadline: a task it refused ends naming it, never the deadline, unless
+	// a cancellation or its project ends it first (ADR 0067).
+	if s.refused && act == actEndExpired {
+		t.Errorf("%+v: a refused start ends as expired", s)
+	}
+	if s.refused && !s.interactive && !s.cancel && act != actEndRefused {
+		t.Errorf("%+v: a refused task's start is not ended: %s", s, act)
 	}
 }
 
@@ -249,7 +264,8 @@ func TestEveryDriverPhaseCanStillBeStoppedAndCancelled(t *testing.T) {
 							switch {
 							case !got.Settled():
 								t.Fatalf("from %s the session is left %s", before.Phase, got)
-							case stop && got == phaseCancelled && !s.cancel && !s.lateStart && s.phase != session.PhaseCancelled:
+							case stop && got == phaseCancelled && !s.cancel && !s.lateStart && (!state.refuses || interactive) &&
+								s.phase != session.PhaseCancelled:
 								t.Fatalf("stopping from %s cancelled it", before.Phase)
 							case !stop && got != phaseCancelled && (code(cancelErr) != profile.CodeConflict || !got.stopped() && got != PhaseFailed):
 								t.Fatalf("cancelling from %s: %s, %v", before.Phase, got, cancelErr)
@@ -308,10 +324,11 @@ func TestUndecidedSituationIsReportedAndRetried(t *testing.T) {
 // with none, has one.
 //
 // This checks the table, not that the action it names finishes: a preparing
-// task with no deadline is decided recover-start, and today Recover can wait
-// in the Kubernetes placement's waitPod for a Pod its failed run never gets.
-// The placement's test of that wait, scheduled separately as
-// TestPrepareOfTaskWithoutDeadlineEndsWhenItsRunFailedBeforePod, will cover it.
+// task with no deadline is decided recover-start, and Recover could wait in
+// the Kubernetes placement's waitPod for a Pod its failed run never gets.
+// TestPrepareOfTaskWithoutDeadlineEndsWhenItsRunFailedBeforePod covers that
+// wait, which now ends with the placement's refusal, and
+// TestDriverEndsAStartItsPlacementRefuses the driver's end of it (ADR 0067).
 func TestEveryDriverPhaseHasAnExitAfterTheDeadline(t *testing.T) {
 	refusedAfterDeadline := []action{actStart}
 	for _, s := range allSituations() {

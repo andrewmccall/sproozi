@@ -48,7 +48,11 @@ const (
 type Config struct {
 	// Gateway is the gateway's https endpoint, with no user, path or query.
 	Gateway *url.URL
-	// TokenPath is the projected token file the kubelet keeps fresh.
+	// TokenPath is the projected token file. The kubelet refreshes it only
+	// when the volume's directory is mounted, not the file through subPath:
+	// it publishes each token in a new directory and swaps the ..data symlink
+	// the path resolves through. The path is opened again for every tunnel,
+	// so no descriptor or token outlives one connection's setup.
 	TokenPath string
 	// Trust verifies the gateway's certificate.
 	Trust *x509.CertPool

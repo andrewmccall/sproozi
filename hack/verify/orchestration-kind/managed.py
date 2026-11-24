@@ -18,6 +18,8 @@ import json
 import time
 import uuid
 
+from serviceaccount import wait_for_default_service_account
+
 SESSIONS = "sproozi-sessions"
 EXECUTOR = "sproozi-work"
 TEMPLATE = "portable-codex"
@@ -147,7 +149,6 @@ def caller_objects(image, ca, token):
     security = {"allowPrivilegeEscalation": False, "readOnlyRootFilesystem": True, "runAsNonRoot": True,
                 "capabilities": {"drop": ["ALL"]}, "seccompProfile": {"type": "RuntimeDefault"}}
     return [
-        {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": CALLER_NAMESPACE}},
         {"apiVersion": "v1", "kind": "ConfigMap", "metadata": meta(CALLER + "-trust"), "data": {"ca.crt": ca}},
         {"apiVersion": "v1", "kind": "Secret", "type": "Opaque", "metadata": meta(CALLER + "-token"),
          "data": {"token": base64.b64encode(token.encode()).decode()}},
@@ -221,14 +222,23 @@ def proof(v, images):
         v.run("kubectl", "delete", "namespace", CALLER_NAMESPACE, "--ignore-not-found", "--wait=false", check=False)
 
 
+def apply_caller(v, image, ca, token):
+    """The caller's namespace first, then its default ServiceAccount, then the
+    Pod: admission refuses a Pod applied before the ServiceAccount exists."""
+    v.k("apply", "-f", "-", input=json.dumps({"apiVersion": "v1", "kind": "Namespace",
+                                               "metadata": {"name": CALLER_NAMESPACE}}))
+    wait_for_default_service_account(v.k, CALLER_NAMESPACE)
+    v.k("apply", "-f", "-", input=json.dumps({"apiVersion": "v1", "kind": "List",
+                                               "items": caller_objects(image, ca, token)}))
+
+
 def _run_case(v, image, clients, ca, cert, key, token):
     v.k("apply", "-f", "-", input=json.dumps({"apiVersion": "v1", "kind": "Namespace",
                                                "metadata": {"name": SESSIONS}}))
     v.k("apply", "-f", "-", input=json.dumps({"apiVersion": "v1", "kind": "List",
                                                "items": executor_objects(v, image, ca, cert, key, token)}))
     v.apply(*runtime_objects(v, image))
-    v.k("apply", "-f", "-", input=json.dumps({"apiVersion": "v1", "kind": "List",
-                                               "items": caller_objects(clients, ca, token)}))
+    apply_caller(v, clients, ca, token)
     v.k("rollout", "status", "deployment/" + EXECUTOR, "-n", SESSIONS, "--timeout=240s")
     v.k("wait", "--for=condition=Ready", "pod/" + CALLER, "-n", CALLER_NAMESPACE, "--timeout=120s")
     work = Work(v)

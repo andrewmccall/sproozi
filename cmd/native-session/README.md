@@ -73,9 +73,11 @@ initialized:
 `configure` accepts the same bounded launch JSON on stdin exactly once, with a
 deadline equal to the original bootstrap deadline. An identical retry succeeds;
 a changed contract fails. Kubernetes continues using the read-only mounted
-contract. Local public CA certificates go to `/tmp/sproozi-native/ca.pem`, and
-projected gateway tokens are read at activation from
-`/var/run/sproozi/tokens/gateway/token`. Neither enters the portable state pair.
+contract. Local public CA certificates go to `/tmp/sproozi-native/ca.pem`. With
+a projected gateway binding, the supervisor checks at activation that
+`/var/run/sproozi/tokens/gateway/token` is readable, then its gateway forwarder
+reads that file again for each tunnel, so the kubelet's refreshed token is used
+(`internal/nativeproxy`). Neither enters the portable state pair.
 
 The server creates `/tmp/sproozi-native/control.sock` under a new 0700 directory.
 This path is in the agent's own tmpfs, never a volume shared with the trusted
@@ -107,7 +109,10 @@ fixed rejection category and selected-journal observation category. These fields
 contain no prompts, tool arguments or journal bytes and do not authorize a move.
 The fixed `observe-claude` command consumes a bounded native hook payload and is
 installed in the trusted fresh hook settings; successful hooks emit no unrelated
-stdout. It is not a developer-facing lifecycle operation.
+stdout. It reports as soon as one whole JSON object has arrived, without waiting
+for the end of its input; input that never completes an object holds it until
+Claude Code's five-second hook timeout ends it. It is not a developer-facing
+lifecycle operation.
 
 `attach` forwards newline-delimited JSON on stdin/stdout. It emits an initial
 `attach` response, then `output` messages with base64 `data`, monotonic `cursor`

@@ -35,6 +35,9 @@ const (
 	// actEndRevoked cancels a session whose project no longer admits this
 	// installation, recording that problem.
 	actEndRevoked action = "end-revoked"
+	// actEndRefused cancels a task whose placement refused its start for
+	// good, keeping the problem that names why (ADR 0067).
+	actEndRefused action = "end-refused"
 )
 
 // phaseNotReceived is the driver's phase for an execution the coordinator
@@ -55,6 +58,13 @@ type situation struct {
 	// deadline has passed; once idle, the deadline ended its first visit
 	// before it started (startEnded). Once a visit started, it is false.
 	lateStart bool
+	// refused: the placement refused the first visit's start for good
+	// (ADR 0067). Only an idle execution whose first visit ended before it
+	// started has it, never with lateStart: the coordinator ends a start
+	// only for one or the other, and only for its deadline once that has
+	// passed. Before the deadline, or with none, the placement refused it;
+	// past it, the refusal problem the driver recorded says which.
+	refused bool
 }
 
 // situationOf is the driver's situation for record r, whose current
@@ -70,7 +80,13 @@ func (o *Owner) situationOf(r record, rec *session.Record) situation {
 	case rec.Phase.Starting():
 		s.lateStart = o.config.Coordinator.PastDeadline(*rec)
 	case rec.Phase == session.PhaseIdle:
-		s.lateStart = startEnded(*rec)
+		// The coordinator ends a start for its deadline only once the
+		// deadline has passed, so before it, or with none, the placement
+		// refused it. Past it, the refusal problem the driver recorded when
+		// the coordinator reported it is the only record of which.
+		ended, past := startEnded(*rec), o.config.Coordinator.PastDeadline(*rec)
+		s.refused = ended && (!past || refusalProblem(r.Problem))
+		s.lateStart = ended && !s.refused
 	}
 	if rec != nil {
 		s.phase, s.cancel = rec.Phase, rec.CancelOperation != ""
@@ -112,15 +128,16 @@ func (m rowMode) holds(interactive bool) bool {
 
 // decisionRow maps every situation it matches to one action.
 type decisionRow struct {
-	phases                     []session.Phase
-	mode                       rowMode
-	cancel, revoked, lateStart condition
-	action                     action
+	phases                              []session.Phase
+	mode                                rowMode
+	cancel, revoked, lateStart, refused condition
+	action                              action
 }
 
 func (row decisionRow) matches(s situation) bool {
 	return slices.Contains(row.phases, s.phase) && row.mode.holds(s.interactive) &&
-		row.cancel.holds(s.cancel) && row.revoked.holds(s.revoked) && row.lateStart.holds(s.lateStart)
+		row.cancel.holds(s.cancel) && row.revoked.holds(s.revoked) && row.lateStart.holds(s.lateStart) &&
+		row.refused.holds(s.refused)
 }
 
 // Phase groups the decision table names.
@@ -148,12 +165,16 @@ var (
 // deadline end a session only before it settles: a revoked project ends any
 // session the coordinator may still run that no cancellation already ends,
 // and the deadline ends a task, or any session not yet received, only
-// before its first visit started (ADR 0060).
+// before its first visit started (ADR 0060). A placement's refusal of the
+// first visit ends a task too, whatever the deadline, naming the refusal
+// rather than the deadline (ADR 0067); an interactive session it ended stays
+// stopped for its owner, as one the deadline ended does.
 var decisions = []decisionRow{
 	{phases: []session.Phase{session.PhaseCancelled}, action: actNothing},
 	{phases: []session.Phase{session.PhaseIdle}, mode: interactiveOnly, action: actNothing},
-	{phases: []session.Phase{session.PhaseIdle}, mode: taskOnly, lateStart: isTrue, action: actEndExpired},
-	{phases: []session.Phase{session.PhaseIdle}, mode: taskOnly, lateStart: isFalse, action: actFinish},
+	{phases: []session.Phase{session.PhaseIdle}, mode: taskOnly, lateStart: isTrue, refused: isFalse, action: actEndExpired},
+	{phases: []session.Phase{session.PhaseIdle}, mode: taskOnly, refused: isTrue, action: actEndRefused},
+	{phases: []session.Phase{session.PhaseIdle}, mode: taskOnly, lateStart: isFalse, refused: isFalse, action: actFinish},
 
 	{phases: phasesUnsettled, mode: interactiveOnly, revoked: isFalse, action: actNothing},
 	{phases: phasesCancelHeld, mode: taskOnly, cancel: isTrue, action: actRecover},
