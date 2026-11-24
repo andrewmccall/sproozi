@@ -278,8 +278,11 @@ type modelCall struct {
 	// stopRelay, while copy relays the body, ends the relay before end
 	// records the call.
 	stopRelay func()
-	diagnostic     *ResponseDiagnostic
-	credential     string
+	// headersSent is set once the provider's response headers are written
+	// to the workload.
+	headersSent bool
+	diagnostic  *ResponseDiagnostic
+	credential  string
 
 	// startedAt times the estimate: when the request was fully written, as
 	// the provider works from then, or when the response headers arrived if
@@ -337,6 +340,7 @@ func (c *modelCall) relay(resp *http.Response) {
 		c.w.Header().Set("Content-Type", eventStreamMediaType)
 	}
 	c.w.WriteHeader(resp.StatusCode)
+	c.headersSent = true
 	if !c.flush() {
 		c.end(ending{kind: endingInterrupted, reason: endClientCancelled})
 		return

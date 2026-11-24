@@ -373,7 +373,7 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 		ctx, r.Method, h.Config.UpstreamURL+h.upstreamTarget(r), bytes.NewReader(bodyBytes),
 	)
 	if err != nil {
-		unsent(errorReply{http.StatusInternalServerError, "failed to build upstream request", serverError, upstreamErrorCode})
+		unsent(internalFailureReply)
 		return
 	}
 	h.copyProviderHeaders(upstreamReq.Header, r.Header, providerAuth.Mode() == modelauth.WorkloadMode)

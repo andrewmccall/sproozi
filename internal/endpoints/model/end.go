@@ -131,6 +131,8 @@ type ending struct {
 	reply errorReply
 	// response is the provider's answer, for endingRejected.
 	response *http.Response
+	// fallback marks the ending end chose for an undeclared one.
+	fallback bool
 }
 
 // providerUsage is a response's reported usage, with Anthropic's own
@@ -197,10 +199,31 @@ func (c *modelCall) settle(x ending) error {
 	return c.move(eventSettled)
 }
 
+// callFallbacks is the ending a call takes when end is given one its phase
+// does not declare: the most conservative ending that phase already has.
+// Nothing falls back from callEnded, so an ending after the end does
+// nothing.
+//
+// ADR 0058 has a lifecycle record refuse an undeclared transition and save
+// nothing, which is safe for a record: what it already holds stays true. A
+// model call is different. By the time it can end it holds a reservation,
+// and from callRelaying the workload has its response headers, so refusing
+// and doing nothing would leave the reservation held until its lease is
+// recovered, write no audit event and, before headers, let net/http answer
+// an empty 200. So the refusal is logged and the call still ends: charged
+// once through charge, recorded once and, if the workload was sent nothing,
+// answered with the gateway's own internal-failure reply.
+var callFallbacks = map[callPhase]endingKind{
+	callAdmitted: endingUnsent,      // release
+	callWritten:  endingNoResponse,  // the estimate
+	callRelaying: endingInterrupted, // the estimate
+	callSettled:  endingRelayed,     // already charged: record what is owed
+}
+
 // end charges, records and answers a call once, deriving its charge, end
-// reason and audit fields from the phase it reached and how it ended. It
-// refuses, logs and leaves the call unchanged for an ending its phase does
-// not declare, which includes any ending after the first.
+// reason and audit fields from the phase it reached and how it ended. An
+// ending its phase does not declare is logged and replaced by the phase's
+// fallback; any ending after the first is logged and does nothing.
 func (c *modelCall) end(x ending) {
 	if err := c.endOnce(x); err != nil {
 		c.h.logger().Error("Refused model call ending", "runID", c.e.RunID, "runUID", c.e.RunUID,
@@ -208,11 +231,19 @@ func (c *modelCall) end(x ending) {
 	}
 }
 
+// endOnce ends the call, and reports an undeclared ending even when it
+// ended the call by the phase's fallback instead.
 func (c *modelCall) endOnce(x ending) error {
 	from := c.phase
 	rule, declared := callEndings[from][x.kind]
+	var refused error
 	if !declared {
-		return fmt.Errorf("model call ending %s is not declared from %s", x.kind, from)
+		refused = fmt.Errorf("model call ending %s is not declared from %s", x.kind, from)
+		kind, ok := callFallbacks[from]
+		if !ok {
+			return refused
+		}
+		x, rule = ending{kind: kind, fallback: true}, callEndings[from][kind]
 	}
 	// Q1 keeps this copy: the event as it was before the charge.
 	before := c.e
@@ -223,6 +254,8 @@ func (c *modelCall) endOnce(x ending) error {
 		x.reason = c.failureReason()
 	case x.kind == endingUnsupported:
 		x.reason = endUpstreamError
+	case x.fallback && from == callRelaying:
+		x.reason = c.failureReason()
 	}
 	if rule != chargeNone {
 		c.charge(rule, x)
@@ -244,7 +277,7 @@ func (c *modelCall) endOnce(x ending) error {
 		c.stopRelay()
 	}
 	c.record(from, x, before)
-	return nil
+	return refused
 }
 
 // charge releases, settles or forfeits the reservation, and is the only
@@ -289,6 +322,15 @@ func (c *modelCall) charge(rule chargeRule, x ending) {
 //     one stopped while it waited for its budget.
 func (c *modelCall) record(from callPhase, x ending, before audit.Event) {
 	ctx := c.r.Context()
+	if x.fallback {
+		// A refused ending is answered only if the workload has nothing yet.
+		if from == callSettled || c.headersSent {
+			c.finish()
+			return
+		}
+		c.h.denyReply(ctx, c.w, c.e, internalFailureReply)
+		return
+	}
 	switch x.kind {
 	case endingUnsent:
 		c.h.denyReply(ctx, c.w, before, x.reply) // Q1
@@ -342,6 +384,8 @@ func (c *modelCall) unsentReason() string {
 
 // Replies to a call that ended before its response headers.
 var (
+	// internalFailureReply is the gateway's reply when it fails itself.
+	internalFailureReply = errorReply{http.StatusInternalServerError, "failed to build upstream request", serverError, upstreamErrorCode}
 	gatewayStoppingReply = errorReply{http.StatusServiceUnavailable, gatewayStoppingMessage, serverError, gatewayStoppingCode}
 	upstreamFailedReply  = errorReply{http.StatusBadGateway, "upstream request failed", serverError, upstreamErrorCode}
 )

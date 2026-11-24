@@ -204,11 +204,13 @@ func TestEndDerivesEachEndingFromItsPhase(t *testing.T) {
 	}
 }
 
-// end refuses an ending its phase does not declare, and any ending after
-// the first: it charges, records and answers nothing, and leaves the phase.
-// end chooses to refuse rather than panic, as ADR 0058's apply does: a
-// panic mid-relay would cut the workload's response and skip the record,
-// where refusing leaves the first ending's charge and record standing.
+// end refuses an ending its phase does not declare. The refusal is logged
+// and the call falls back to its phase's own conservative ending
+// (callFallbacks), so it is still charged once, recorded once and, when the
+// workload has been sent nothing, answered with the gateway's own 500. An
+// ending after the call ended stays a logged no-op. end refuses rather
+// than panics: a panic mid-relay would cut the workload's response and
+// skip the record.
 func TestEndRefusesUndeclaredAndRepeatedEndings(t *testing.T) {
 	kinds := []endingKind{endingUnsent, endingNoResponse, endingRejected, endingUnsupported,
 		endingInterrupted, endingUsage, endingCut, endingRelayed}
@@ -217,20 +219,12 @@ func TestEndRefusesUndeclaredAndRepeatedEndings(t *testing.T) {
 			if _, declared := callEndings[phase][kind]; declared {
 				continue
 			}
-			t.Run(phase.String()+"/"+kind.String(), func(t *testing.T) {
-				c := newEndTestCall(t, phase, callLive)
-				x := ending{kind: kind, reason: endClientCancelled, usage: reportedUsage(), response: rejection()}
-				if err := c.call.endOnce(x); err == nil {
-					t.Fatal("end accepted an undeclared ending")
-				}
-				if c.call.phase != phase || len(c.events.events) != 0 || c.writer.Body.Len() != 0 {
-					t.Fatalf("refused ending changed the call: phase=%s events=%d reply=%q",
-						c.call.phase, len(c.events.events), c.writer.Body.String())
-				}
-				if used, reserved := c.used(t); used != 0 || reserved != 1000 {
-					t.Fatalf("refused ending charged: used=%d reserved=%d", used, reserved)
-				}
-			})
+			t.Run(phase.String()+"/"+kind.String(), func(t *testing.T) { checkRefusedEnding(t, phase, kind, false) })
+			if phase == callRelaying {
+				t.Run(phase.String()+"/"+kind.String()+"/headers sent", func(t *testing.T) {
+					checkRefusedEnding(t, phase, kind, true)
+				})
+			}
 		}
 	}
 
@@ -293,5 +287,76 @@ func TestCallTransitionsAreDeclared(t *testing.T) {
 				t.Errorf("%s from %s: phase=%s err=%v, want refused", event, from, c.phase, err)
 			}
 		}
+	}
+}
+
+// refusedFallback is what a refused ending falls back to, by phase, before
+// any response headers were sent.
+var refusedFallback = map[callPhase]struct {
+	used    int64
+	allowed bool
+	outcome audit.Outcome
+	status  int
+	reason  string
+}{
+	callAdmitted: {0, false, audit.Unavailable, http.StatusInternalServerError, ""},
+	callWritten:  {10, false, audit.Unavailable, http.StatusInternalServerError, endUpstreamError},
+	callRelaying: {10, false, audit.Unavailable, http.StatusInternalServerError, endUpstreamError},
+	callSettled:  {7, true, audit.Served, 0, endCompleted},
+}
+
+// checkRefusedEnding ends a call in phase with an undeclared kind and checks
+// that it fell back: settled once with nothing left reserved, recorded once
+// and answered when nothing was sent; or, after the end, left unchanged.
+func checkRefusedEnding(t *testing.T, phase callPhase, kind endingKind, headersSent bool) {
+	t.Helper()
+	c := newEndTestCall(t, callRelaying, callLive)
+	switch phase {
+	case callSettled:
+		if err := c.call.settle(ending{kind: endingUsage, reason: endCompleted, usage: reportedUsage()}); err != nil {
+			t.Fatal(err)
+		}
+	case callEnded:
+		c.call.end(ending{kind: endingUsage, reason: endCompleted, usage: reportedUsage()})
+	default:
+		c.call.phase = phase
+	}
+	c.call.headersSent = headersSent
+	eventsBefore := len(c.events.events)
+	usedBefore, _ := c.used(t)
+	x := ending{kind: kind, reason: endClientCancelled, usage: reportedUsage(), response: rejection()}
+	if err := c.call.endOnce(x); err == nil {
+		t.Fatal("end did not report an undeclared ending")
+	}
+	used, reserved := c.used(t)
+	if phase == callEnded {
+		if len(c.events.events) != eventsBefore || used != usedBefore || c.writer.Body.Len() != 0 {
+			t.Fatalf("an ending after the end changed the call: events=%d used=%d reply=%q",
+				len(c.events.events), used, c.writer.Body.String())
+		}
+		return
+	}
+	want := refusedFallback[phase]
+	if headersSent {
+		want.allowed, want.outcome, want.status = true, audit.Served, 0
+	}
+	if c.call.phase != callEnded || reserved != 0 || used != want.used {
+		t.Fatalf("refused ending left phase=%s used=%d reserved=%d, want ended used=%d reserved=0",
+			c.call.phase, used, reserved, want.used)
+	}
+	if len(c.events.events) != 1 {
+		t.Fatalf("refused ending recorded %d events, want 1", len(c.events.events))
+	}
+	e := c.events.events[0]
+	if e.Allowed != want.allowed || e.Outcome != want.outcome || e.EndReason != want.reason {
+		t.Errorf("event allowed=%v outcome=%q endReason=%q, want %v %q %q",
+			e.Allowed, e.Outcome, e.EndReason, want.allowed, want.outcome, want.reason)
+	}
+	status := 0
+	if c.writer.Body.Len() > 0 {
+		status = c.writer.Code
+	}
+	if status != want.status {
+		t.Errorf("reply status %d (%q), want %d", status, c.writer.Body.String(), want.status)
 	}
 }
