@@ -20,6 +20,7 @@ import (
 
 	authorizationv1 "k8s.io/api/authorization/v1"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -1005,5 +1006,40 @@ func TestCopilotHostsServeAForwardedSignInOrAGatewayToken(t *testing.T) {
 	account, _, _ := routes.Select("api.github.com:443", "/copilot/mcp_registry")
 	if account.Capability == api.CapabilityModelInference && account.Handler != nil {
 		t.Fatal("Copilot account route opened without a GitHub credential mechanism")
+	}
+}
+
+// The Kubernetes upstream client carries sandbox requests with the gateway's
+// own credentials, so it ignores ambient proxy settings too. client-go uses
+// http.ProxyFromEnvironment when the config's Proxy is nil, and that function
+// reads the environment once per process, so the test unwraps the client's
+// round-trippers to the *http.Transport and calls its Proxy function.
+func TestKubernetesUpstreamClientIgnoresProxy(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", "http://proxy.invalid:3128")
+	t.Setenv("HTTP_PROXY", "http://proxy.invalid:3128")
+	c, host, err := newKubernetesUpstreamClient(&rest.Config{Host: "https://kubernetes.invalid:443", BearerToken: "t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host != "https://kubernetes.invalid:443" {
+		t.Fatalf("host = %q", host)
+	}
+	rt := c.Transport
+	for {
+		wrapper, ok := rt.(interface{ WrappedRoundTripper() http.RoundTripper })
+		if !ok {
+			break
+		}
+		rt = wrapper.WrappedRoundTripper()
+	}
+	transport, ok := rt.(*http.Transport)
+	if !ok || transport.Proxy == nil {
+		t.Fatalf("innermost transport = %#v, want an *http.Transport with a Proxy function", rt)
+	}
+	for _, target := range []string{"https://kubernetes.invalid:443/api", "http://kubernetes.invalid/api"} {
+		req, _ := http.NewRequest(http.MethodGet, target, nil)
+		if proxy, err := transport.Proxy(req); err != nil || proxy != nil {
+			t.Fatalf("proxy for %s = %v, %v; want none", target, proxy, err)
+		}
 	}
 }

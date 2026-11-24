@@ -791,15 +791,11 @@ func main() {
 	// credentials. Build the upstream transport from its own in-cluster
 	// rest.Config so workload ServiceAccount tokens can never be forwarded to
 	// Kubernetes and no workload-specific RBAC is required.
-	kubeConfig := rest.CopyConfig(config)
-	// The handler clears this Timeout for watches, which it bounds by their
-	// timeoutSeconds instead.
-	kubeConfig.Timeout = kubernetesReadTimeout
-	kubeClient, err := rest.HTTPClientFor(kubeConfig)
+	kubeClient, kubeHost, err := newKubernetesUpstreamClient(config)
 	if err != nil {
 		log.Fatal(err)
 	}
-	kubeURL, err := url.Parse(kubeConfig.Host)
+	kubeURL, err := url.Parse(kubeHost)
 	if err != nil || kubeURL.Scheme == "" || kubeURL.Host == "" {
 		log.Fatal("invalid in-cluster Kubernetes API host")
 	}
@@ -1074,6 +1070,24 @@ func newModelClient() *http.Client {
 	transport := directTransport()
 	transport.ResponseHeaderTimeout = modelHeaderTimeout
 	return &http.Client{Transport: transport}
+}
+
+// newKubernetesUpstreamClient returns the client that carries sandbox
+// requests to the Kubernetes API with the gateway's own credentials, and the
+// API host. Like the other upstream clients it ignores ambient proxy
+// settings: client-go falls back to http.ProxyFromEnvironment when the
+// config's Proxy is nil (ADR 0001).
+func newKubernetesUpstreamClient(config *rest.Config) (*http.Client, string, error) {
+	kubeConfig := rest.CopyConfig(config)
+	// The handler clears this Timeout for watches, which it bounds by their
+	// timeoutSeconds instead.
+	kubeConfig.Timeout = kubernetesReadTimeout
+	kubeConfig.Proxy = func(*http.Request) (*url.URL, error) { return nil, nil }
+	kubeClient, err := rest.HTTPClientFor(kubeConfig)
+	if err != nil {
+		return nil, "", err
+	}
+	return kubeClient, kubeConfig.Host, nil
 }
 
 // kubernetesReadTimeout bounds a get, list or log read. Watches last up to
