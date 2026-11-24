@@ -494,8 +494,7 @@ func spends(t *testing.T, name string, routes gateway.Dispatcher, authority stri
 // the provider table does not name, by authority or authority and prefix.
 func ModelAuthorities(routes gateway.Dispatcher) map[string]string {
 	known := map[string]bool{}
-	for _, name := range []string{modelgateway.ProviderOpenAI, modelgateway.ProviderAnthropic, modelgateway.ProviderCopilot} {
-		provider, _ := modelgateway.ProviderFor(name)
+	for _, provider := range modelgateway.Providers() {
 		for _, m := range provider.Models {
 			known[m.Authority] = true
 		}

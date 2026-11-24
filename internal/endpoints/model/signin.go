@@ -49,7 +49,8 @@ type Relay struct {
 // NewAnthropicSignInHandler relays Anthropic's sign-in routes to upstreamURL,
 // such as a fixture.
 func NewAnthropicSignInHandler(upstreamURL string, client *http.Client, logger audit.Writer) *Relay {
-	relay := providers[ProviderAnthropic].SignInRelay(client, logger)
+	anthropic, _ := ProviderFor(ProviderAnthropic)
+	relay := anthropic.SignInRelay(client, logger)
 	relay.UpstreamURL = upstreamURL
 	return relay
 }

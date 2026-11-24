@@ -2,6 +2,7 @@ package model
 
 import (
 	"net/http"
+	"slices"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
@@ -54,8 +55,9 @@ const (
 	ProviderAnthropic = "anthropic"
 )
 
-var providers = map[string]Provider{
-	ProviderOpenAI: {Name: ProviderOpenAI,
+// providers is the table, in the order compositions build their routes.
+var providers = []Provider{
+	{Name: ProviderOpenAI,
 		Models: []ModelRoute{
 			{Authority: OpenAIAuthority, UpstreamURL: "https://api.openai.com",
 				New: func(c HandlerConfig) http.Handler { return &Handler{Config: c} }},
@@ -68,7 +70,7 @@ var providers = map[string]Provider{
 			{Method: http.MethodPost, Path: "/api/accounts/deviceauth/usercode"},
 			{Method: http.MethodPost, Path: "/api/accounts/deviceauth/token"},
 		}},
-	ProviderAnthropic: {Name: ProviderAnthropic,
+	{Name: ProviderAnthropic,
 		Models: []ModelRoute{
 			{Authority: AnthropicAuthority, UpstreamURL: "https://api.anthropic.com",
 				New: func(c HandlerConfig) http.Handler { return NewAnthropicHandler(c) }},
@@ -78,7 +80,7 @@ var providers = map[string]Provider{
 		TokenHeaders:    map[string]string{"Anthropic-Beta": "oauth-2025-04-20"}},
 	// Copilot has no API-key host: a client signs in to GitHub, and its
 	// sign-in or a gateway-held GitHub token reaches its plan's host.
-	ProviderCopilot: {Name: ProviderCopilot,
+	{Name: ProviderCopilot,
 		Models: []ModelRoute{
 			{Authority: CopilotIndividualAuthority, UpstreamURL: "https://api.individual.githubcopilot.com", SignedIn: true,
 				New: NewCopilotHandler},
@@ -105,8 +107,18 @@ var providers = map[string]Provider{
 
 // ProviderFor returns a provider by its protocol name, such as "openai".
 func ProviderFor(name string) (Provider, bool) {
-	p, ok := providers[name]
-	return p, ok
+	for _, p := range providers {
+		if p.Name == name {
+			return p, true
+		}
+	}
+	return Provider{}, false
+}
+
+// Providers are every provider in the table, in the order the gateway
+// compositions build their routes.
+func Providers() []Provider {
+	return slices.Clone(providers)
 }
 
 // ServedRoute is one route a provider serves: a model.inference route on

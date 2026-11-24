@@ -379,8 +379,7 @@ func pruneModelHosts(hosts, owned map[string]bool, credentials map[string]modela
 		}
 	}
 	var candidates []string
-	for _, name := range modelProviders {
-		provider, _ := modelgateway.ProviderFor(name)
+	for _, provider := range modelgateway.Providers() {
 		candidates = append(candidates, provider.Hosts(true)...)
 	}
 	for authority, capability := range endpoints.SemanticAuthorities {
@@ -530,10 +529,13 @@ func githubAppInteger(key, secretKey string) (int64, error) {
 
 // providerAuth chooses one provider's credential (ADR 0047): its gateway
 // API key, then its gateway-held sign-in token, then in workload mode the
-// harness's own sign-in. ok is false when the provider has none.
+// harness's own sign-in. ok is false when the provider has none. A provider
+// the gateway has no key or token setting for can only forward a sign-in.
 func providerAuth(cfg *startupConfig, name string) (auth modelauth.Authenticator, ok bool) {
-	key, token := cfg.openAIKey, cfg.openAIToken
+	var key, token string
 	switch name {
+	case modelgateway.ProviderOpenAI:
+		key, token = cfg.openAIKey, cfg.openAIToken
 	case modelgateway.ProviderAnthropic:
 		key, token = cfg.anthropicKey, cfg.anthropicToken
 	case modelgateway.ProviderCopilot:
@@ -553,17 +555,14 @@ func providerAuth(cfg *startupConfig, name string) (auth modelauth.Authenticator
 	return nil, false
 }
 
-// modelProviders are the providers the gateway composes routes for.
-var modelProviders = []string{modelgateway.ProviderOpenAI, modelgateway.ProviderAnthropic, modelgateway.ProviderCopilot}
-
 // modelCredentials are each provider's one credential, keyed by provider
 // name; a provider without one is absent. In chatgpt mode the gateway's
 // ChatGPT sign-in is OpenAI's.
 func modelCredentials(cfg *startupConfig, chatGPT modelauth.SessionStore) map[string]modelauth.Authenticator {
 	credentials := map[string]modelauth.Authenticator{}
-	for _, name := range modelProviders {
-		if auth, ok := providerAuth(cfg, name); ok {
-			credentials[name] = auth
+	for _, provider := range modelgateway.Providers() {
+		if auth, ok := providerAuth(cfg, provider.Name); ok {
+			credentials[provider.Name] = auth
 		}
 	}
 	if cfg.modelAuthMode == modelauth.ChatGPTMode {
@@ -595,9 +594,8 @@ func modelRoutes(cfg *startupConfig, auditLogger audit.Writer, modelClient *http
 	}
 	credentials := modelCredentials(cfg, chatGPT)
 	var routes []modelgateway.ServedRoute
-	for _, name := range modelProviders {
-		if auth, ok := credentials[name]; ok {
-			provider, _ := modelgateway.ProviderFor(name)
+	for _, provider := range modelgateway.Providers() {
+		if auth, ok := credentials[provider.Name]; ok {
 			routes = append(routes, provider.Routes(auth, config)...)
 		}
 	}

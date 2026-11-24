@@ -42,9 +42,7 @@ var credentialSources = routetest.Sources{
 // cover.
 func certifiedModelHosts(cfg *startupConfig) string {
 	hosts := map[string]bool{}
-	for _, name := range []string{modelgateway.ProviderOpenAI, modelgateway.ProviderAnthropic,
-		modelgateway.ProviderCopilot} {
-		provider, _ := modelgateway.ProviderFor(name)
+	for _, provider := range modelgateway.Providers() {
 		for _, host := range provider.Hosts(true) {
 			hosts[host] = true
 		}
