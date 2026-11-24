@@ -3,6 +3,11 @@
 Status: accepted
 Date: 2026-10-19
 
+History: this record also holds the runtime check at admission and the live
+reads that admission and sandbox lookups rely on, which ADR 0017 recorded on
+2026-10-17. ADR 0017 was removed in the change that added this paragraph; its
+replay-record decisions went with the event webhook (ADR 0043).
+
 ## Problem and constraints
 
 The controller admitted one active AgentRun per cluster. `handleQueued` listed
@@ -35,6 +40,16 @@ found:
   - The connection pool is shared, and the gateway Pod had a 250m CPU and
     256Mi memory limit.
 - **Webhook bursts:** event bursts were throttled only by the single slot.
+
+Admission must also reject what cannot run. `AgentRuntime` rules (digest-pinned
+images, container security, approved volumes, an immutable certificate-only
+trust bundle) were first checked when the controller created the sandbox Pod.
+By then the run held a slot. Every Pod create failed, the reconcile retried,
+and the run kept the slot, and so counted against a cap, until its execution
+deadline, or for ever when it had none. No admission webhook exists for
+`AgentRuntime`. The CRD schema cannot express all of the rules, and the trust
+bundle is a separate ConfigMap that can change or disappear after the runtime
+is created.
 
 The gateway remains one process ([ADR 0026](0026-single-gateway-refresh-owner-with-recreate.md)),
 so every concurrent run's traffic shares its CPU, memory and connection pool.
@@ -89,6 +104,25 @@ so every concurrent run's traffic shares its CPU, memory and connection pool.
   seconds to one minute until the Pod is created, which sets Ready True again,
   or the run passes its execution deadline and ends TimedOut. A ResourceQuota
   on `sproozi-agents` is the documented Kubernetes-level backstop.
+- **The runtime is checked at admission.** `SandboxClient.ValidateRuntime`
+  applies the template rules (`ValidateRuntimeTemplate`) and reads the trust
+  bundle. The controller calls it from `resolveAdmission`, the single step that
+  also resolves references and the session binding and evaluates policy, so
+  every reconcile of a `Queued`, `Admitted` or `Running` run goes through it. A
+  runtime that cannot launch fails the run with reason `RuntimeInvalid` before
+  it takes a place under any cap, and the `Ready` condition message names the
+  runtime and the broken rule. A later edit that breaks the runtime of an
+  active run fails that run, as a policy tightening already does. Errors
+  wrapping `ErrInvalidRuntime` are permanent; other errors, such as a failed
+  ConfigMap read, are retried and do not fail the run. `Ensure` and
+  `EnsureManaged` do not repeat the check: their only caller, `ensureSandbox`,
+  runs in the same reconcile after `resolveAdmission`.
+- **Reads that decide the run's end are live.** The cap decision lists AgentRuns
+  through the manager's API reader (next bullet). Likewise
+  `PodSandboxClient.GetStatus` reads a Pod from the cache but confirms a cached
+  NotFound with one uncached Get before it reports the sandbox absent, because
+  an absent sandbox ends the run and the cache can lag a Pod the reconciler has
+  just created. Found Pods are still read from the cache.
 - **Reconciles stay serialized** (`MaxConcurrentReconciles: 1`), and the
   active-run List stays uncached. Counting is correct because every earlier
   admission is visible to the next reconcile. A counter object or distributed
@@ -169,6 +203,19 @@ so every concurrent run's traffic shares its CPU, memory and connection pool.
     default;
   - a pooled Pod cannot carry the run's ServiceAccount and token, which the
     gateway's identity depends on.
+- **A validating admission webhook for `AgentRuntime`.** It would reject bad
+  runtimes earlier, but it needs serving certificates and webhook
+  infrastructure the installation does not otherwise use. It cannot see a later
+  trust bundle change, so the controller would still need its own check. CEL
+  rules on the CRD cannot read the ConfigMap and would duplicate the Go rules
+  in a second language.
+- **A separate `AgentRuntime` controller that publishes readiness.** It would
+  add a reconciler and a status contract, and runs would still need to check
+  it. Checking at admission reuses the existing per-run re-evaluation and
+  reports the problem on the object the operator is watching.
+- **A second runtime check at Pod creation.** It would cost little, but the two
+  checks could drift and readers would need to know which one is
+  authoritative.
 - **Parallel reconciles with a lease or counter object.** It would give more
   admission throughput, but it adds a coordination protocol. One worker that
   reads the live run list is enough for the admission rates seen so far.
@@ -189,6 +236,8 @@ so every concurrent run's traffic shares its CPU, memory and connection pool.
   more of a node, but the scheduler does not reserve it. A gateway that
   exceeds the node's free memory can still be evicted. Administrators who need
   guaranteed capacity raise the requests themselves.
+- **A bad runtime surfaces late.** It is reported only when a run uses it, not
+  when the `AgentRuntime` is created.
 - **Admission cost.** Every queued run lists the cluster's AgentRuns at each
   reconcile and resolves the policy of each earlier queued run. That cost
   grows with the queue length.
@@ -212,6 +261,8 @@ so every concurrent run's traffic shares its CPU, memory and connection pool.
   owner (ADR 0026).
 - Agent Sandbox ships identity and NetworkPolicy attached at claim time.
 - A real task type needs its own cap on overlapping with itself.
+- Sproozi adds admission webhooks for other resources, or operators need a
+  runtime's status before any run uses it: revisit the runtime check.
 
 ## Links
 
@@ -231,5 +282,10 @@ so every concurrent run's traffic shares its CPU, memory and connection pool.
 - Earlier records: [ADR 0003](0003-persistent-assistants-and-retained-results.md),
   [ADR 0016](0016-dispatcher-capability-enforcement-and-fresh-revalidation.md),
   which this record partly supersedes,
-  [ADR 0017](0017-runtime-admission-and-replay-retention.md),
   [ADR 0026](0026-single-gateway-refresh-owner-with-recreate.md).
+- Implementation, runtime check: `internal/controller/reconciler.go`
+  (`resolveAdmission`, `handleQueued`), `internal/controller/execution.go`
+  (`ensureSandbox`), `internal/runtime/kubernetes/sandbox.go`
+  (`ValidateRuntime`, `GetStatus`).
+- References: [AgentRuntime](../reference/agentruntime.md),
+  [AgentRun lifecycle](../reference/agentrun.md#lifecycle).

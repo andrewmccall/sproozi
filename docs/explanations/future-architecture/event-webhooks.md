@@ -35,8 +35,12 @@ later idempotent-delivery rework described below was never released.
   the event context as untrusted input.
 - **Replay protection.** One ConfigMap per accepted event in
   `sproozi-webhook-state`, kept for two replay windows after the event's
-  timestamp and swept once per window
-  ([ADR 0017](../../adr/0017-runtime-admission-and-replay-retention.md)).
+  timestamp and swept once per window: the sweep listed records by label in
+  pages and deleted expired ones with UID and resource-version preconditions,
+  so concurrent replicas did not conflict, and it kept a record whose expiry was
+  missing or unreadable, which kept blocking its event
+  ([ADR 0017](../../adr/README.md#removed), removed; its last text is linked
+  there).
 - **Limits.** Headers 64 KiB read within 10 s, whole request 45 s, response
   45 s, idle keep-alive 60 s.
 
