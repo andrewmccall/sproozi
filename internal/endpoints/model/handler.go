@@ -301,6 +301,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	plan := h.planReservation(bodyBytes, limits)
 	call := &modelCall{h: h, ctx: callCtx, w: w, r: r, e: e, limits: limits,
 		plan: plan, body: bodyBytes, stream: check.Stream}
+	call.claim()
 	reservation, endAdmission, err := budget.FromContext(ctx).ReserveRequest(callCtx, plan.units, plan.costMicros,
 		plan.bounded, call.recovery())
 	if err != nil {

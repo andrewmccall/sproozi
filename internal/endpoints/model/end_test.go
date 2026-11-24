@@ -84,7 +84,7 @@ func newEndTestCall(t *testing.T, phase callPhase, ended string) *endTestCall {
 	writer := httptest.NewRecorder()
 	call := &modelCall{h: h, ctx: ctx, w: writer, r: r, limits: limits, reservation: reservation,
 		plan: reservationPlan{sizable: true}, body: body, phase: phase, startedAt: now,
-		cancelUpstream: func() {}}
+		cancelUpstream: func() {}, checkOwner: newOwnerCheck()}
 	t.Cleanup(done)
 	return &endTestCall{call: call, tracker: tracker, events: events, writer: writer}
 }

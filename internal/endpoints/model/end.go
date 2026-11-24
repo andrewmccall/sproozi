@@ -1,5 +1,21 @@
 package model
 
+// One goroutine owns a model call: the handler goroutine that runs
+// ServeHTTP, creates the call and returns only once it has ended. Only it
+// calls end, settle and mark, and only it reads or writes phase, so phase
+// needs no lock and "charged once, recorded once" holds by the table alone.
+// Three other goroutines see the call and stay out:
+//
+//   - the reader goroutine in copy only reads the provider's body and
+//     sends what it read on a channel the owner receives from;
+//   - the drain's context.AfterFunc (and proxytransport's) only cancels the
+//     call's context, which the owner then observes;
+//   - the transport's WroteRequest callback only reads the clock and stores
+//     the write time in the atomic written, which the owner loads.
+//
+// Tests check it: newOwnerCheck, set only in test builds, makes end, settle
+// and mark panic on any other goroutine.
+
 import (
 	"fmt"
 	"net/http"
@@ -70,9 +86,29 @@ func (c *modelCall) move(event callEvent) error {
 	return nil
 }
 
+// newOwnerCheck is nil outside tests. A test build sets it to return a
+// check that panics when run on a goroutine other than the one that called
+// newOwnerCheck.
+var newOwnerCheck func() func()
+
+// claim makes the calling goroutine the call's owner in a test build.
+func (c *modelCall) claim() {
+	if newOwnerCheck != nil {
+		c.checkOwner = newOwnerCheck()
+	}
+}
+
+// owned runs the owner check, if a test build installed one.
+func (c *modelCall) owned() {
+	if c.checkOwner != nil {
+		c.checkOwner()
+	}
+}
+
 // mark moves the call by event, logging a refusal, which only a programming
 // error causes.
 func (c *modelCall) mark(event callEvent) {
+	c.owned()
 	if err := c.move(event); err != nil {
 		c.h.logger().Error("Refused model call event", "runID", c.e.RunID, "runUID", c.e.RunUID,
 			"error", err.Error())
@@ -191,6 +227,7 @@ var callEndings = map[callPhase]map[endingKind]chargeRule{
 // response is relayed. It refuses an ending its phase does not declare or
 // one already charged.
 func (c *modelCall) settle(x ending) error {
+	c.owned()
 	rule, declared := callEndings[c.phase][x.kind]
 	if !declared || rule == chargeNone {
 		return fmt.Errorf("model call cannot settle ending %s from %s", x.kind, c.phase)
@@ -225,6 +262,7 @@ var callFallbacks = map[callPhase]endingKind{
 // ending its phase does not declare is logged and replaced by the phase's
 // fallback; any ending after the first is logged and does nothing.
 func (c *modelCall) end(x ending) {
+	c.owned()
 	if err := c.endOnce(x); err != nil {
 		c.h.logger().Error("Refused model call ending", "runID", c.e.RunID, "runUID", c.e.RunUID,
 			"error", err.Error())

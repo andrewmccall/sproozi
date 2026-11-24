@@ -278,6 +278,8 @@ type modelCall struct {
 	// stopRelay, while copy relays the body, ends the relay before end
 	// records the call.
 	stopRelay func()
+	// checkOwner is set only in test builds (newOwnerCheck).
+	checkOwner func()
 	// headersSent is set once the provider's response headers are written
 	// to the workload.
 	headersSent bool
@@ -288,12 +290,14 @@ type modelCall struct {
 	// the provider works from then, or when the response headers arrived if
 	// the transport does not report the write. A call that does not stream
 	// sends its headers only once generation has finished.
-	startedAt   time.Time
-	written     atomic.Pointer[time.Time]
-	visible     int64
-	relayed     int
-	anthropic   *anthropicStream
-	responses   *responsesStream
+	startedAt time.Time
+	written   atomic.Pointer[time.Time]
+	visible   int64
+	relayed   int
+	anthropic *anthropicStream
+	responses *responsesStream
+	// phase is read and written only by the goroutine that owns the call
+	// (end.go), so it has no lock.
 	phase       callPhase
 	passthrough bool
 }
