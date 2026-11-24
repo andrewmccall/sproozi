@@ -509,13 +509,13 @@ func (c *modelCall) jsonUsage(buffered []byte) (providerUsage, bool) {
 		c.diagnostic.ErrorCode, c.diagnostic.ErrorParam, c.diagnostic.ErrorMessage = format.ErrorCode, format.ErrorParam, format.ErrorMessage
 	}
 	if c.h.protocol == anthropicProtocol {
-		usage, err := decodeAnthropicUsage(buffered, false, "")
+		usage, err := decodeAnthropicUsage(buffered)
 		if err != nil {
 			return providerUsage{}, false
 		}
 		return providerUsage{usage: anthropicResponseUsage(usage), anthropic: usage}, true
 	}
-	usage, err := decodeUsage(buffered, c.r.URL.Path, false, "")
+	usage, err := decodeUsage(buffered, c.r.URL.Path)
 	if err != nil || invalidTokenUsage(usage, nil, c.limits) {
 		return providerUsage{}, false
 	}

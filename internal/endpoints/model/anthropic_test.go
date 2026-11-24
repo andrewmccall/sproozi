@@ -19,7 +19,7 @@ func TestAnthropicJSONCountsDisjointCacheCategories(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			body := `{"type":"message","role":"assistant","model":"claude-test","stop_reason":"tool_use","usage":` + test.usage + `}`
-			got, err := decodeAnthropicUsage([]byte(body), false, "application/json")
+			got, err := decodeAnthropicUsage([]byte(body))
 			if err != nil || got != test.want {
 				t.Fatalf("usage=%+v err=%v, want %+v", got, err, test.want)
 			}
@@ -45,7 +45,7 @@ func TestAnthropicJSONRejectsIncompleteOrInvalidUsage(t *testing.T) {
 		strings.Replace(valid, `"output_tokens":3`, `"output_tokens":3,"cache_creation_input_tokens":8,"cache_creation":{"ephemeral_5m_input_tokens":8,"ephemeral_1h_input_tokens":null}`, 1),
 		strings.Replace(valid, `"output_tokens":3`, `"output_tokens":3,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0}`, 1),
 	} {
-		if got, err := decodeAnthropicUsage([]byte(body), false, "application/json"); err == nil {
+		if got, err := decodeAnthropicUsage([]byte(body)); err == nil {
 			t.Fatalf("invalid response accepted: %s => %+v", body, got)
 		}
 	}
@@ -57,7 +57,7 @@ func TestAnthropicStreamCountsFinalCumulativeOutput(t *testing.T) {
 		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{},\"usage\":{\"output_tokens\":2}}\n\n" + anthropicTestFinish
 	for _, body := range []string{stream, strings.ReplaceAll(stream, "\n", "\r\n")} {
 		for _, contentType := range []string{"text/event-stream; charset=utf-8", ""} {
-			got, err := decodeAnthropicUsage([]byte(body), true, contentType)
+			got, err := decodeBufferedAnthropicStream([]byte(body), contentType)
 			want := anthropicUsage{Input: 10, CacheRead: 20, CacheWrite5m: 8, Output: 3, Total: 41}
 			if err != nil || got != want {
 				t.Fatalf("usage=%+v err=%v, want %+v", got, err, want)
@@ -88,11 +88,11 @@ func TestAnthropicStreamRejectsMissingOrAmbiguousCompletion(t *testing.T) {
 		valid + "event: ping\ndata: {\"type\":\"ping\"}\n\n",
 		"event: message_start\ndata: invalid\n\n" + anthropicTestFinish,
 	} {
-		if got, err := decodeAnthropicUsage([]byte(body), true, "text/event-stream"); err == nil {
+		if got, err := decodeBufferedAnthropicStream([]byte(body), "text/event-stream"); err == nil {
 			t.Fatalf("invalid stream accepted: %q => %+v", body, got)
 		}
 	}
-	if _, err := decodeAnthropicUsage([]byte(valid), true, "application/json"); err == nil {
+	if _, err := decodeBufferedAnthropicStream([]byte(valid), "application/json"); err == nil {
 		t.Fatal("non-SSE content type accepted")
 	}
 }
@@ -171,7 +171,7 @@ func TestAnthropicCostCapRefusesLongContextBeta(t *testing.T) {
 
 func TestAnthropicStreamUsesUpdatedCumulativeInputCounts(t *testing.T) {
 	stream := anthropicTestStart + strings.Replace(anthropicTestFinish, `"output_tokens":3`, `"output_tokens":3,"input_tokens":12,"cache_read_input_tokens":22,"cache_creation_input_tokens":10`, 1)
-	got, err := decodeAnthropicUsage([]byte(stream), true, "text/event-stream")
+	got, err := decodeBufferedAnthropicStream([]byte(stream), "text/event-stream")
 	want := anthropicUsage{Input: 12, CacheRead: 22, CacheWrite5m: 10, Output: 3, Total: 47}
 	if err != nil || got != want {
 		t.Fatalf("usage=%+v err=%v, want %+v", got, err, want)
@@ -180,7 +180,7 @@ func TestAnthropicStreamUsesUpdatedCumulativeInputCounts(t *testing.T) {
 
 func TestAnthropicStreamRetainsKnownCountsOnNullableDelta(t *testing.T) {
 	stream := anthropicTestStart + strings.Replace(anthropicTestFinish, `"output_tokens":3`, `"output_tokens":3,"input_tokens":null,"cache_read_input_tokens":null,"cache_creation_input_tokens":null,"cache_creation":null`, 1)
-	got, err := decodeAnthropicUsage([]byte(stream), true, "text/event-stream")
+	got, err := decodeBufferedAnthropicStream([]byte(stream), "text/event-stream")
 	want := anthropicUsage{Input: 10, CacheRead: 20, CacheWrite5m: 8, Output: 3, Total: 41}
 	if err != nil || got != want {
 		t.Fatalf("usage=%+v err=%v, want %+v", got, err, want)

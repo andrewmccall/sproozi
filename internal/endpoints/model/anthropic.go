@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"mime"
 	"net/http"
 	"strings"
 )
@@ -169,14 +168,8 @@ func validateAnthropicCacheBlocks(raw json.RawMessage) error {
 	return nil
 }
 
-func decodeAnthropicUsage(body []byte, streaming bool, contentType string) (anthropicUsage, error) {
-	if streaming {
-		mediaType, _, err := mime.ParseMediaType(contentType)
-		if strings.TrimSpace(contentType) != "" && (err != nil || mediaType != eventStreamMediaType) {
-			return anthropicUsage{}, fmt.Errorf("unsupported Anthropic streaming response")
-		}
-		return decodeAnthropicStream(body)
-	}
+// decodeAnthropicUsage reads the usage of a whole Messages JSON response.
+func decodeAnthropicUsage(body []byte) (anthropicUsage, error) {
 	var message anthropicMessage
 	if err := json.Unmarshal(body, &message); err != nil {
 		return anthropicUsage{}, fmt.Errorf("invalid Anthropic response")
@@ -265,20 +258,6 @@ func totalAnthropicUsage(usage anthropicUsage) (anthropicUsage, error) {
 		usage.Total += count
 	}
 	return usage, nil
-}
-
-func decodeAnthropicStream(body []byte) (anthropicUsage, error) {
-	normalized := bytes.ReplaceAll(body, []byte("\r\n"), []byte("\n"))
-	if !bytes.HasSuffix(normalized, []byte("\n\n")) || bytes.Contains(normalized, []byte("\r")) {
-		return anthropicUsage{}, fmt.Errorf("truncated Anthropic event stream")
-	}
-	var stream anthropicStream
-	for frame := range bytes.SplitSeq(normalized, []byte("\n\n")) {
-		if err := stream.next(frame); err != nil {
-			return anthropicUsage{}, err
-		}
-	}
-	return stream.finish()
 }
 
 type anthropicPhase uint8
