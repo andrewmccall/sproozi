@@ -551,15 +551,15 @@ func providerAuth(result model.HandlerConfig, c GatewayConfig, kind harness.Nati
 			"it must hold only the provider API key", c.ProviderTokenFile)
 	}
 	h, _ := harness.Managed(kind)
-	switch {
-	case c.ProviderTokenKind == modelauth.TokenMode:
+	if c.ProviderTokenKind == modelauth.TokenMode {
 		p, _ := model.ProviderFor(h.Provider(true))
 		result.ProviderAuth = modelauth.Token{Value: token, Headers: p.TokenHeaders}
-	case h.Protocol == harness.ProtocolAnthropic:
-		result.ProviderAuth = modelauth.AnthropicAPIKey{Key: token}
-	default:
-		result.ProviderAuth = modelauth.APIKey{Key: token}
+		return result, nil
 	}
+	// A key is for the provider of the harness's own protocol, which has an
+	// API authority.
+	p, _ := model.ProviderFor(h.Provider(false))
+	result.ProviderAuth = p.APIKey(token)
 	return result, nil
 }
 

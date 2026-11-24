@@ -41,6 +41,10 @@ type Provider struct {
 	// TokenHeaders are set with a gateway-held sign-in token, such as the beta
 	// header Anthropic requires for an OAuth token.
 	TokenHeaders map[string]string
+	// APIKey attaches a gateway-held API key the way the provider's API
+	// expects it. A provider without an API authority, such as Copilot, has
+	// none.
+	APIKey func(key string) modelauth.Authenticator
 	// AccountAuthority, AccountPrefixes and AccountRoutes are the account and
 	// policy requests a signed-in client makes on a host another capability
 	// owns, such as Copilot's on api.github.com. Only these paths are served.
@@ -69,7 +73,8 @@ var providers = []Provider{
 			{Method: http.MethodPost, Path: "/oauth/token"},
 			{Method: http.MethodPost, Path: "/api/accounts/deviceauth/usercode"},
 			{Method: http.MethodPost, Path: "/api/accounts/deviceauth/token"},
-		}},
+		},
+		APIKey: func(key string) modelauth.Authenticator { return modelauth.APIKey{Key: key} }},
 	{Name: ProviderAnthropic,
 		Models: []ModelRoute{
 			{Authority: AnthropicAuthority, UpstreamURL: "https://api.anthropic.com",
@@ -77,7 +82,8 @@ var providers = []Provider{
 		},
 		SignInAuthority: AnthropicSignInAuthority,
 		SignInRoutes:    []RelayRoute{{Method: http.MethodPost, Path: "/v1/oauth/token"}},
-		TokenHeaders:    map[string]string{"Anthropic-Beta": "oauth-2025-04-20"}},
+		TokenHeaders:    map[string]string{"Anthropic-Beta": "oauth-2025-04-20"},
+		APIKey:          func(key string) modelauth.Authenticator { return modelauth.AnthropicAPIKey{Key: key} }},
 	// Copilot has no API-key host: a client signs in to GitHub, and its
 	// sign-in or a gateway-held GitHub token reaches its plan's host.
 	{Name: ProviderCopilot,

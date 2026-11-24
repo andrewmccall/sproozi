@@ -543,10 +543,8 @@ func providerAuth(cfg *startupConfig, name string) (auth modelauth.Authenticator
 	}
 	provider, _ := modelgateway.ProviderFor(name)
 	switch {
-	case key != "" && name == modelgateway.ProviderAnthropic:
-		return modelauth.AnthropicAPIKey{Key: key}, true
-	case key != "":
-		return modelauth.APIKey{Key: key}, true
+	case key != "" && provider.APIKey != nil:
+		return provider.APIKey(key), true
 	case token != "":
 		return modelauth.Token{Value: token, Headers: provider.TokenHeaders}, true
 	case cfg.modelAuthMode == modelauth.WorkloadMode:
