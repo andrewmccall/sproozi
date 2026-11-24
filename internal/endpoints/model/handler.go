@@ -355,19 +355,11 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 	limits sprooziv1alpha1.EndpointBudget, bodyBytes []byte, providerAuth modelauth.Authenticator, call *modelCall,
 ) {
 	ctx := r.Context()
-	var reservation *budget.Reservation
 	if call != nil {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(call.ctx)
 		defer cancel()
-		call.cancelUpstream, reservation = cancel, call.reservation
-	}
-	release := func() {
-		event := &e
-		if call != nil {
-			event = &call.e
-		}
-		h.release(event, reservation)
+		call.cancelUpstream = cancel
 	}
 	// unsent ends a request that never reached the provider.
 	unsent := func(reply errorReply) {
@@ -417,32 +409,8 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 	}
 	resp, err := providerClient.Do(upstreamReq)
 	if err != nil {
-		if call != nil && call.written.Load() != nil {
-			call.startedAt = *call.written.Load()
-			call.observeFailure("provider call ended before its response headers")
-			reason := endUpstreamError
-			if call.ctx.Err() != nil {
-				reason = call.cancelReason()
-			}
-			call.settleInterrupted(reason)
-			if reason == endClientCancelled {
-				// The harness left; nothing failed and no one reads a reply.
-				call.e.Outcome = audit.Cancelled
-				call.finish()
-				return
-			}
-			if reason == endGatewayRestart {
-				h.deny(r.Context(), w, call.e, http.StatusServiceUnavailable, gatewayStoppingMessage, "server_error", gatewayStoppingCode)
-				return
-			}
-			h.deny(r.Context(), w, call.e, http.StatusBadGateway,
-				"upstream request failed", "server_error", "upstream_error")
-			return
-		}
-		// The provider never received the whole request, so it did no work:
-		// end releases the reservation so a retry can use it.
 		if call != nil {
-			call.end(ending{kind: endingNoResponse})
+			call.noResponse()
 			return
 		}
 		h.denyReply(r.Context(), w, e, upstreamFailedReply)
@@ -468,9 +436,15 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 		call.relay(resp)
 		return
 	}
-	// Provider errors do not represent successful model consumption, so
-	// release the admission for a retry.
-	release()
+	if call != nil {
+		// A provider error is not model consumption: end releases the
+		// admission for a retry.
+		if call.written.Load() != nil {
+			call.mark(eventWrote)
+		}
+		call.end(ending{kind: endingRejected, response: resp})
+		return
+	}
 	h.relayWhole(w, r, e, resp, diagnostic, credential, limits)
 }
 

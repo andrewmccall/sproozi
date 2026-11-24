@@ -70,6 +70,27 @@ func (c *modelCall) move(event callEvent) error {
 	return nil
 }
 
+// mark moves the call by event, logging a refusal, which only a programming
+// error causes.
+func (c *modelCall) mark(event callEvent) {
+	if err := c.move(event); err != nil {
+		c.h.logger().Error("Refused model call event", "runID", c.e.RunID, "runUID", c.e.RunUID,
+			"error", err.Error())
+	}
+}
+
+// noResponse ends a call whose provider sent no response headers. A request
+// the provider had is charged from when it was written; one it never had
+// is released, so a retry can use the reservation.
+func (c *modelCall) noResponse() {
+	if at := c.written.Load(); at != nil {
+		c.mark(eventWrote)
+		c.startedAt = *at
+		c.observeFailure("provider call ended before its response headers")
+	}
+	c.end(ending{kind: endingNoResponse})
+}
+
 // endingKind is what ended a call.
 type endingKind uint8
 
