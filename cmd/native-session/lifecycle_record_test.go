@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -31,8 +33,12 @@ const lifecycleRecord = "testdata/supervisor-lifecycle.txt"
 // recordedHarness stands in for every harness: a line typed into its
 // terminal, such as Codex's quit, ends it with code 0, and SIGUSR1 makes it
 // exit by itself with code 3. It prints only "ready", once its terminal no
-// longer echoes input.
-const recordedHarness = `stty -echo; trap 'exit 3' USR1; printf ready; read -r line </dev/tty & wait $!; exit 0`
+// longer echoes input. Its terminal reader ends otherwise only by a kill of
+// its process group, which can reach the reader first; the shell then waits
+// in sleep, silently, for the kill to reach it too, so a kill always ends it
+// "-1 forced-stop" (TestRecordedHarnessEndsByAKillThatReachesItsReaderFirst).
+const recordedHarness = `exec 2>/dev/null; stty -echo; trap 'exit 3' USR1; printf ready; ` +
+	`read -r line </dev/tty & wait $! && exit 0; exec sleep 3600`
 
 // The recorded harness's shell, and the names of two events other tests also
 // name.
@@ -849,6 +855,67 @@ func recordedWorlds() []world {
 		worlds = append(worlds, world{kind: kind, deadline: true}, world{kind: kind, first: true, deadline: true})
 	}
 	return append(worlds, world{kind: harness.Default(), deadline: true, late: true})
+}
+
+// The recorded harness ends by a kill of its process group whichever member
+// the kill reaches first. Darwin signals a group's members one at a time, so
+// a loaded machine can let the terminal reader die, and its shell run on, before
+// the shell's own SIGKILL lands; a stand-in that then exited by itself would
+// end "0 native-exit", and the record's kills would depend on scheduling.
+// This kills the reader alone, as that ordering does, waits until the shell
+// has seen it end, and then stops the harness as the supervisor does.
+func TestRecordedHarnessEndsByAKillThatReachesItsReaderFirst(t *testing.T) {
+	native, err := nativepty.Start(nativepty.Launch{Executable: recordedShell, Args: []string{"-c", recordedHarness},
+		Env: []string{testPathEnvironment, testTerminalEnvironment}, Dir: t.TempDir(),
+		Size: nativepty.Size{Rows: 24, Columns: 80}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_, _ = native.Stop(ctx)
+	})
+	limit := time.After(10 * time.Second)
+	poll := func(what string) {
+		select {
+		case <-limit:
+			t.Fatalf("%s within 10s", what)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	reader := 0
+	for reader == 0 {
+		// The reader is the shell's only child once it is ready.
+		out, _ := exec.Command("/usr/bin/pgrep", "-P", fmt.Sprint(native.PID())).Output()
+		if fields := strings.Fields(string(out)); len(fields) == 1 && strings.Contains(string(native.Tail(64)), "ready") {
+			reader, _ = strconv.Atoi(fields[0])
+			break
+		}
+		poll("the recorded harness did not start its reader")
+	}
+	if err = unix.Kill(reader, unix.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	// The shell has seen its reader end once it has ended or runs the command
+	// it waits in for its own kill.
+	for waited := false; !waited; {
+		select {
+		case <-native.Done():
+			waited = true
+		default:
+			out, _ := exec.Command("/bin/ps", "-o", "comm=", "-p", fmt.Sprint(native.PID())).Output()
+			if waited = filepath.Base(strings.TrimSpace(string(out))) == "sleep"; !waited {
+				poll("the recorded harness did not see its reader end")
+			}
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), realStopLimit)
+	defer cancel()
+	exit, err := native.Stop(ctx)
+	if err != nil || exit != (nativepty.Exit{Code: -1, Reason: nativepty.ForcedStop}) {
+		t.Fatalf("harness ended %d %s (%v), want -1 forced-stop", exit.Code, exit.Reason, err)
+	}
 }
 
 // The supervisor's behaviour, for every event in every state it reaches, is
