@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,12 +12,12 @@ import (
 
 // liveLogin is a login sync as activate leaves it once the launch is
 // prepared: first sync done, periodic sync running at its production
-// interval, with its production save bound, against a store nobody else
-// holds.
+// interval, against a store nobody else holds. Its save bound is one no
+// ending reaches, so an ending that waited for its bound would never end.
 func liveLogin(t *testing.T) *loginSync {
 	t.Helper()
 	l := &loginSync{stored: filepath.Join(t.TempDir(), "auth.json"), native: filepath.Join(t.TempDir(), "auth.json"),
-		quit: make(chan struct{}), stopped: make(chan struct{})}
+		quit: make(chan struct{}), stopped: make(chan struct{}), diagnostics: &lockedBuffer{}, wait: unreachedSaveWait}
 	write(t, l.stored, refreshedR3)
 	if err := l.sync(); err != nil {
 		t.Fatal(err)
@@ -25,16 +26,12 @@ func liveLogin(t *testing.T) *loginSync {
 	return l
 }
 
-// endingBound is far above what an ordinary ending's login save takes, a
-// few milliseconds, and below the five-second bound a save may wait for a
-// store another holder keeps locked: an uncontended ending that waited for
-// that bound fails.
-const endingBound = 2 * time.Second
-
-// An ordinary ending, against an uncontended store, spends milliseconds on
-// the login: from the harness's exit to the stop's reply, or to the
-// supervisor concluding after the harness exited by itself, whether or not
-// there is a change to save.
+// An ordinary ending, against an uncontended store, ends when its login save
+// does, not at the save's bound: from the harness's exit to the stop's reply,
+// or to the supervisor concluding after the harness exited by itself,
+// whether or not there is a change to save. The bound is out of reach, so
+// an ending that happens at all ended with its save, not at the bound; how
+// long the save's writes take on a loaded machine does not decide it.
 func TestOrdinaryEndingsDoNotWaitForTheLoginBound(t *testing.T) {
 	quits := "read -r line; exit 0"
 	for _, changed := range []bool{false, true} {
@@ -75,10 +72,9 @@ func TestOrdinaryEndingsDoNotWaitForTheLoginBound(t *testing.T) {
 					write(t, l.native, `{"refresh":"r5"}`)
 				}
 				exited, ended := ending(t, l)
-				took := ended.Sub(exited)
-				t.Logf("login part of the ending took %s", took)
-				if took > endingBound {
-					t.Fatalf("the ending took %s after the harness exited", took)
+				t.Logf("login part of the ending took %s", ended.Sub(exited))
+				if said := l.diagnostics.(*lockedBuffer).String(); strings.Contains(said, "unavailable for") {
+					t.Fatalf("the ending waited for the save's bound: %q", said)
 				}
 			})
 		}
