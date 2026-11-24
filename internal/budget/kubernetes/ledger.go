@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
-	"strings"
 	"time"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -54,7 +53,7 @@ func (s *store) Update(ctx context.Context, key budget.AccountKey, mutate func(*
 // accountParts returns the run UID and capability of an account key, or ""
 // for a part the key lacks. Kubernetes keys are "<run UID>/<capability>".
 func accountParts(key budget.AccountKey) (run, capability string) {
-	run, capability, found := strings.Cut(string(key), "/")
+	run, capability, found := budget.SplitAccount(string(key))
 	if !found || len(validation.IsValidLabelValue(run)) != 0 {
 		return "", ""
 	}
