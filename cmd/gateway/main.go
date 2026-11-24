@@ -336,8 +336,12 @@ func loadStartupConfig() (*startupConfig, error) {
 		withoutModel := maps.Clone(enabled)
 		delete(withoutModel, sprooziv1alpha1.CapabilityModelInference)
 		owned := inspectionHosts(host, withoutModel, profiles, mcpRegistry)
-		pruneModelHosts(hosts, owned, modelAuthMode, openAIKey+openAIToken != "", anthropicKey+anthropicToken != "",
-			copilotToken != "")
+		// Only the credentials' modes are read, so the ChatGPT sign-in needs
+		// no store yet.
+		credentials := modelCredentials(&startupConfig{modelAuthMode: modelAuthMode, openAIKey: openAIKey,
+			anthropicKey: anthropicKey, openAIToken: openAIToken, anthropicToken: anthropicToken,
+			copilotToken: copilotToken}, nil)
+		pruneModelHosts(hosts, owned, credentials)
 	}
 	for name := range hosts {
 		if err := leaf.VerifyHostname(name); err != nil {
@@ -358,40 +362,28 @@ func loadStartupConfig() (*startupConfig, error) {
 	}, nil
 }
 
-// pruneModelHosts drops model hosts no route serves: a provider API with no
-// credential, and a signed-in client's hosts unless the provider forwards its
-// sign-in, so a gateway with keys needs no extra certificate names. It never
-// drops a host in owned, which other capabilities and egress profiles route.
-func pruneModelHosts(hosts, owned map[string]bool, mode string, openAIHeld, anthropicHeld, copilotHeld bool) {
-	drop := func(host string) {
-		if !owned[host] {
-			delete(hosts, host)
-		}
-	}
-	workload := mode == modelauth.WorkloadMode
-	if !anthropicHeld && !workload {
-		drop("api.anthropic.com")
-	}
-	if !openAIHeld && mode == modelauth.APIKeyMode {
-		drop("api.openai.com")
-	}
-	for name, forwards := range map[string]bool{modelgateway.ProviderOpenAI: workload && !openAIHeld,
-		modelgateway.ProviderAnthropic: workload && !anthropicHeld} {
+// pruneModelHosts keeps the hosts each provider's credential needs and drops
+// the provider table's other hosts, so a gateway with keys needs no extra
+// certificate names. A credential that forwards the harness's own sign-in,
+// or one for a provider with no API host such as Copilot, needs every model,
+// sign-in and account host; any other needs the API host. It never drops a
+// host in owned, which other capabilities and egress profiles route.
+func pruneModelHosts(hosts, owned map[string]bool, credentials map[string]modelauth.Authenticator) {
+	needed := map[string]bool{}
+	for name, auth := range credentials {
 		provider, _ := modelgateway.ProviderFor(name)
-		if !forwards {
-			for _, extra := range provider.Hosts(true)[1:] {
-				drop(extra)
-			}
+		for _, host := range provider.Hosts(auth.Mode() == modelauth.WorkloadMode || provider.Models[0].SignedIn) {
+			needed[host] = true
 		}
 	}
-	// Copilot has only signed-in hosts, served with a gateway-held GitHub
-	// token or the harness's own sign-in.
-	copilot, _ := modelgateway.ProviderFor(modelgateway.ProviderCopilot)
-	for _, host := range copilot.Hosts(true) {
-		if copilotHeld || workload {
-			hosts[host] = true
-		} else {
-			drop(host)
+	for _, name := range modelProviders {
+		provider, _ := modelgateway.ProviderFor(name)
+		for _, host := range provider.Hosts(true) {
+			if needed[host] {
+				hosts[host] = true
+			} else if !owned[host] {
+				delete(hosts, host)
+			}
 		}
 	}
 }
