@@ -241,7 +241,7 @@ func (r *AgentRunReconciler) resolveAdmission(ctx context.Context, run *sprooziv
 	}
 	limit := registry.EffectiveDeadline(run, pol, binding)
 	// A completed session stop ends the run as stopped even past the deadline
-	// (ADR 0041); handleRunning waits for its sandbox to finish.
+	// (ADR 0045); handleRunning waits for its sandbox to finish.
 	stopped := binding != nil && binding.Phase == registry.Stopped
 	if !stopped && limit.Passed(time.Now()) {
 		logger.Info("AgentRun deadline exceeded", "name", run.Name, "phase", run.Status.Phase)

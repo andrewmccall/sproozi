@@ -94,7 +94,7 @@ func TestPreflightRefusesABudgetNamespaceTheGatewayDoesNotCharge(t *testing.T) {
 }
 
 // The gateway's namespace holds its configuration ConfigMaps, which only the
-// controller may write (ADR 0041). The executor writes ConfigMaps in its run
+// controller may write (ADR 0045). The executor writes ConfigMaps in its run
 // namespace, so that may not be the gateway's, whatever RBAC allows. Ledgers
 // are BudgetLedger resources, so the budget namespace may be (ADR 0045).
 func TestPreflightRefusesTheGatewayNamespace(t *testing.T) {

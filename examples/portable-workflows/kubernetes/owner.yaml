@@ -14,7 +14,7 @@
 # immutability is what stops it rewriting its own profile or the CA.
 # The executor, its managed runs and their registrations live in their own
 # namespace. The executor writes ConfigMaps here, so it must not share a
-# namespace with the gateway's configuration in sproozi-system (ADR 0041), and
+# namespace with the gateway's configuration in sproozi-system (ADR 0045), and
 # the CLI's port-forward access here reaches only the executor.
 apiVersion: v1
 kind: Namespace

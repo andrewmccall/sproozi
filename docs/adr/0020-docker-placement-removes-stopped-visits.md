@@ -3,7 +3,7 @@
 Status: accepted
 Date: 2026-10-18
 
-Partly superseded: [ADR 0041](0041-gateway-state-namespace-and-retained-state-owners.md) gives failed removals an owner: the local service retries them at start and every five minutes, so they no longer wait for a person.
+Corrected 2026-11-24: failed removals have an owner. The local service retries them at start and every five minutes (see "A failed removal has an owner" below), so the consequence below that they stay until removed by hand no longer holds, and the revisit condition about a startup sweep is met. This was recorded in ADR 0041 on 2026-10-21 and moved here when that record was removed.
 
 ## Problem and constraints
 
@@ -59,6 +59,23 @@ A removal failure never turns a durable stop into an unknown stop. `Stop` and
 the first `Abort` return the recorded result and leave removal for a retry. A
 replayed `Abort` still fails if the exact agent container is present and cannot
 be confirmed stopped.
+
+### A failed removal has an owner
+
+`Stop` and `Abort` return success once a stop is durable and leave a failed
+removal for the next call. A coordinator has no reason to make that call, so
+stopped containers and their volume could stay until someone ran `docker rm`.
+The local service owns the retry. `Placement.ReleaseStopped` walks the
+placement's records and finishes removal for every durably stopped or aborted
+visit not yet marked removed, under the same operation lock as `Stop` (it skips
+a visit whose lock is held and tries it on the next sweep). The service runs it
+once at start and every five minutes (`internal/session/home/release.go`,
+`internal/runtime/docker/release_sweep.go`). A retry that fails is logged and
+left for the next sweep, so a durable stop never becomes an unknown stop.
+
+A periodic sweep with no lock was rejected: it could race a concurrent `Stop`
+for the same visit. Reusing the operation lock and the existing idempotent
+removal avoids a second removal path.
 
 ## Alternatives
 

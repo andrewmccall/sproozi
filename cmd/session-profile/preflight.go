@@ -42,7 +42,7 @@ func gatewayNamespace(gatewayUser string) (string, error) {
 // it a wrong run namespace or budget namespace starts cleanly and fails on
 // every request. It also refuses the gateway's own namespace as the run
 // namespace: the executor writes ConfigMaps there, and the gateway's
-// configuration ConfigMaps live there (ADR 0041). Ledgers are BudgetLedger
+// configuration ConfigMaps live there (ADR 0045). Ledgers are BudgetLedger
 // resources, so the budget namespace may be the gateway's (ADR 0045).
 func preflight(ctx context.Context, clients kubernetes.Interface,
 	runNamespace, budgetNamespace, gatewayUser string,
