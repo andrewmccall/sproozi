@@ -55,8 +55,8 @@ func TestAnUnreachablePlacementDelaysNoOtherExitCheck(t *testing.T) {
 	if _, running := s.exitChecks.Load(held); !running {
 		t.Fatal("the unreachable placement's check ended before its bound")
 	}
-	checks = s.sweepExits(ctx)
-	goFor(s, func() { <-checks })
+	again := s.sweepExits(ctx)
+	goFor(s, func() { <-again })
 	cancel()
 }
 
