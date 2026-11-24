@@ -197,6 +197,12 @@ The model call's settlement (ADR 0028) may later be rewritten as one `end`
 step that derives the charge, end reason and audit fields from the call's
 phase. That rewrite changes no outcome and is not part of this decision.
 
+Corrected 2026-11-24: the rewrite was done. `end`, in
+`internal/endpoints/model/end.go`, charges, records and answers each model
+call once from the phase it reached and how it ended, and keeps as explicit
+rules the three outcomes the records pin that look inconsistent. No recorded
+outcome changed.
+
 ## Alternatives
 
 - **Keep the handlers and add only the enumeration test.** It catches a
