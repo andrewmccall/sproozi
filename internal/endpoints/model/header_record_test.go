@@ -142,7 +142,7 @@ func recordHeaders(t *testing.T, provider string, route model.ModelRoute, call h
 	events := &recordedEvents{}
 	var auth modelauth.Authenticator = modelauth.Workload{}
 	if call.apiKey {
-		auth = modelauth.APIKey{Key: "sk-fixture-openai-key-0123"}
+		auth = modelauth.APIKey{Key: recordOpenAIKey}
 		if provider == model.ProviderAnthropic {
 			auth = modelauth.AnthropicAPIKey{Key: testAnthropicSecret}
 		}

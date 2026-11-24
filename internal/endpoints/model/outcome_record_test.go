@@ -571,7 +571,7 @@ func runModelCase(t *testing.T, tc modelCase) string {
 	}
 	events := &recordedEvents{}
 	run.config = model.HandlerConfig{AuditLogger: events, UpstreamURL: testModelUpstream,
-		ProviderAuth: modelauth.APIKey{Key: "sk-fixture-openai-key-0123"},
+		ProviderAuth: modelauth.APIKey{Key: recordOpenAIKey},
 		Logger:       slog.New(slog.DiscardHandler), Now: run.clock.Now, Drain: run.drain}
 	if tc.anthropic {
 		run.config.ProviderAuth = modelauth.AnthropicAPIKey{Key: testAnthropicSecret}
@@ -909,6 +909,9 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 			client: respond(http.StatusOK, eventStream, responsesEvents[0]+
 				"event: error\ndata: {\"type\":\"error\",\"code\":\"server_error\",\"message\":\"boom\"}\n\n")},
 		{name: "row 22/anthropic message_stop settles provider usage", anthropic: true, body: anthropicStreamRequest,
+			client: respond(http.StatusOK, eventStream, anthropicStream)},
+		{name: "row 22/anthropic message_stop settles provider usage under a cost cap", anthropic: true,
+			body: anthropicStreamRequest, limits: budgetOf(10_000, 1_000_000),
 			client: respond(http.StatusOK, eventStream, anthropicStream)},
 		{name: "row 22/anthropic message_stop without message_delta", anthropic: true, body: anthropicStreamRequest,
 			client: respond(http.StatusOK, eventStream, strings.Join(anthropicEvents[:12], "")+anthropicEvents[len(anthropicEvents)-1])},
