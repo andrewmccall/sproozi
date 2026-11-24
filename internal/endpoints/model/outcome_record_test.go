@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"os"
 	"path/filepath"
 	"slices"
@@ -385,6 +386,26 @@ func respond(status int, contentType, body string) func(*caseRun) *http.Client {
 			}
 			return response, nil
 		})}
+	}
+}
+
+// respondWritten reports the whole request written, as the transport does
+// before a provider answers, then answers status.
+func respondWritten(status int, contentType, body string) func(*caseRun) *http.Client {
+	return func(*caseRun) *http.Client {
+		return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			reportWritten(r)
+			response := modelResponse(r, body)
+			response.StatusCode, response.Status = status, http.StatusText(status)
+			response.Header.Set("Content-Type", contentType)
+			return response, nil
+		})}
+	}
+}
+
+func reportWritten(r *http.Request) {
+	if trace := httptrace.ContextClientTrace(r.Context()); trace != nil && trace.WroteRequest != nil {
+		trace.WroteRequest(httptrace.WroteRequestInfo{})
 	}
 }
 
@@ -838,6 +859,26 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 
 		{name: "row 15/openai non-2xx relayed with a failing release (Q1)", path: chatPath, body: chatBody, ledger: releaseFails,
 			client: respond(http.StatusTooManyRequests, "application/json", `{"error":{"message":"slow down"}}`)},
+		{name: "row 14/anthropic written, then 429 replaced", anthropic: true, body: messagesBody,
+			client: respondWritten(http.StatusTooManyRequests, "application/json", `{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`)},
+		{name: "row 14/anthropic written, then 500 replaced", anthropic: true, body: messagesBody,
+			client: respondWritten(http.StatusInternalServerError, "application/json", `{"type":"error","error":{"type":"api_error","message":"boom"}}`)},
+		{name: "row 15/openai written, then 429 relayed", path: chatPath, body: chatBody,
+			client: respondWritten(http.StatusTooManyRequests, "application/json", `{"error":{"message":"slow down"}}`)},
+		{name: "row 15/openai written, then 500 relayed", path: chatPath, body: chatBody,
+			client: respondWritten(http.StatusInternalServerError, "application/json", `{"error":{"message":"boom"}}`)},
+		{name: "row 15/openai written, then 429 relayed with a failing release (Q1)", path: chatPath, body: chatBody,
+			ledger: releaseFails,
+			client: respondWritten(http.StatusTooManyRequests, "application/json", `{"error":{"message":"slow down"}}`)},
+		// The provider read the whole request, but the transport had not yet
+		// reported the write when the call failed: released, not estimated.
+		{name: "row 12/openai provider read the request, write not yet reported (released)", path: chatPath, body: chatBody,
+			client: func(*caseRun) *http.Client {
+				return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					_, _ = io.ReadAll(r.Body)
+					return nil, errors.New("connection reset by peer")
+				})}
+			}},
 
 		// Relay (rows 16-30).
 		{name: "row 16/openai stream with the wrong content type", path: testResponsesPath, body: responsesStreamRequest,
