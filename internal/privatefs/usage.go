@@ -12,7 +12,8 @@ import (
 // that is not a directory and that skip does not name. It examines nothing
 // but sizes, so an owner can bound what it keeps while others write.
 //
-// The sum is of what each directory's listing found. A Replace in progress
+// The sum is of what each directory's listing found, each at the size lstat
+// reports when it is examined. A Replace in progress
 // counts its temporary file, beside the file it replaces, which only
 // overstates what is kept. An entry the listing found that is gone when it
 // is examined is not counted: it was removed, or it was a Replace's
@@ -70,4 +71,33 @@ func usage(root string, skip func(name string) bool, listed func(path string)) (
 		return err
 	})
 	return size, err
+}
+
+// gone reports whether path, which an operation just failed on with an error
+// that is fs.ErrNotExist, is itself gone, rather than unreachable because a
+// directory above it became something else. On Unix the second case fails with
+// ENOTDIR and never reaches here. On Windows syscall.ENOTDIR is
+// ERROR_PATH_NOT_FOUND, which is also what a path below a file reports, so the
+// error alone cannot tell them apart: a directory replaced by a file, or a
+// parent replaced by one, would look like a removal and be skipped, an
+// undercount. gone looks: path is gone only if it does not exist and the
+// nearest ancestor that does is a directory (following links, as the failed
+// operation did). Anything else, including an error other than not-exist, is
+// not gone and the caller fails the sum.
+func gone(path string) bool {
+	if _, err := os.Lstat(path); err == nil {
+		return false
+	}
+	for p := filepath.Dir(path); ; p = filepath.Dir(p) {
+		info, err := os.Stat(p)
+		if err == nil {
+			return info.IsDir()
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return false
+		}
+		if filepath.Dir(p) == p {
+			return true
+		}
+	}
 }
