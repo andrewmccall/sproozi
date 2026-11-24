@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
@@ -393,5 +394,38 @@ func TestUnsentReasonIsReadAfterTheRelease(t *testing.T) {
 	if e := c.events.events[0]; e.EndReason != endClientCancelled || e.Outcome != audit.Cancelled || c.writer.Body.Len() != 0 {
 		t.Fatalf("endReason=%q outcome=%q reply=%q, want the workload's leaving recorded and no reply",
 			e.EndReason, e.Outcome, c.writer.Body.String())
+	}
+}
+
+// A refused ending or settlement is a programming error whose only signal
+// is its log line, so the lines are pinned.
+func TestRefusalsAreLogged(t *testing.T) {
+	logged := func(c *endTestCall) *bytes.Buffer {
+		var logs bytes.Buffer
+		c.call.h.Config.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+		return &logs
+	}
+
+	c := newEndTestCall(t, callAdmitted, callLive)
+	logs := logged(c)
+	c.call.end(ending{kind: endingCut})
+	if !strings.Contains(logs.String(), `level=ERROR msg="Refused model call ending"`) ||
+		!strings.Contains(logs.String(), `error="model call ending cut is not declared from admitted"`) {
+		t.Fatalf("refused ending logged %q", logs.String())
+	}
+
+	c = newEndTestCall(t, callRelaying, callLive)
+	if err := c.call.settle(ending{kind: endingUsage, reason: endCompleted, usage: reportedUsage()}); err != nil {
+		t.Fatal(err)
+	}
+	logs = logged(c)
+	c.call.responses = &responsesStream{terminal: "response.completed"}
+	c.call.settleCompleted()
+	if !strings.Contains(logs.String(), `level=ERROR msg="Refused model call settlement"`) ||
+		!strings.Contains(logs.String(), `error="model call cannot settle ending interrupted from settled"`) {
+		t.Fatalf("refused settlement logged %q", logs.String())
+	}
+	if used, _ := c.used(t); used != 7 || c.call.phase != callSettled {
+		t.Fatalf("refused settlement charged: used=%d phase=%s", used, c.call.phase)
 	}
 }
