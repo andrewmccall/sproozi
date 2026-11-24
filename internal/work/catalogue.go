@@ -547,21 +547,22 @@ func (o *Owner) admitRetention(newSession bool) error {
 // the input the coordinator has not retained yet. A settled session and a
 // version 1 record hold none.
 //
-// A record that is gone holds none, and so does one that is present and read
-// but is not a valid record: nothing drives it, so it will never commit a
-// checkpoint. A record is gone if it was listed and removed before it was
+// A record or journal that is gone holds none, and so does one that is
+// present and read but is not valid: no coordinator operation can load an
+// invalid journal, so nothing commits a checkpoint for it, and Remove cannot
+// clear it, so failing closed would refuse all work until the volume is
+// edited by hand. A record is gone if it was listed and removed before it was
 // read, or removed during the read (a removal mark, or a missing record or
 // journal), as privatefs.Usage skips an entry removed after its directory was
 // listed. A catalogue directory that went too fails admission in Usage, which
-// admitRetention calls next, and Usage counts the files that remain.
+// admitRetention calls next.
 //
-// A record or journal that is present but cannot be looked at (permission,
-// I/O, too many open files, not a regular file, a mark that cannot be
-// checked) fails closed: the error is returned, and admission refuses with
-// it, as it does when the coordinator's or the catalogue's size cannot be
-// summed. Treating "could not look" as "nothing reserved" would admit work
-// the limit refuses. An error from the coordinator's journal is not told
-// apart from a corrupt journal, so a corrupt journal fails closed too.
+// A record or journal that is present but cannot be read (permission,
+// ownership, I/O, too many open files, not a regular file, over its bound, a
+// removal mark that cannot be checked, a closed coordinator) fails closed:
+// the error is returned and logged, and admission refuses with it, as it does
+// when the coordinator's or the catalogue's size cannot be summed. Treating
+// "could not look" as "nothing reserved" would admit work the limit refuses.
 func (o *Owner) reserved(id string) (int64, error) {
 	if !CanonicalID(id) {
 		return 0, nil // a stray file, not a session's record
@@ -571,7 +572,7 @@ func (o *Owner) reserved(id string) (int64, error) {
 		return 0, nil
 	}
 	if err != nil {
-		return 0, fmt.Errorf("work: could not determine reserved storage: %w", err)
+		return 0, o.unreserved(id, err)
 	}
 	e, err := o.decodeEntry(id, b)
 	if err != nil || e.legacy != nil {
@@ -580,10 +581,13 @@ func (o *Owner) reserved(id string) (int64, error) {
 	rec, err := o.execution(*e.current)
 	if err != nil {
 		var rejection *profile.Rejection
-		if errors.As(err, &rejection) && rejection.Code == profile.CodeInvalid {
+		switch {
+		case errors.As(err, &rejection) && rejection.Code == profile.CodeInvalid:
 			return 0, nil // removed since the record was read
+		case errors.Is(err, session.ErrJournalInvalid):
+			return 0, nil // content that is not a valid journal
 		}
-		return 0, fmt.Errorf("work: could not determine reserved storage: %w", err)
+		return 0, o.unreserved(id, err)
 	}
 	switch {
 	case derivePhase(*e.current, rec).Settled():
@@ -592,6 +596,13 @@ func (o *Owner) reserved(id string) (int64, error) {
 		return 2, nil
 	}
 	return 1, nil
+}
+
+// unreserved logs a session whose reservation could not be determined and
+// returns the error that refuses admission.
+func (o *Owner) unreserved(id string, err error) error {
+	o.logf("Could not determine reserved storage for work session %s: %v", id, err)
+	return fmt.Errorf("work: could not determine reserved storage: %w", err)
 }
 
 // lastExit is the exit of the execution's last stopped visit, if its harness

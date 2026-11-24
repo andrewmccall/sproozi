@@ -244,6 +244,21 @@ func (c *Coordinator) save(r Record) error {
 	return privatefs.Replace(c.dir, r.ID+".json", data)
 }
 func readFile(p string, max int64) ([]byte, error) { return privatefs.ReadFile(p, max) }
+
+// ErrJournalInvalid matches, with errors.Is, a load failure of a journal that
+// was read but is not valid: it does not decode, has trailing data, names
+// another execution or fails validation. A journal that could not be read
+// (permission, I/O, not a regular file, over its bound) does not match. The
+// error keeps its own message.
+var ErrJournalInvalid = errors.New("session: journal is not valid")
+
+// invalidJournal carries a journal's content failure: its message is the
+// cause's, and it matches ErrJournalInvalid and the cause.
+type invalidJournal struct{ cause error }
+
+func (e invalidJournal) Error() string   { return e.cause.Error() }
+func (e invalidJournal) Unwrap() []error { return []error{ErrJournalInvalid, e.cause} }
+
 func (c *Coordinator) load(id string) (Record, error) {
 	var r Record
 	if !validUUID(id) {
@@ -256,17 +271,17 @@ func (c *Coordinator) load(id string) (Record, error) {
 	d := json.NewDecoder(bytes.NewReader(data))
 	d.DisallowUnknownFields()
 	if err = d.Decode(&r); err != nil {
-		return r, err
+		return r, invalidJournal{err}
 	}
 	if err = d.Decode(new(any)); err != io.EOF {
-		return r, errors.New("session: trailing journal data")
+		return r, invalidJournal{errors.New("session: trailing journal data")}
 	}
 	if r.ID != id {
-		return r, errors.New("session: journal identity mismatch")
+		return r, invalidJournal{errors.New("session: journal identity mismatch")}
 	}
 	normalizeLegacyPhase(&r)
 	if err = validateRecord(r); err != nil {
-		return r, err
+		return r, invalidJournal{err}
 	}
 	return r, nil
 }
