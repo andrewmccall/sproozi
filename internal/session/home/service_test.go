@@ -52,6 +52,8 @@ type placementFixture struct {
 	// turnless stops a visit from a workspace with no conversation.
 	turnless bool
 	exited   *session.Exit
+	// attach, when set, runs inside Attach before it returns.
+	attach func(context.Context)
 	// exitedErr fails Exited; blockExited makes it wait for its context, as
 	// an executor that cannot be reached does.
 	exitedErr                   error
@@ -242,7 +244,10 @@ func (p *placementFixture) AbortPreparation(ctx context.Context, l session.Launc
 	_, err := p.Abort(ctx, l, r.Incarnation)
 	return err
 }
-func (p *placementFixture) Attach(context.Context, session.Launch, session.Incarnation, io.Reader, io.Writer) error {
+func (p *placementFixture) Attach(ctx context.Context, _ session.Launch, _ session.Incarnation, _ io.Reader, _ io.Writer) error {
+	if p.attach != nil {
+		p.attach(ctx)
+	}
 	return nil
 }
 
@@ -415,8 +420,27 @@ func testService(t *testing.T) (*Service, *placementFixture, *placementFixture, 
 		t.Fatal(err)
 	}
 	s := &Service{config: config, duration: time.Hour, stacks: []*localStack{{config: config.Local}}, placements: placements, coordinator: coordinator}
-	t.Cleanup(func() { _ = s.Close() })
+	t.Cleanup(func() { quiesce(s); _ = s.Close() })
 	return s, local, remote, repo
+}
+
+// testGoroutines holds the goroutines tests start on a service's behalf, such as a
+// control handler that keeps running after it replies, or a sweep's checks.
+var testGoroutines sync.Map // *Service -> *sync.WaitGroup
+
+// goFor runs f in a goroutine that the service's clean-up waits for.
+func goFor(s *Service, f func()) {
+	wg, _ := testGoroutines.LoadOrStore(s, &sync.WaitGroup{})
+	wg.(*sync.WaitGroup).Go(f)
+}
+
+// quiesce waits for every goroutine started with goFor on s. testService
+// registers it ahead of the service's Close and the removal of its directory,
+// so no goroutine a test started can write there once the test has ended.
+func quiesce(s *Service) {
+	if wg, ok := testGoroutines.LoadAndDelete(s); ok {
+		wg.(*sync.WaitGroup).Wait()
+	}
 }
 
 func TestStartIgnoredOptInRetainsBytesAndImmutableSelectionAcrossVisits(t *testing.T) {
