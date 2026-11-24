@@ -288,6 +288,7 @@ type modelCall struct {
 	relayed     int
 	anthropic   *anthropicStream
 	responses   *responsesStream
+	phase       callPhase
 	settled     bool
 	passthrough bool
 	tokensUsed  int64
