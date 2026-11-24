@@ -15,7 +15,7 @@ later resume, use [Hermes with remote work](retained-work-kubernetes.md).
 The deployment follows the persistent-agent pattern in the upstream [Agent
 Sandbox Hermes
 example](https://agent-sandbox.sigs.k8s.io/docs/use-cases/examples/hermes-agent/).
-Sproozi runs it as a separate coordinator Deployment and creates sandbox Pods
+Sproozi runs it as a separate persistent assistant Deployment and creates sandbox Pods
 directly; see [cluster dependencies](../reference/dependencies.md).
 
 ## Deploy with your own model account
@@ -26,10 +26,10 @@ gateway-held model credentials for the sandboxes and the public sandbox trust
 ConfigMap. Its [step 7](install-from-checkout.md#7-run-a-model-on-this-cluster)
 shows how to add model credentials and extend the gateway certificate. Enable
 `model.inference,kubernetes.read` on the gateway, and ensure its inspection
-certificate covers `api.openai.com` and `kubernetes.default.svc`. The coordinator
-uses a separate model credential. Sandbox budgets do not cap coordinator
+certificate covers `api.openai.com` and `kubernetes.default.svc`. The persistent assistant
+uses a separate model credential. Sandbox budgets do not cap persistent assistant
 spending. Your cluster also needs a default StorageClass, or an explicit
-`storageClassName` in the coordinator PVC.
+`storageClassName` in the persistent assistant PVC.
 
 Review local copies of these administrator-owned examples:
 
@@ -47,7 +47,7 @@ Sproozi image used by your controller. Pull the Hermes image that Sproozi's
 tests pin, Hermes 0.22.7, by digest:
 `docker pull docker.io/nousresearch/hermes-agent@sha256:e6d81ae52ebf6a43efa529701405509f20054ba818f179ddd748bed4f8af584c`.
 Use the same digest reference in your copy of the Hermes runtime. Review the
-model selection in both runtime and coordinator, target namespace, policy
+model selection in both runtime and persistent assistant, target namespace, policy
 budgets and resources. The Hermes runtime enables the native Kubernetes
 Pod-list MCP tool; the policy and template in `worker.yaml`, which every
 delegated run uses, grant and direct its use. The task service fixes the workflow's template and
@@ -100,7 +100,7 @@ kubectl create secret tls sproozi-task-tls -n sproozi-system \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-Save the coordinator's OpenAI API key in `.local/orchestration/model-key`, with
+Save the persistent assistant's OpenAI API key in `.local/orchestration/model-key`, with
 file mode 600. The following command references that file without displaying
 its contents:
 
@@ -137,11 +137,11 @@ sleeps while that supervised Hermes process serves API requests and cron. Do not
 also run a foreground `hermes gateway run`, which competes with the supervised
 Hermes process restored from the PVC.
 
-The coordinator uses the official root bootstrap to prepare the volume and drop
+The persistent assistant uses the official root bootstrap to prepare the volume and drop
 to the Hermes runtime user. Its configuration is mounted read-only. It has no
 Kubernetes token or host mounts. Each delegated run's Hermes sandbox bypasses that
 bootstrap, executes as UID 10000 with a read-only root, and uses only its
-projected gateway identity. The coordinator and the sandboxes have separate
+projected gateway identity. The persistent assistant and the sandboxes have separate
 credentials and lifetimes.
 
 ## Chat and schedules
@@ -233,6 +233,6 @@ kubectl delete -f .local/orchestration/agentruntime-hermes.yaml
 kubectl delete secret sproozi-task-token sproozi-task-tls -n sproozi-system
 ```
 
-Deleting the coordinator manifest deletes its PVC and persistent assistant
+Deleting the persistent assistant manifest deletes its PVC and persistent assistant
 state. Inspect or back up that state first when retaining conversations matters.
 Run objects and Sproozi's installation have their own cleanup and retention.

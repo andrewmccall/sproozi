@@ -18,8 +18,8 @@ each graceful wait, and accepts Claude's `system` request caches.
 
 ## Problem and constraints
 
-[ADR 0007](0007-codex-round-trip-before-harness-expansion.md) selected a complete
-Codex round trip followed by an independently verified Claude Code extension.
+ADR 0007 ([removed](README.md#removed)) selected a complete Codex round trip
+followed by an independently verified Claude Code extension.
 Both must preserve the stock interactive terminal and native UUID. A common
 summary format or a prompt interface around headless execution would change that
 experience. Each client also needs its own native state and completion checks.
@@ -117,6 +117,18 @@ the gateway. The worker has no host Docker socket, host repository bind or
 Kubernetes credentials. This flag choice does not weaken the placement's outer
 limits or permit checkpoint contents to select them. Claude's fixed
 `bypassPermissions` mode uses the same outer confinement responsibility.
+
+Corrected 2026-11-15: moved here from ADR 0006, which was removed. The
+terminal transport is the supervisor's real PTY, not a prompt wrapper or an
+app-server connection, so the stock client keeps its own interface. It keeps a
+bounded output replay buffer and accepts one input attachment at a time, bound
+to the active placement incarnation (`internal/nativepty/supervisor.go`,
+`internal/session/profile/terminal.go`). A disconnect leaves the execution
+running and its replay available; only explicit cancellation revokes and stops
+it. Batch-only resume was rejected because it gives no interaction while the
+session runs remotely, and a custom Sproozi chat UI because it adds a second
+conversation representation to maintain. Terminal reconnect alone never
+satisfies a move: the conversation and workspace round trip still applies.
 
 ## Alternatives and accepted tradeoffs
 

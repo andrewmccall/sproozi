@@ -1,6 +1,6 @@
 # Hermes with remote work
 
-This deployment connects the persistent stock Hermes coordinator to the remote
+This deployment connects the stock Hermes persistent assistant to the remote
 work endpoint of a [remote executor](../../GLOSSARY.md#remote-executor) at
 `/work/mcp`. Each Codex [remote work](../../GLOSSARY.md#remote-work) session runs
 in `sproozi-agents`; its conversation, supported Git workspace and bounded final
@@ -40,7 +40,7 @@ persistent Hermes Deployment. You need a default StorageClass or explicit PVC
 `storageClassName` values. Use quota-enforced remote executor storage: Git
 revision restoration stages retained objects on that PVC under the profile
 service container's
-resource limits. It selects the same Hermes coordinator names as the
+resource limits. It selects the same Hermes persistent assistant names as the
 older example; choose the intended MCP configuration before installation.
 
 Render and review a private copy:
@@ -80,7 +80,7 @@ Use your internal PKI or the test-CA procedure in the Hermes guide with this
 service hostname. Save the chain and private key as
 `.local/retained-work/owner.crt` and `owner.key`, and the issuing CA as
 `owner-ca.crt`, mode `0600`. Generate the Hermes work token, and save the
-coordinator's separate model credential directly to `model-key` using your
+persistent assistant's separate model credential directly to `model-key` using your
 secret tooling:
 
 ```sh
@@ -179,7 +179,7 @@ Combine Hermes's normal public roots with the remote executor's public CA as
 procedure. Create `hermes-task-trust` in `sproozi-coordinators` from that bundle.
 Hermes receives only the work token. Your CLI and service sign in as the
 `sproozi-cli` ServiceAccount, which additionally authorizes exclusive
-export/claim. The coordinator
+export/claim. The persistent assistant
 manifest, shared with the [task service](hermes-orchestration.md), reads its
 bearer token from the `hermes-coordinator` key `task-token`, so that key holds
 the work token here.

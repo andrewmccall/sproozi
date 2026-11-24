@@ -228,7 +228,7 @@ policy predicates and client preparation.
 ## Optional persistent orchestration
 
 [Run a persistent Hermes assistant on Kubernetes](../guides/hermes-orchestration.md) prepares the private task
-service and trusted coordinator. These credentials stay outside sandbox Pods:
+service and trusted persistent assistant. These credentials stay outside sandbox Pods:
 
 | Object | Namespace | Purpose |
 | --- | --- | --- |
@@ -240,5 +240,5 @@ service and trusted coordinator. These credentials stay outside sandbox Pods:
 | `hermes-config` immutable ConfigMap | `sproozi-coordinators` | Reviewed native model, platform and MCP configuration |
 
 Changing service credentials or native environment configuration requires
-restarting the affected Deployment. The stock coordinator keeps writable native
+restarting the affected Deployment. The stock persistent assistant keeps writable native
 state in its PVC; the task service keeps no separate persistent ledger.

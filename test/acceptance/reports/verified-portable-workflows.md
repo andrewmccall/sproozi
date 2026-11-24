@@ -43,7 +43,7 @@ from hosted CI and the wider acceptance limits above.
 ## Subsequent stock Hermes acceptance
 
 On 13 October 2026, the execution-roadmap fixture passed with stock Hermes itself
-in the persistent Kubernetes coordinator. It discovered and invoked `sproozi_run`
+in the persistent Kubernetes assistant. It discovered and invoked `sproozi_run`
 through its native MCP client, then retrieved the completed retained session with
 `sproozi_status`. The native remote Codex task finished while the home was absent.
 Pull committed the one-way home claim; Docker resume retained the same native UUID

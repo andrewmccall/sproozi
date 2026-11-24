@@ -58,8 +58,8 @@ runs the service in the foreground, which `service start` does for you.
   anything else. Every error is one line on standard error starting `error:`.
   A misspelt command, verb or flag gets `did you mean ...?`.
 - **Checked first.** Flags are checked before anything is read or sent, so
-  `sproozi run --harness bogus` fails with `--harness must be codex or
-  claude-code` and touches nothing.
+  `sproozi run --harness bogus` fails with `--harness must be codex,
+  claude-code or copilot` and touches nothing.
 - **Retries.** Only a request whose outcome is unknown, such as a dropped
   connection, ends with `the outcome is unknown: check with "sproozi status
   ID", and to try again repeat the command with --operation OP`. A refused

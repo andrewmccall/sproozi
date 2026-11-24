@@ -37,6 +37,10 @@ replay. Keep admitted association and repository source immutable. A Project edi
 must not reinterpret an existing request or reveal its retained metadata to a
 revoked principal.
 
+Corrected 2026-11-16: the static home token no longer exists. ADR 0036 replaced
+it with Kubernetes review of the caller (`internal/session/remote/review.go`);
+the task token keeps its role.
+
 Revocation must not disable trusted writer cleanup. On owner restart, nonterminal
 work whose Project was removed or membership revoked follows the existing monotonic
 cancellation path with a deterministic retained operation. Internal fencing and

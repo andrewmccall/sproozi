@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -57,14 +58,13 @@ type NativeLaunch struct {
 
 // NativeUserInstructionsFile is the native user-level instruction file name
 // inside each harness's native home, and of its harness's profile instructions.
+// It is empty for a kind that is not managed.
 func NativeUserInstructionsFile(kind NativeKind) string {
-	switch kind {
-	case NativeClaude:
-		return "CLAUDE.md"
-	case NativeCopilot:
-		return "copilot-instructions.md"
+	h, err := Managed(kind)
+	if err != nil {
+		return ""
 	}
-	return "AGENTS.md"
+	return h.InstructionsFile
 }
 
 // NativeGateway projects a fresh workload token only at activation. Its fixed
@@ -205,7 +205,7 @@ func (c NativeLaunch) Validate(now time.Time) error {
 	}
 	if utf8.RuneCountInString(c.Task) > agentcontract.MaxTaskRunes || strings.ContainsRune(c.Task, 0) ||
 		c.Task != "" && (strings.TrimSpace(c.Task) == "" || !c.Harness.TakesTask()) {
-		return errors.New("native task requires bounded nonempty Codex or Claude Code input")
+		return fmt.Errorf("native task requires bounded nonempty %s input", TaskKindList())
 	}
 	if err := ValidateNativeArgs(c.Harness, c.Args); err != nil {
 		return err
@@ -225,10 +225,7 @@ func (c NativeLaunch) Validate(now time.Time) error {
 			return errors.New("invalid explicit native environment")
 		}
 		seen[key] = true
-		switch key {
-		case "HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "PWD", "KUBECONFIG",
-			"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_AUTOUPDATER",
-			"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS":
+		if reservedEnvironment(key) {
 			return errors.New("native environment cannot replace fixed home or workspace")
 		}
 	}
@@ -273,18 +270,26 @@ func NativeBaseEnvironment(kind NativeKind, executionUID string, credential Nati
 	}
 	env := []string{"PATH=/opt/git/bin:/usr/local/bin:/usr/bin:/bin", "TERM=xterm-256color", "LANG=C.UTF-8",
 		"GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1", "SPROOZI_EXECUTION_UID=" + executionUID}
-	if kind != NativeCopilot || credential != CredentialSignIn {
+	h, _ := Managed(kind)
+	if !h.SignInYieldsGitHubToken || credential != CredentialSignIn {
 		env = append(env, "GH_TOKEN="+nativePlaceholder)
 	}
 	switch {
 	case credential == CredentialSignIn:
 		return env, nil
-	case kind == NativeCopilot && credential == CredentialToken:
-		return append(env, "COPILOT_GITHUB_TOKEN="+NativeCopilotTokenPlaceholder), nil
-	case kind == NativeCopilot:
-		return append(env, "COPILOT_PROVIDER_API_KEY="+nativePlaceholder), nil
-	case kind == NativeClaude:
-		return append(env, nativeAnthropicKey+"="+nativePlaceholder), nil
+	case credential == CredentialToken && h.TokenEnv != "":
+		return append(env, h.TokenEnv+"="+h.TokenPlaceholder), nil
 	}
-	return append(env, nativeOpenAIKey+"="+nativePlaceholder), nil
+	return append(env, h.KeyEnv+"="+nativePlaceholder), nil
+}
+
+// reservedEnvironment reports a variable a launch's explicit environment may
+// not set: the fixed home and workspace variables, and each managed
+// harness's ReservedEnv.
+func reservedEnvironment(key string) bool {
+	switch key {
+	case "HOME", "PWD", "KUBECONFIG":
+		return true
+	}
+	return slices.ContainsFunc(registry, func(h Harness) bool { return slices.Contains(h.ReservedEnv, key) })
 }

@@ -18,6 +18,9 @@ Constraints found in the code:
   are launched by `native-session`, which runs as the agent's UID. Ordinary
   AgentRuns are launched by the administrator's AgentRuntime command from a
   read-only contract ConfigMap; Hermes alone uses a Sproozi launcher.
+
+  Corrected 2026-11-16: managed native sessions include GitHub Copilot CLI
+  (ADR 0048), and Claude Code AgentRuns use a Sproozi launcher too (ADR 0054).
 - Approved instructions are bound by SHA-256 through the session registry,
   placements and work owner. Codex continuity hashes the first developer
   message of the rollout against that digest.
@@ -47,10 +50,18 @@ Constraints found in the code:
   `--plugin-dir` carries the skill (`sproozi:sproozi-access`); the control
   server is the only entry in the strict MCP config. Every setting source stays
   disabled.
+
+  Corrected 2026-11-16: named MCP servers a session is granted are rendered
+  beside the control server in that config (`cmd/native-session/claude.go`; ADR
+  0001's clarification of 2026-11-14).
 - Ordinary runs: the contract always contains the control connection in the
   harness's MCP config, `sproozi-instructions.md` and `sproozi-access.md`. The
   Hermes launcher appends both to its system prompt. The administrator command
   places them for the other harnesses; the examples show how.
+
+  Corrected 2026-11-16: `claude-launch.py` appends both for Claude Code as
+  well (`internal/harness/launchfiles`; ADR 0054). The administrator command
+  places them for the remaining harnesses.
 
 Approved instructions and their digest never change. The Sproozi text travels
 beside them, so sessions started before this change still resume.

@@ -85,6 +85,11 @@ work. A context that signs in only with a client certificate, or impersonates
 another user, is refused with guidance, because the executor cannot review it.
 (Replaced by the amendment below: the client now sends only an
 audience-bound token it mints for `sproozi-cli`.)
+
+Corrected 2026-11-16: the paragraph above is dead. The client no longer sends
+the context's token, and no context is refused, since a certificate or
+impersonating context can mint the token too (`internal/session/remote/discover.go`).
+
 The executor runs a TokenReview and a SubjectAccessReview for `use` on `remoteexecutors` in its namespace, named by
 its placement name, on every request. An unknown token is 401, a known identity
 without the permission is 403, and a review that cannot complete is 503
@@ -125,9 +130,17 @@ name equal to `local` or a local placement name is refused.
 
 `move ID --local` needs no context. `pull ID` uses the default context unless
 `--context` names another. A pull the service already began continues with its
-recorded source and operation, whatever the retry names; this replaces
-[ADR 0019](0019-pull-operations-and-work-owner-names.md)'s refusal of a retry
-with a different operation, which the CLI no longer derives. `sessions` without
+recorded source and operation, whatever the retry names; this replaces the
+earlier refusal of a retry with a different operation. Corrected 2026-11-15:
+this text first said the CLI no longer derives the operation, and moved here
+from ADR 0019, which was removed: without `--operation` the CLI still derives
+it as a name-based UUID of the session ID (`cmd/sproozi/session.go`), so a plain
+`pull` retry repeats the same operation and an interrupted pull completes. The
+operation is chosen before home has recorded anything, which a lookup in home's
+catalogue cannot cover, and the CLI can print it beforehand, which a derivation
+in the daemon could not. Two homes sharing one principal credential would
+derive the same operation, which is already unsupported. An explicit
+`--operation` wins. `sessions` without
 `--context` lists this machine and, when the `sproozi` context exists, its
 cluster. A session a machine pulled is in phase `pulled` in the executor's catalogue
 and in every command's output; the work API's former `home-owned` is gone.
@@ -330,6 +343,10 @@ better shape.
   `serviceaccounts/token` grant and a token request per connection. The
   executor is a trusted service with far broader rights in the namespace than
   `sproozi-cli`, so the narrow token gains it nothing.
+
+  Corrected 2026-11-16: the amendment of 2026-10-21 adopted this alternative,
+  for the reason it gives: the context's own credential never reaches the
+  executor.
 - **The kubeconfig's current context as the default.** That is kubectl's
   default, but it silently points remote work at whatever cluster the developer
   last used. A dedicated `sproozi` context names the cluster and identity
@@ -395,5 +412,6 @@ better shape.
   `cmd/session-profile/main.go`, `config/cli-access/`,
   `examples/portable-workflows/kubernetes/owner.yaml`
 - Refines [ADR 0010](0010-managed-session-authority-and-admission.md)'s fixed
-  remote profile, and replaces [ADR 0019](0019-pull-operations-and-work-owner-names.md)'s
-  owner-name rule and its refusal of a retried pull with another operation.
+  remote profile, and replaces the owner-name rule of ADR 0019
+  ([removed](README.md#removed)) and its refusal of a retried pull with another
+  operation.

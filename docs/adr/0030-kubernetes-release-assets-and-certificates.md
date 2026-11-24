@@ -24,8 +24,9 @@ that external certificates remain supported without the helper.
 
 Each release publishes `sproozi_VERSION_kubernetes.tar.gz` beside the CLI. It
 extracts to `sproozi-release/` with `crds.yaml`, a digest-pinned `install/`
-bundle, an optional `self-managed-ca/` component, two quickstart overlays and a
-provider-free `first-check/`. The CRDs are separate so the operator applies them
+bundle, an optional `self-managed-ca/` component, two quickstart overlays, a
+provider-free `first-check/`, a `cli-access/` bundle and a `kind/` cluster
+configuration. The CRDs are separate so the operator applies them
 and waits for `Established` first. The control and native images are the same
 multi-architecture digests the CLI release records in `images.json`.
 
@@ -78,7 +79,12 @@ test enforces these rules.
 The external quickstart omits the controller. The operator supplies
 `sproozi-gateway-tls` and `sproozi-sandbox-trust`, for example from
 cert-manager or an enterprise issuer. Harness arguments, capabilities and the
-four CRDs are the same in both modes.
+five CRDs are the same in both modes.
+
+Corrected 2026-11-16: the archive's listing and the count of CRDs are brought up
+to date. It also ships `cli-access/` and `kind/`, and there are five CRDs, with
+`BudgetLedger` (`api/v1alpha1/budgetledger_types.go`,
+`hack/release/kubernetes.py`).
 
 ## Alternatives
 

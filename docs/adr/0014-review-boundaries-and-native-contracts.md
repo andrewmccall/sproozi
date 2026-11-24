@@ -124,11 +124,18 @@ clients. Bounded cleanup can outlive a cancelled request. Do not claim hard
 provider spending ceilings: input/output accounting, unknown consumption and
 non-token provider charges retain their documented limits.
 
+Corrected 2026-11-16: the gateway's connection limits are configurable now
+(ADR 0027; `SPROOZI_GATEWAY_MAX_CONNECTIONS` in `cmd/gateway/main.go`, defaults
+and ceilings in `internal/proxytransport/gateway.go`).
+
 ## Deferred direction and revisit conditions
 
 DNS is explicitly deferred by the user. The current Kubernetes kube-dns exception
 is unchanged, including its recursive external-name egress limitation. See
 [DNS egress containment](../explanations/future-architecture/dns-egress.md).
+
+Corrected 2026-11-16: the DNS deferral and the kube-dns exception no longer
+hold. ADR 0040 removed them: sandboxes resolve no names.
 
 Revisit AHP when a real external host/GUI client is in scope; require an actual
 SDK client round trip, negotiated byte extensions, uncertain-delivery handling,
@@ -153,6 +160,9 @@ The [current architecture](../explanations/system-architecture.md),
 implemented behavior and limits. Regression and integration results are recorded
 in the task evidence; this ADR makes no new live provider, CNI, throughput or
 full native failure-matrix claim.
+
+Corrected 2026-11-16: `.engineering/tasks/review-fixes-2026-10-14/` is not in the
+repository. The evidence it held is not distributed with it.
 
 ## Implementation notes
 

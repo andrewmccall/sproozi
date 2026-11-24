@@ -3,17 +3,18 @@
 Status: accepted
 Date: 2026-10-24
 
-Supersedes [ADR 0046](0046-github-copilot-cli-harness-in-byok-mode.md)'s
-"an AgentRun harness, not managed" and "only the Kind client image installs
-it". Its bring-your-own-key route, MCP loading and instructions file stay.
+Copilot first ran only as an AgentRun harness in bring-your-own-key mode, in
+a Kind client image (ADR 0046, removed). This record makes it a managed harness
+in the released image. What the earlier record decided and still holds is under
+"AgentRun harness and bring-your-own-key mode" below.
 
 ## Problem and constraints
 
 People asked for Copilot as a first-class agent beside Codex and Claude Code:
 `sproozi init` and `sproozi run` on this machine, sessions that move between
 Docker and Kubernetes, and every credential mechanism of
-[ADR 0047](0047-harnesses-sign-in-to-their-own-model-providers.md). ADR 0046
-had deferred this for want of a request; ADR 0047 then routed Copilot's own
+[ADR 0047](0047-harnesses-sign-in-to-their-own-model-providers.md). The
+AgentRun harness had deferred this for want of a request; ADR 0047 then routed Copilot's own
 GitHub sign-in through the gateway, which removed its other reason.
 
 A managed harness needs a native state format, a completed-turn observer and a
@@ -21,6 +22,9 @@ checkpoint ([ADR 0011](0011-native-session-compatibility-and-completion.md)),
 and release users must not have to build an image.
 
 Pinned and tested: `@github/copilot` 1.0.102.
+
+Corrected 2026-11-16: 1.0.102 was the pin when this record was written. The
+pinned version is in `hack/clients/copilot/package.json`.
 
 ## Decision
 
@@ -68,6 +72,49 @@ Pinned and tested: `@github/copilot` 1.0.102.
   (`hack/clients/install.sh`). A sandbox home is a 16 MiB `noexec` tmpfs
   where Copilot can't unpack 170 MB or run it, so the supervisor links
   `~/.cache/copilot/pkg` to the image's copy.
+
+## AgentRun harness and bring-your-own-key mode
+
+Corrected 2026-11-15: moved here from ADR 0046, which was removed. The
+decisions below came first, for the AgentRun harness, and still hold. The
+example is `examples/harnesses/agentruntime-copilot.yaml`; the managed
+adapter is `cmd/native-session/copilot.go`.
+
+- **The exit status is the outcome; an AgentRun has no launch helper.** Copilot
+  exits 1 after a failed or refused model call and 0 after a completed turn, so
+  the example `exec`s it, and no completion adapter or
+  launch helper builds the instructions: four lines of shell write the file.
+- **Instructions through `$COPILOT_HOME/copilot-instructions.md`.** Copilot has
+  no system prompt flag but adds that file to its system prompt. The example
+  writes the approved instructions and both integration files there and
+  passes `request.json` as the prompt. `--no-custom-instructions` would also
+  drop that file, so Sproozi doesn't pass it, and Copilot still loads workspace
+  instruction files such as `AGENTS.md`, as Claude Code loads `CLAUDE.md`. A
+  repository's own files reach the system prompt after the Sproozi file: they
+  can contradict it but can't remove it.
+- **Bring-your-own-key mode on the OpenAI Responses route.** The environment is
+  `COPILOT_PROVIDER_BASE_URL=https://api.openai.com/v1`,
+  `COPILOT_PROVIDER_TYPE=openai`, `COPILOT_PROVIDER_WIRE_API=responses` and a
+  placeholder `COPILOT_PROVIDER_API_KEY`; the gateway supplies the real key, as
+  for OpenCode, so no GitHub token enters the sandbox. The supervisor sets the
+  same variables for a gateway-held key. Anthropic Messages through
+  `COPILOT_PROVIDER_TYPE=anthropic` was not chosen as the default: the gateway
+  has that route, but OpenAI matches OpenCode's, and an administrator can switch
+  the variables.
+- **Offline mode.** `COPILOT_OFFLINE=true` stops GitHub sign-in, telemetry, the
+  built-in GitHub MCP server and auto-update, and `--disable-builtin-mcps`
+  disables the built-in MCP servers. Remote MCP servers still load in offline
+  mode.
+- **Copilot's TLS stack refuses a CA certificate served as a leaf**
+  (`CaUsedAsEndEntity`). The gateway serves leaves signed by its inspection CA,
+  and the `harness-process` fixture does the same.
+
+Revisit the instructions rule if Copilot adds a system prompt flag or a way to
+disable workspace instructions alone.
+
+Corrected 2026-11-16: the example `exec`s Copilot directly, but Claude Code's
+does not, as this section first said. Claude Code AgentRuns launch through a
+helper (ADR 0054; `examples/harnesses/agentruntime-claude-code.yaml`).
 
 ## Evidence
 
@@ -118,9 +165,13 @@ With 1.0.102, against scripted providers:
   shell, which reads `BASH_ENV`.
 - `/login` through the gateway's device-flow relay is untested with a real
   GitHub account. Copilot's plan hosts are routed as ADR 0047 recorded.
-- Copilot releases often. 1.0.103 removed `--no-remote`; v0.2.1 pins 1.0.103
-  and drops the flag from the supervisor and the AgentRun example
+- Copilot releases often. 1.0.103 removed `--no-remote`; the pinned version
+  (`hack/clients/copilot/package.json`) is past it, so the supervisor and the
+  AgentRun example drop the flag
   ([ADR 0050](0050-prebuilt-cli-and-explicit-image-builds.md)).
+
+Corrected 2026-11-16: the bullet above named the release that pinned 1.0.103 and
+that pin. It now points at the pinned version rather than a number.
 - Copilot models on `/chat/completions` stream, which the gateway refuses
   (ADR 0047).
 

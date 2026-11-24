@@ -65,6 +65,22 @@ the hook, strict decoding of each example, and `hack/verify/fake-mcp`, which
 serves the same fake MCP server locally so a real client can be checked on a
 laptop.
 
+### Correction, 15 November 2026: plain facts belong in the registry
+
+The decision said the registry holds the facts Go code needs, but several
+per-harness facts had stayed in `switch` statements elsewhere whose default
+branch gave a new harness Codex's value, so a sixth managed harness would have
+inherited Codex's refused flags, instructions file name, credential variable
+and wait text. The registry entry of every managed harness now also holds its
+display name and product name, executable path, instructions file name,
+placeholder credential variables, refused flags, reserved environment
+variables, whether it takes a task, whether a remote executor may run it,
+which harness is the default and the native options a local installation
+gives it. Each is required, with a guard test, and none has a zero value that
+means Codex. Behaviour stays in code: completion observers, checkpoint formats,
+and the parsing of Codex's `-c` overrides (the registry records facts, as the
+last alternative below says).
+
 ## Alternatives
 
 - **Allow a harness without MCP, marked "no diagnose".** It would add a

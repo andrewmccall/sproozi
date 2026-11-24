@@ -39,11 +39,11 @@ Constraints found in the code:
 ## Decision
 
 **One profile.** The `profile` folder beside the home configuration,
-`~/sproozi/profile` in a local installation, holds an optional `AGENTS.md` for
+`~/.sproozi/profile` in a local installation, holds an optional `AGENTS.md` for
 every harness, optional `codex/AGENTS.md` and `claude/CLAUDE.md` for one
 harness each, and `skills/<name>/SKILL.md` with supporting files. The home
 takes its location from the configuration file's location, never from its
-contents, so there is no `agentsDirectory` setting. `sproozi init --local`
+contents, so there is no `agentsDirectory` setting. `sproozi init`
 creates it. Sproozi never reads `~/.codex` or `~/.claude`.
 
 **One set of rules.** `internal/agentprofile` reads the folder or a
@@ -91,12 +91,17 @@ limit.
 
 **The MCP authority is always configured.** The control connection from
 [ADR 0025](0025-managed-harness-integration-and-diagnose.md) needs
-`gateway.mcpAuthority`. `sproozi init --local` writes
+`gateway.mcpAuthority`. `sproozi init` writes
 `mcp.sproozi.internal:443`, adds it to an existing configuration that lacks it,
 and the home certificate authority's serving certificate covers it.
 
 **Naming.** "Profile" now means the user's profile. The `session-profile`
 program is a remote executor in documentation, matching `--executor`.
+
+Corrected 2026-11-16: the path is `~/.sproozi/profile` (not `~/sproozi/profile`)
+and the command is `sproozi init` (not `sproozi init --local`). A Copilot-only
+file also exists, `copilot/copilot-instructions.md`
+([Profile](../reference/profile.md)).
 
 ## Alternatives
 
@@ -106,6 +111,9 @@ program is a remote executor in documentation, matching `--executor`.
 - **The profile under `~/.sproozi`.** This change first moved the default
   configuration there. The local installation's root, `~/sproozi`, was already
   the default, so the profile follows it instead.
+
+  Corrected 2026-11-16: ADR 0037 reversed that. The root is `~/.sproozi` now,
+  so the profile is under `~/.sproozi` after all.
 - **Global and project layers with import commands (the PRD's M2).** Deferred
   by the owner as more than a demo needs.
 - **Several named profiles selected by `--profile`, project or workspace.**

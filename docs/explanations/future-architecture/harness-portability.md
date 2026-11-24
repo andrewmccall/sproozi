@@ -2,15 +2,16 @@
 
 Status: future extensions to the supported clients.
 
-Sproozi supports ordinary launches for Codex, Claude Code, OpenCode and Hermes.
-Managed session movement supports Codex and Claude Code. See the
+Sproozi supports ordinary launches for Codex, Claude Code, OpenCode, GitHub Copilot CLI and Hermes.
+Managed session movement supports Codex, Claude Code and GitHub Copilot CLI. See the
 [harness reference](../../reference/harnesses.md) for configuration and limits.
 This page covers additional state formats and client connections.
 
 A harness owns its agent loop, conversation semantics and user experience.
 Sproozi owns the bounded environment and external authority available there.
 Extend the current launch adapters only when a concrete resume or control requirement
-needs it; a generic harness registry is not a prerequisite.
+needs it. One harness registry exists already
+([ADR 0039](../../adr/0039-one-harness-registry-and-the-mcp-requirement.md)).
 
 ## Session adapters preserve native state
 
@@ -47,7 +48,7 @@ stop or trusted usage. See
 
 | Client connection | Purpose | Current support |
 | --- | --- | --- |
-| Native CLI resume | Resume through the client's own command. | Pinned Codex and Claude Code. |
+| Native CLI resume | Resume through the client's own command. | Pinned Codex, Claude Code and GitHub Copilot CLI. |
 | Remote terminal | Attach to the running CLI. | Managed Docker and Kubernetes sessions. |
 | Native protocol | Connect an IDE or GUI to a remote session. | Future extension. |
 
@@ -59,13 +60,15 @@ and Kubernetes environments. Recheck current official interfaces when
 implementing; do not rely on undocumented session-file manipulation.
 
 The accepted first client experience is native CLI locally and terminal attachment
-remotely, under [ADR 0006](../../adr/0006-native-cli-and-terminal-before-gui-mobility.md).
-GUI/IDE connection remains a future extension. [ADR 0007](../../adr/0007-codex-round-trip-before-harness-expansion.md)
-selects the complete Codex round trip first, followed by Claude Code.
+remotely, with the terminal transport in [ADR 0011](../../adr/0011-native-session-compatibility-and-completion.md).
+GUI/IDE connection remains a future extension, and a custom Sproozi chat UI is
+not planned: the native harness loop and conversation are retained. The first complete round trips were Codex, then Claude Code.
+[ADR 0039](../../adr/0039-one-harness-registry-and-the-mcp-requirement.md) holds
+the harness registry, and GitHub Copilot CLI is also a managed harness
+([ADR 0048](../../adr/0048-github-copilot-cli-is-a-managed-harness.md)).
 
-The first session starts through Sproozi in local Docker, under
-[ADR 0005](../../adr/0005-controlled-docker-launch-before-session-adoption.md).
-Later adoption of a directly
+The first session starts through Sproozi in local Docker, so that the
+source environment is known. Later adoption of a directly
 started harness conversation requires explicit user selection, safe state import and
 control of the original writer. A copied session cannot import cached approvals
 as a Sproozi grant. If native GUI access is unsupported, retain the proved CLI or

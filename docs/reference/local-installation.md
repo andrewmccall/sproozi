@@ -137,6 +137,7 @@ network, gateway address, limits, allowances and certificate authority.
 | --- | --- | --- | --- |
 | `codex` | `local` when first, otherwise `local-codex` | `https://api.openai.com` | Key file `credentials/openai`; `--token` stores a sign-in token there; `--chatgpt` keeps a ChatGPT plan sign-in in `credentials/chatgpt-session.json`; `--sign-in` uses Codex's own sign-in in its login volume |
 | `claude-code` | `local` when first, otherwise `local-claude` | `https://api.anthropic.com` | Key file `credentials/anthropic`; `--token` stores a sign-in token there; `--sign-in` uses Claude Code's own sign-in in its login volume |
+| `copilot` | `local` when first, otherwise `local-copilot` | With a key, `https://api.openai.com`; with `--token` or `--sign-in`, GitHub's Copilot service, `https://api.individual.githubcopilot.com` | With a key, key file `credentials/openai`; `--token` stores a GitHub token in `credentials/copilot`; `--sign-in` uses Copilot's own sign-in in its login volume |
 
 `--provider-url` and `--provider-ca-file` select a private HTTPS provider
 endpoint for the harness being added. The CA bundle is public, so its source

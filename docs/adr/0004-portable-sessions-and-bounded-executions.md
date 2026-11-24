@@ -11,7 +11,7 @@ Developers should be able to continue a native coding conversation and workspace
 between local Docker and an approved Kubernetes environment. They should not
 need personal cloud accounts or a new agent UI. At the initial design, Docker,
 session checkpoints and relocation were absent. AgentRun intent is immutable, worker identity
-is disposable, and terminal Runs cannot resume. Persistent Hermes coordinator
+is disposable, and terminal Runs cannot resume. Persistent Hermes assistant
 state does not establish portable worker conversations.
 
 This decision extends the boundaries in ADRs [0001](0001-mcp-capabilities-through-shared-gateway.md),
@@ -29,12 +29,18 @@ within that destination; they do not replace it.
 
 The user also accepted these independently revisitable scope decisions:
 
-- [ADR 0005](0005-controlled-docker-launch-before-session-adoption.md): start
-  through Sproozi in local Docker; defer existing-session adoption.
-- [ADR 0006](0006-native-cli-and-terminal-before-gui-mobility.md): native CLI
-  locally and terminal attachment remotely; defer native GUI/IDE integration.
-- [ADR 0007](0007-codex-round-trip-before-harness-expansion.md): complete Codex's
-  round trip first, then Claude Code before broader portability claims.
+- ADR 0005 ([removed](README.md#removed)): start through Sproozi in local
+  Docker; defer existing-session adoption. Adoption is still deferred, under
+  [session mobility](../explanations/future-architecture/session-mobility.md#adopt-directly-started-sessions).
+- ADR 0006 ([removed](README.md#removed)): native CLI locally and terminal
+  attachment remotely; defer native GUI/IDE integration. The terminal
+  transport is held by [ADR 0011](0011-native-session-compatibility-and-completion.md),
+  and GUI/IDE access stays deferred, under
+  [harness portability](../explanations/future-architecture/harness-portability.md).
+- ADR 0007 ([removed](README.md#removed)): complete Codex's round trip first,
+  then Claude Code before broader portability claims. Both are done, and
+  [ADR 0039](0039-one-harness-registry-and-the-mcp-requirement.md) now holds
+  the harness registry.
 
 The user also selected a completed-turn checkpoint boundary: wait for the current
 native turn and tools to finish rather than interrupting active work. Preserve
@@ -142,7 +148,7 @@ The implementation now separates the [home service](../../internal/session/home/
 [Kubernetes placement](../../internal/runtime/kubernetes/placement/placement.go).
 Terminal Runs remain terminal. Managed remote visits use fresh ordinary Runs and
 independent service-owned registration. Hermes state still belongs to its separate
-coordinator and supplies no worker-session portability evidence.
+persistent assistant and supplies no worker-session portability evidence.
 
 The deterministic Codex 0.161.0 core proof completed three genuine terminal turns
 across Docker, Kubernetes and Docker. It retained the same native UUID, exact Git

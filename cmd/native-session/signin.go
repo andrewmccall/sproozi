@@ -27,7 +27,7 @@ func signInPaths(c config) (stored, native string, ok bool) {
 		return "", "", false
 	}
 	return filepath.Join(c.SignInDirectory, h.SignInFile),
-		filepath.Join("/workspace/session", h.NativeDirectory, h.SignInFile), true
+		filepath.Join(harness.NativeSessionRoot, h.NativeDirectory, h.SignInFile), true
 }
 
 // loginSync keeps a harness's login file and its login store the same while

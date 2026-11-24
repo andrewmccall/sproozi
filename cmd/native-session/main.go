@@ -28,9 +28,7 @@ import (
 const (
 	socketPath    = "/tmp/sproozi-native/control.sock"
 	configPath    = "/etc/sproozi/native/config.json"
-	nativeHome    = "/workspace/session/codex"
-	workspace     = "/workspace/session/workspace"
-	executable    = "/usr/local/bin/codex"
+	workspace     = harness.NativeSessionRoot + "/workspace"
 	agentHome     = "/home/agent"
 	inactiveError = "native execution is not active"
 )
@@ -711,17 +709,18 @@ func (s *server) waitingFor() string {
 	s.mu.Lock()
 	kind := s.config.Harness
 	s.mu.Unlock()
+	name := harness.NativeDisplayName(kind)
 	if kind == harness.NativeCopilot {
 		if _, _, err := s.observeCopilotTurn(); errors.Is(err, os.ErrNotExist) {
-			return "Copilot to start its first turn"
+			return name + " to start its first turn"
 		}
-		return "the current Copilot turn to complete"
+		return "the current " + name + " turn to complete"
 	}
 	if kind != harness.NativeClaude {
 		if !codexJournalExists(nativeHome) {
-			return "Codex to start its first turn"
+			return name + " to start its first turn"
 		}
-		return "the current Codex turn to complete"
+		return "the current " + name + " turn to complete"
 	}
 	switch s.claudeCompletion().Observation {
 	case pendingTools:

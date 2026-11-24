@@ -28,7 +28,7 @@ func (q *options) initLocal(ctx context.Context) error {
 	}
 	kind := harness.NativeKind(q.harness)
 	if kind == "" {
-		kind = harness.NativeCodex
+		kind = harness.Default()
 		_, _ = fmt.Fprintf(os.Stderr, "No --harness given, so setting up %s; choose another with --harness %s\n",
 			kind, harness.ManagedKindList())
 	}

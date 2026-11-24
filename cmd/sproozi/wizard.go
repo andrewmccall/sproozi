@@ -41,10 +41,8 @@ func (q *options) wizard(in *bufio.Reader, w io.Writer, inst localsetup.Installa
 		kinds := harness.ManagedKinds()
 		choices := make([]choice, 0, len(kinds))
 		for _, kind := range kinds {
-			label := agentNames[kind]
-			if label == "" {
-				label = string(kind)
-			}
+			h, _ := harness.Managed(kind)
+			label := string(kind) + ": " + h.Product
 			if configured(inst, kind) != nil {
 				label += " (already set up)"
 			}
@@ -67,13 +65,6 @@ func (q *options) wizard(in *bufio.Reader, w io.Writer, inst localsetup.Installa
 		choices = append([]choice{keep}, choices...)
 	}
 	return ask(in, w, fmt.Sprintf("How should %s sign in to its model provider?", kind), choices, q)
-}
-
-// agentNames are the names the wizard shows for each agent.
-var agentNames = map[harness.NativeKind]string{
-	harness.NativeCodex:   "codex: OpenAI Codex CLI",
-	harness.NativeClaude:  "claude-code: Anthropic Claude Code",
-	harness.NativeCopilot: "copilot: GitHub Copilot CLI",
 }
 
 func signIn(q *options)   { q.signIn = true }

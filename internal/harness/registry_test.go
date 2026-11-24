@@ -271,3 +271,69 @@ func TestDockerignoreShipsLaunchFiles(t *testing.T) {
 			"fails for every embedded launch file")
 	}
 }
+
+// Every managed harness supplies every per-harness fact, so a new one never
+// silently takes another's value, and an AgentRun-only harness supplies none.
+func TestManagedKindsSupplyEveryFact(t *testing.T) {
+	// reservedEnvExempt names the managed harnesses that declare no ReservedEnv
+	// and why.
+	reservedEnvExempt := map[NativeKind]string{
+		NativeCopilot: "its supervisor sets COPILOT_HOME and COPILOT_AUTO_UPDATE, but they have never been refused in a " +
+			"launch's explicit environment; kept as it was",
+	}
+	defaults := 0
+	for _, h := range registry {
+		if h.Native == "" {
+			if h.DisplayName != "" || h.Product != "" || h.Executable != "" || h.InstructionsFile != "" || h.KeyEnv != "" ||
+				h.RefusedFlags != nil || h.ReservedEnv != nil || h.RemoteExecutor || h.TakesTask || h.Default ||
+				h.TokenEnv != "" || h.KeyOptions != nil || h.SignInOptions != nil {
+				t.Errorf("harness %q has no Native kind, so %s must not set the managed facts", h.Selector, registryFile)
+			}
+			continue
+		}
+		missing := map[string]bool{
+			"DisplayName": h.DisplayName == "", "Product": h.Product == "", "InstructionsFile": h.InstructionsFile == "",
+			"KeyEnv": h.KeyEnv == "", "RefusedFlags": len(h.RefusedFlags) == 0,
+			"Executable":  !strings.HasPrefix(h.Executable, "/"),
+			"ReservedEnv": len(h.ReservedEnv) == 0 && reservedEnvExempt[h.Native] == "",
+		}
+		for fact, isMissing := range missing {
+			if isMissing {
+				t.Errorf("managed harness %q needs %s in %s; a managed harness must supply every fact, "+
+					"see docs/contributing/add-a-harness.md", h.Selector, fact, registryFile)
+			}
+		}
+		if (h.TokenEnv == "") != (h.TokenPlaceholder == "") {
+			t.Errorf("managed harness %q must set TokenEnv and TokenPlaceholder together in %s", h.Selector, registryFile)
+		}
+		if h.Default {
+			defaults++
+		}
+	}
+	if defaults != 1 || Default() == "" {
+		t.Errorf("exactly one managed harness must be the Default in %s; found %d", registryFile, defaults)
+	}
+}
+
+// File names that a Python launch file repeats must not drift from the
+// registry, which those files cannot read.
+func TestLaunchFilesAgreeWithTheirRegistryEntry(t *testing.T) {
+	mcpLiteral := regexp.MustCompile(`"([a-z0-9-]+-mcp\.json)"`)
+	signIn := regexp.MustCompile(`SIGN_IN_FILE = "([^"]+)"`)
+	for _, h := range registry {
+		for name, content := range h.LaunchFiles {
+			for _, m := range mcpLiteral.FindAllStringSubmatch(content, -1) {
+				if m[1] != h.MCP.File {
+					t.Errorf("launch file %s names %s, but harness %q's MCP.File in %s is %s", name, m[1], h.Selector,
+						registryFile, h.MCP.File)
+				}
+			}
+			for _, m := range signIn.FindAllStringSubmatch(content, -1) {
+				if m[1] != h.SignInFile {
+					t.Errorf("launch file %s keeps its sign-in in %s, but harness %q's SignInFile in %s is %q", name, m[1],
+						h.Selector, registryFile, h.SignInFile)
+				}
+			}
+		}
+	}
+}

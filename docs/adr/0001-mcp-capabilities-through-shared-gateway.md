@@ -61,8 +61,8 @@ Use the official MCP SDK and a JSON Schema library behind one `http.Handler`,
 with shared policy compilation for admission and call enforcement. Provider and
 policy schemas retain their original dialects and validate the same parsed
 arguments independently. A merged schema can change draft-07 interpretation
-under a newer dialect and lose restrictions. The advertised `allOf` is client
-guidance only. Reject unsupported or unbounded schema forms and ambiguous JSON,
+under a newer dialect and lose restrictions. The gateway advertises the
+provider's schema unchanged. Reject unsupported or unbounded schema forms and ambiguous JSON,
 rather than fetching external references, applying defaults or building a custom
 validator. Missing approved tools fail preparation; newly discovered tools gain
 no authority.
@@ -74,6 +74,13 @@ a custom tool manifest or a general harness plugin registry. The workload may
 change its client configuration; gateway authorization still controls each call.
 Native Kubernetes MCP remains a separate trusted launch opt-in because it
 delivers an existing Semantic capability, not a registered remote server.
+
+Corrected 2026-11-16: the advertised schema is the provider's own, unchanged
+(ADR 0015, `internal/endpoints/mcp/handler.go`), where this section first said
+the gateway advertised an `allOf`. The concrete Codex renderer and the refusal
+of a harness registry above record what this decision relied on. ADR 0039 has
+since replaced them: `internal/harness/registry.go` renders the connections for
+every harness.
 
 ## Alternatives considered
 
@@ -160,6 +167,9 @@ reaches the agent and the audit log, so the administrator can correct the
 policy; `hack/mcp-tools.py` lists a server's tools before writing one. Local
 sessions give named MCP servers only to Codex placements; Claude Code
 placements on the same home start without them instead of failing.
+
+Corrected 2026-11-16: the sentence about Claude Code placements no longer
+holds. The clarification below, dated 2026-11-14, gives them named servers.
 
 ## Later clarification (2026-11-14)
 

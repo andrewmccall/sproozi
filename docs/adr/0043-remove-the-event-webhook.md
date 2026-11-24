@@ -30,12 +30,13 @@ Secret-reading Role and an audit event type to every install.
   service already do. The integration tests now submit runs directly.
 - **Keep what was learned.** The design, its limits and fourteen gotchas are in
   [event webhooks](../explanations/future-architecture/event-webhooks.md). The
-  code before the unreleased rework ADR 0042 describes is at commit `01bac1b`.
+  code before the unreleased idempotent-delivery rework is at commit `01bac1b`.
 - **Guard the removal.** A manifest test fails if the install renders any
   object named for the webhook.
 
-This supersedes [ADR 0022](0022-webhook-hmac-secrets-in-own-namespace.md),
-[ADR 0042](0042-idempotent-webhook-delivery.md) and the replay-record part of
+This replaces ADR 0022 (HMAC Secrets in their own namespace) and ADR 0042
+(idempotent delivery), both [removed](README.md#removed) with it, and the
+replay-record part of
 [ADR 0017](0017-runtime-admission-and-replay-retention.md).
 
 ## Alternatives

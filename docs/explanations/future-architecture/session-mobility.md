@@ -1,9 +1,9 @@
 # Session mobility extensions
 
-Status: future extensions to controlled Codex and Claude Code session movement.
+Status: future extensions to controlled Codex, Claude Code and GitHub Copilot CLI session movement.
 
 [Move a live session between Docker and Kubernetes](../../guides/session-mobility.md) describes managed
-Codex and Claude Code sessions. This page covers extensions to that workflow.
+Codex, Claude Code and GitHub Copilot CLI sessions. This page covers extensions to that workflow.
 
 [ADR 0004](../../adr/0004-portable-sessions-and-bounded-executions.md) records the
 accepted outcome. ADRs [0008](../../adr/0008-selected-native-and-git-checkpoints.md),
@@ -21,8 +21,8 @@ execution with fresh approval; it does not renew the old live-move ledger.
 
 ## Adopt directly started sessions
 
-The first supported entry is Sproozi's controlled Docker launch, selected in
-[ADR 0005](../../adr/0005-controlled-docker-launch-before-session-adoption.md).
+The first supported entry is Sproozi's controlled Docker launch, so that the
+source environment is known.
 Adopting an arbitrary local Codex or Claude conversation needs explicit
 selection, compatible native state, inspection of workspace dependencies and
 control of the original writer before a resumed agent starts. Imported
@@ -36,8 +36,8 @@ access. Keep refusal explicit when those guarantees cannot be established.
 
 ## Additional harnesses and clients
 
-[ADR 0007](../../adr/0007-codex-round-trip-before-harness-expansion.md) selects
-Claude Code after Codex. The current workflow supports those two selected clients.
+Codex and Claude Code completed the first round trips. GitHub Copilot CLI is also a
+managed harness ([ADR 0048](../../adr/0048-github-copilot-cli-is-a-managed-harness.md)).
 [ADR 0011](../../adr/0011-native-session-compatibility-and-completion.md) records
 the Claude transcript and completion contract. [ADR 0015](../../adr/0015-default-clients-and-native-tool-schemas.md)
 removes exact-version checks.
@@ -48,7 +48,7 @@ protocol. Background tasks, subagents and compaction are outside the current sup
 state. The current selected checkpoint does not transfer running memory or tools.
 
 Native GUI/IDE access remains a separate extension under
-[ADR 0006](../../adr/0006-native-cli-and-terminal-before-gui-mobility.md).
+[harness and client compatibility](harness-portability.md).
 A supported CLI resume command does not prove an official desktop client accepts
 an arbitrary Sproozi endpoint. Test each selected client, its authentication,
 session discovery, detach/reconnect and revocation separately. See

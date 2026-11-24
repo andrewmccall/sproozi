@@ -127,7 +127,7 @@ make test-e2e
 
 The command owns a dedicated two-node Kind cluster, builds and loads the release
 image, fixture providers and stock clients, and launches the complete
-controller, TLS gateway, task service and persistent Hermes coordinator. Native
+controller, TLS gateway, task service and persistent Hermes assistant. Native
 API chat and a native scheduled job delegate real AgentRuns. The suite checks
 all five stock worker loops, denials, budgets, cancellation, deadlines, UID-bound
 replay, result retention, PVC restart and direct-network isolation. On the same
@@ -303,7 +303,7 @@ Use the [complete mobility setup](../../hack/verify/session-mobility/README.md)
 to create a dedicated two-node Kind cluster with enforcing Calico, build the
 approved native/helper images, prepare TLS and install the controller/gateway.
 The [stock Hermes walkthrough](../../hack/verify/portable-workflows/README.md#stock-hermes-and-a-persistent-kubernetes-owner)
-then installs this owner and coordinator and runs the complete native round trip.
+then installs this owner and persistent assistant and runs the complete native round trip.
 It needs Docker, Kind, kubectl, Git, Go 1.26.11, OpenSSL, Python 3 and PyYAML from `hack/requirements.txt`.
 It selects no personal credentials or home-network resources. The development
 fixture seeds only public Sproozi compiler sources. Follow the

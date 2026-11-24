@@ -30,9 +30,7 @@ const (
 	claudeBash            = harness.ClaudeBash
 	claudeHooksKey        = "hooks"
 
-	claudeSettings   = "/tmp/sproozi-native/claude-settings.json"
-	claudeHome       = "/workspace/session/claude"
-	claudeExecutable = "/usr/local/bin/claude"
+	claudeSettings = "/tmp/sproozi-native/claude-settings.json"
 	// claudeHookCommand is what each lifecycle hook runs.
 	claudeHookCommand = "/usr/local/bin/native-session observe-claude"
 )

@@ -112,9 +112,9 @@ calls and capability/budget denials through the deployed gateway.
 Persistent Hermes tests must cover native chat and scheduled task submission,
 exact-request retries, UID-bound status and cancellation, retained answers, PVC
 restart and direct-network restrictions. Multiple jobs must run concurrently,
-or queue under a concurrency cap, without the coordinator counting as an active
+or queue under a concurrency cap, without the persistent assistant counting as an active
 run. Worker budgets must remain separate from
-coordinator inference.
+persistent assistant inference.
 
 Provider-authentication changes need callback and identity validation, private
 storage, refresh serialization, persistence retry and stale-writer rejection.

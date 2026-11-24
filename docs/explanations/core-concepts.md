@@ -9,8 +9,8 @@ describe those parts and how they fit together.
 
 ## The agent and its environment
 
-The **[harness](../../GLOSSARY.md#harness)** is the program that runs the agent. Codex, Claude Code, OpenCode
-and Hermes are supported harnesses. The harness manages the conversation and
+The **[harness](../../GLOSSARY.md#harness)** is the program that runs the agent. Codex, Claude Code, OpenCode,
+GitHub Copilot CLI and Hermes are supported harnesses. The harness manages the conversation and
 tool calls.
 
 The **AgentRuntime** resource holds Kubernetes configuration for the container
@@ -91,7 +91,7 @@ A checkpoint contains work, not permission to run it. Sproozi creates fresh
 access at the destination. Before a move can start another agent, Sproozi must
 confirm that the source has stopped and record its finalized usage.
 
-Managed remote tasks currently use Codex; interactive sessions a cluster owns
+Managed remote tasks use Codex or Claude Code; interactive sessions a cluster owns
 use Codex or Claude Code. Controlled interactive moves support
 Codex, Claude Code and Copilot. Support for a harness in ordinary
 Kubernetes runs does not imply support for session movement. See

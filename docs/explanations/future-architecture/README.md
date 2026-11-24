@@ -3,9 +3,9 @@
 These notes describe proposed extensions. They do not add requirements to the
 current setup guides.
 
-Kubernetes runs, four stock harnesses, native and configured HTTPS MCP, and
-persistent Hermes delegation are implemented. Controlled Codex and Claude Code
-sessions can move between Docker and Kubernetes. Retained remote tasks, local
+Kubernetes runs, five stock harnesses, native and configured HTTPS MCP, and
+persistent Hermes delegation are implemented. Controlled Codex, Claude Code and
+GitHub Copilot CLI sessions can move between Docker and Kubernetes. Retained remote tasks, local
 resume, configured Projects and exact-revision launches are also implemented.
 See the [current architecture](../system-architecture.md), [Move a live session between Docker and Kubernetes](../../guides/session-mobility.md) and [Run a task remotely, then resume it locally](../../guides/portable-workflows.md) for setup and limits.
 

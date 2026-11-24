@@ -300,3 +300,18 @@ func TestEveryManagedKindHasAnAdapter(t *testing.T) {
 		}
 	}
 }
+
+// Each adapter launches the registry's executable for its kind, so the
+// supervisor keeps no path of its own.
+func TestAdaptersLaunchTheRegistryExecutable(t *testing.T) {
+	for _, kind := range harness.ManagedKinds() {
+		adapter, err := adapterFor(kind)
+		if err != nil {
+			continue
+		}
+		if want := harness.NativeExecutable(kind); want == "" || adapter.executable != want {
+			t.Errorf("managed harness %q launches %q, but its Executable in internal/harness/registry.go is %q",
+				kind, adapter.executable, want)
+		}
+	}
+}

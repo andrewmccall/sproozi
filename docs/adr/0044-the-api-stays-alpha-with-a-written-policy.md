@@ -16,6 +16,11 @@ installation holds stored objects: the only release, v0.1.0, was a test
 release and has been deleted, so a version change now would need no
 conversion.
 
+Corrected 2026-11-16: that claim is false. Releases v0.1.0 to v0.2.6 are tagged
+(`git tag`), so an installation may hold stored objects. The decision to stay on
+`v1alpha1` and its policy are unchanged; only the premise that a version change
+needs no conversion no longer holds.
+
 ## Decision
 
 - **Stay on `sproozi.com/v1alpha1`.** One served and stored version, no

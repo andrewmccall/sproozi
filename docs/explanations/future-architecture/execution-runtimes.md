@@ -2,7 +2,7 @@
 
 **Status:** future extensions to implemented Kubernetes and controlled local Docker.
 See [Move a live session between Docker and Kubernetes](../../guides/session-mobility.md) for the current narrow
-Codex and Claude Code foreground workflows and limits.
+Codex, Claude Code and GitHub Copilot CLI foreground workflows and limits.
 
 Docker and Kubernetes have concrete placement adapters under
 `internal/runtime/docker` and `internal/runtime/kubernetes/placement`. The

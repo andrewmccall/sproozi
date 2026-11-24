@@ -87,6 +87,9 @@ The same review made three related contracts explicit:
   directory. Sproozi is an unreleased preview with no tags, so earlier records
   are not migrated. A session started before this change must be cancelled or
   discarded by the operator.
+
+  Corrected 2026-11-16: Sproozi has tags (v0.1.0 to v0.2.6), and ADR 0058 now
+  requires a change to read existing journals, with no migration step.
 - A move or stop on an execution whose first visit has not activated returns
   "requires recovery" instead of starting that visit implicitly. Run `recover`,
   or retry `start` or `resume` with the same operation.
@@ -121,7 +124,7 @@ The same review made three related contracts explicit:
   or a harness needs its launch changed after creation.
 - Status reads need a consistent view across several journals, which the
   lock-free `Inspect` does not provide.
-- Adopting existing native sessions ([ADR 0005](0005-controlled-docker-launch-before-session-adoption.md))
+- Adopting existing native sessions ([session mobility](../explanations/future-architecture/session-mobility.md#adopt-directly-started-sessions))
   needs a first visit that the coordinator does not prepare.
 
 ## Evidence

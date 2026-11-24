@@ -149,7 +149,11 @@ fails, naming the file to change, unless:
   reads it), and a row in the reference's selector table with the right
   Managed value;
 - every managed kind has its own native directory and a protocol, is accepted
-  by `nativeconfig`, and has a supervisor adapter and a checkpoint format.
+  by `nativeconfig`, and has a supervisor adapter and a checkpoint format;
+- every managed kind supplies every managed fact listed in the managed
+  harness steps (an AgentRun-only harness supplies none), exactly one is the
+  default, its supervisor adapter launches the registry's `Executable`, and
+  the file names a Python launch file repeats equal the registry's.
 
 They don't prove that a stock client loads its MCP file, that it shows the
 MCP tools to the model (pi, for example, hides them behind its `codemode`
@@ -219,18 +223,35 @@ and fails instead when `CI` is set.
 Do the AgentRun steps first, then:
 
 1. In the registry entry, set `Native`, `NativeDirectory` and `Protocol`, the
-   model API it calls through the gateway.
+   model API it calls through the gateway, then every managed fact. The guard
+   test fails on a missing one, so a new harness never takes another's value:
+   - `DisplayName` and `Product`, the names messages and the setup wizard show;
+   - `Executable`, the stock client's path in the managed sandbox image;
+   - `InstructionsFile`, its user-level instructions file name;
+   - `KeyEnv`, the variable that carries the placeholder credential, and
+     `TokenEnv` with `TokenPlaceholder` when a gateway-held sign-in token uses
+     another; `SignInYieldsGitHubToken` when it prefers `GH_TOKEN` to its own
+     sign-in;
+   - `RefusedFlags`, the command-line options Sproozi controls (the tables in
+     [`internal/harness/native_args.go`](../../internal/harness/native_args.go));
+   - `ReservedEnv`, the variables its supervisor sets and a launch may not;
+   - `TakesTask`, `RemoteExecutor` and `Default`, when each applies;
+   - `KeyOptions` and `SignInOptions`, any native options a local installation
+     gives it; and `SignInFile` and `SignInProvider` when it signs in itself.
 2. Accept it in `nativeconfig.ValidateHarness`
    ([`internal/nativeconfig/claude.go`](../../internal/nativeconfig/claude.go)).
 3. Add a supervisor adapter to `nativeAdapters` in
    [`cmd/native-session/launch.go`](../../cmd/native-session/launch.go): launch
-   arguments, completed-turn observation, controlled stop and refused
-   [harness arguments](../../internal/harness/native_args.go).
+   arguments, completed-turn observation and controlled stop. Its `executable`
+   is the registry's `Executable`; add a variable for it and for its native
+   home to `cmd/native-session/homes.go`, and add its graceful-stop wait text
+   to `waitingFor` in `cmd/native-session/main.go`.
 4. Add its native state capture, validation and restore in
    [`internal/checkpoint/artifact.go`](../../internal/checkpoint/artifact.go)
    and `internal/harness`, with captured transcript fixtures.
 5. If its protocol is new, add the gateway model handler and the provider in
-   `internal/localsetup`.
+   `internal/localsetup`, and add its sign-in choices to `signInChoices` in
+   [`cmd/sproozi/wizard.go`](../../cmd/sproozi/wizard.go) (a guard test requires them).
 6. Run `go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/`;
    the guards name each missing piece. Then prove a real round trip with
    `make verify-local-onboarding` and the session verifiers in

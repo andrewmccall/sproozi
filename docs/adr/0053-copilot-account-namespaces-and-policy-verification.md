@@ -8,8 +8,8 @@ Date: 2026-11-05
 GitHub-backed Copilot reads account metadata under both `/copilot_internal/`
 and `/copilot/` on `api.github.com`. The gateway mounted only the former.
 In particular, `GET /copilot/mcp_registry` could not reach GitHub.
-[ADR 0052](0052-copilot-policy-fetch-queries.md) fixed a query on the separate
-managed-settings endpoint, without proving this registry-policy route.
+ADR 0052 (removed) had allowed a query only on the separate managed-settings
+endpoint, without proving this registry-policy route.
 
 Hosted Copilot E2E used OpenAI bring-your-own-key mode. The manual GitHub
 process fixture represented an individual account, which could complete a
@@ -40,6 +40,22 @@ return the fixture policy. This probe is recorded separately from the stock
 client's tool turn. It cannot be replaced by a model-completion result or a
 counter for another endpoint. The fixture also rejects unmodeled account
 requests so a newly exercised client path needs review.
+
+Corrected 2026-11-15: moved here from ADR 0052, which was removed. Relay
+refusals report the request's shape and never its content. The denial
+reason reads "the gateway relays only the provider's sign-in and account
+requests (method GET; query parameters present: true)", naming a recognized
+HTTP method or "unrecognized" for any other, because an unrecognized method
+can contain arbitrary text, and whether a query is present. It never records
+query names, query values, headers or bodies, which can carry credentials
+(`internal/endpoints/model/signin.go`). Presence diagnoses a refused route
+without exposing content, but cannot identify a new parameter: capture new
+request shapes with an isolated fixture client before extending a route.
+Forwarding
+queries only on fixed, named routes, rather than on every account route or by
+validating today's three client metadata keys, keeps the relay from breaking
+whenever the provider adds a parameter and from extending access without an
+observed need.
 
 ## Alternatives and tradeoffs
 

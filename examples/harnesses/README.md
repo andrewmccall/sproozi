@@ -65,6 +65,6 @@ bundled interpreter directly, outside the root startup system, with fresh native
 state. Its immutable helper supervises the stock CLI and publishes a bounded
 UID-bound final answer. The example enables the native Kubernetes MCP tool;
 request `kubernetes.read` and configure its namespace/resource policy to use it.
-`make test-e2e` checks the deployed stock loops and persistent coordinator with
+`make test-e2e` checks the deployed stock loops and persistent assistant with
 deterministic providers. [Run a persistent Hermes assistant on Kubernetes](../../docs/guides/hermes-orchestration.md)
 provides the persistent deployment and schedule setup.

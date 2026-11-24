@@ -15,8 +15,6 @@ import (
 )
 
 const (
-	copilotHome       = "/workspace/session/copilot"
-	copilotExecutable = "/usr/local/bin/copilot"
 	// copilotMCP and copilotBashEnv are launch-generated, outside the
 	// workspace and portable state.
 	copilotMCP     = "/tmp/sproozi-native/copilot-mcp.json"

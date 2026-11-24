@@ -56,6 +56,60 @@ type Harness struct {
 	// so a stopped or exited process is enough evidence. Without it, as for
 	// Claude Code, a stop needs the supervisor's acknowledgement.
 	StateProvesCompletion bool
+
+	// The facts below are required for every managed harness (a Native kind);
+	// the guard tests fail on an entry that leaves one out, so a new managed
+	// harness never inherits another's value.
+
+	// DisplayName is how messages name the harness, such as "Claude Code".
+	DisplayName string
+	// Product is the vendor's name for the program, shown beside the selector
+	// when a person chooses a harness.
+	Product string
+	// Executable is the stock client's path inside the managed sandbox image.
+	Executable string
+	// InstructionsFile is the user-level instructions file name inside the
+	// native home, and the name of the harness's profile instructions file.
+	InstructionsFile string
+	// KeyEnv is the environment variable that carries the public placeholder
+	// where the gateway holds the harness's API key or sign-in token.
+	KeyEnv string
+	// RefusedFlags are the command-line options Sproozi controls; a user's
+	// harness arguments may not set them (see ValidateNativeArgs).
+	RefusedFlags []controlledFlag
+	// ReservedEnv are the variables the supervisor sets for this harness and a
+	// launch's explicit environment may not replace, besides the fixed ones
+	// (HOME, PWD, KUBECONFIG). A harness may declare none only with a reason in
+	// the guard test.
+	ReservedEnv []string
+	// RemoteExecutor reports that a remote executor may run this harness, for
+	// both tasks and interactive sessions. A Claude Code task's completion is
+	// bound to its prompt's turn by the supervisor's UserPromptSubmit hook (ADR
+	// 0057).
+	RemoteExecutor bool
+
+	// TakesTask: the supervisor submits a task as the launch's prompt and
+	// binds completion to that prompt's turn: Codex by the task text in its
+	// rollout, Claude Code by its UserPromptSubmit hook. False means the
+	// harness is interactive only.
+	TakesTask bool
+	// Default marks the one managed harness Sproozi uses when none is named.
+	Default bool
+
+	// TokenEnv and TokenPlaceholder replace KeyEnv, and its placeholder, when
+	// the gateway holds a sign-in token. Empty means the token travels in
+	// KeyEnv, as for Codex and Claude Code.
+	TokenEnv         string
+	TokenPlaceholder string
+	// SignInYieldsGitHubToken: the harness prefers GH_TOKEN to its own sign-in,
+	// so a launch that signs in itself gets no GH_TOKEN placeholder in its
+	// environment (its supervisor gives it to the agent's shell only).
+	SignInYieldsGitHubToken bool
+	// KeyOptions and SignInOptions are the native options a local installation
+	// gives the harness: when the gateway holds its credential, and when it
+	// signs in itself. Both may be empty.
+	KeyOptions    []string
+	SignInOptions []string
 }
 
 // ProvesCompletion reports the kind's StateProvesCompletion.
@@ -114,15 +168,39 @@ func (p ModelProtocol) InspectionHost() string {
 	return "api.openai.com"
 }
 
+// codexKeyOptions point stock Codex at the OpenAI Responses API through the
+// gateway with the worker's placeholder key, and trust the managed workspace.
+var codexKeyOptions = []string{
+	`model_provider="sproozi"`,
+	`model_providers.sproozi.name="OpenAI through Sproozi"`,
+	`model_providers.sproozi.base_url="https://api.openai.com/v1"`,
+	`model_providers.sproozi.env_key="` + nativeOpenAIKey + `"`,
+	`model_providers.sproozi.wire_api="responses"`,
+	`model_providers.sproozi.supports_websockets=false`,
+	codexTrust,
+}
+
+// codexTrust trusts the session workspace. A Codex that signs in itself keeps
+// only this option and uses its built-in OpenAI provider, which reaches the
+// ChatGPT backend or the API to match its sign-in (ADR 0047).
+const codexTrust = `projects."/workspace/session/workspace".trust_level="trusted"`
+
 // mcpServersField is Claude Code's MCP configuration key.
 const mcpServersField = "mcpServers"
 
 var registry = []Harness{
 	{Selector: string(NativeCodex), Native: NativeCodex, NativeDirectory: string(NativeCodex), Protocol: ProtocolOpenAI,
 		SignInFile: "auth.json", StateProvesCompletion: true,
+		DisplayName: "Codex", Product: "OpenAI Codex CLI", Executable: "/usr/local/bin/codex", InstructionsFile: "AGENTS.md",
+		KeyEnv: nativeOpenAIKey, RefusedFlags: codexControlled, ReservedEnv: []string{"CODEX_HOME"},
+		RemoteExecutor: true, TakesTask: true, Default: true, KeyOptions: codexKeyOptions, SignInOptions: []string{codexTrust},
 		MCP: MCPFormat{File: "codex-mcp.toml"}, Loader: NativeMCP},
 	{Selector: string(NativeClaude), Native: NativeClaude, NativeDirectory: "claude", Protocol: ProtocolAnthropic,
-		SignInFile:   ".credentials.json",
+		SignInFile:  ".credentials.json",
+		DisplayName: "Claude Code", Product: "Anthropic Claude Code", Executable: "/usr/local/bin/claude", InstructionsFile: "CLAUDE.md",
+		KeyEnv: nativeAnthropicKey, RefusedFlags: claudeControlled, RemoteExecutor: true, TakesTask: true,
+		ReservedEnv: []string{"CLAUDE_CONFIG_DIR", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_AUTOUPDATER",
+			"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"},
 		RequestFiles: true, Loader: NativeMCP, LaunchFiles: launchFilesNamed("claude-launch.py"),
 		MCP: MCPFormat{File: "claude-mcp.json", Field: mcpServersField, Entry: func(name, address string) (string, any) {
 			return name, map[string]any{connectionType: httpTransport, connectionURL: address}
@@ -133,6 +211,9 @@ var registry = []Harness{
 		}}},
 	{Selector: string(NativeCopilot), Native: NativeCopilot, NativeDirectory: string(NativeCopilot),
 		Protocol: ProtocolOpenAI, SignInProvider: "copilot", SignInFile: "config.json", StateProvesCompletion: true,
+		DisplayName: "Copilot", Product: "GitHub Copilot CLI", Executable: "/usr/local/bin/copilot",
+		InstructionsFile: "copilot-instructions.md", KeyEnv: "COPILOT_PROVIDER_API_KEY", RefusedFlags: copilotControlled,
+		TokenEnv: "COPILOT_GITHUB_TOKEN", TokenPlaceholder: NativeCopilotTokenPlaceholder, SignInYieldsGitHubToken: true,
 		RequestFiles: true, Loader: NativeMCP,
 		MCP: MCPFormat{File: "copilot-mcp.json", Field: mcpServersField, Entry: func(name, address string) (string, any) {
 			return name, map[string]any{connectionType: httpTransport, connectionURL: address, "tools": []string{"*"}}
@@ -143,6 +224,34 @@ var registry = []Harness{
 			return "sproozi-mcp-" + name, map[string]any{connectionURL: address, "enabled": true,
 				"strict_redirect_headers": true, "connect_timeout": 15, "timeout": 60}
 		}}},
+}
+
+// Default is the managed kind Sproozi uses when none is named: the entry
+// marked Default.
+func Default() NativeKind {
+	for _, h := range registry {
+		if h.Default {
+			return h.Native
+		}
+	}
+	return ""
+}
+
+// TaskKindList names the kinds that take a task for a message: "a or b".
+func TaskKindList() string {
+	var names []string
+	for _, h := range registry {
+		if h.Native != "" && h.TakesTask {
+			names = append(names, h.DisplayName)
+		}
+	}
+	return strings.Join(names, " or ")
+}
+
+// RemoteExecutorKind reports that a remote executor may run the kind.
+func RemoteExecutorKind(kind NativeKind) bool {
+	h, err := Managed(kind)
+	return err == nil && h.RemoteExecutor
 }
 
 // Lookup returns the registered harness for an AgentRuntime selector.
