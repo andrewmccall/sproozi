@@ -39,6 +39,10 @@ type Config struct {
 	// Profiles retains profile archives that launches name. Without it, a
 	// launch with a profile is unsupported.
 	Profiles ProfileStore
+	// Stops tracks the stops the handler carries on after their requests
+	// end, so the executor can drain them at shutdown. Without it the handler
+	// keeps its own.
+	Stops *Stops
 }
 
 // ProfileStore retains a verified profile archive under its digest.
@@ -49,6 +53,10 @@ type handler struct {
 	config  Config
 	home    Authorizer
 	maxBody int64
+	// stops are the stops this executor carries on after their requests
+	// end, each for at most stopBound.
+	stops     *Stops
+	stopBound time.Duration
 }
 
 // ErrUnauthenticated means a bearer token identifies no caller at all.
@@ -100,7 +108,11 @@ func NewHandler(config Config) (http.Handler, error) {
 		return nil, errors.New("profile: home principal authorizer required")
 	}
 	config.Authorizer = nil
-	return &handler{config: config, home: home, maxBody: maxBody}, nil
+	stops := config.Stops
+	if stops == nil {
+		stops = &Stops{}
+	}
+	return &handler{config: config, home: home, maxBody: maxBody, stops: stops, stopBound: StopBound}, nil
 }
 
 // validToken trims a bearer token and checks the length and characters every
@@ -185,7 +197,7 @@ func (h *handler) requestAction(r *http.Request) (string, int, Code) {
 		return "", http.StatusNotFound, CodeInvalid
 	}
 	switch action {
-	case actionPrepare, actionActivate, actionStop, actionInspect, actionAbort, actionAttach, actionDescribe:
+	case actionPrepare, actionActivate, actionStop, actionInspect, actionAbort, actionAbortPreparation, actionAttach, actionDescribe:
 	default:
 		return "", http.StatusNotFound, CodeInvalid
 	}
@@ -243,7 +255,7 @@ func (h *handler) validatePayload(action string, input request) error {
 	} else if len(input.Checkpoint) > 0 || len(input.Profile) > 0 {
 		return &Rejection{Code: CodeInvalid}
 	}
-	if action == actionInspect {
+	if action == actionInspect || action == actionAbortPreparation {
 		if input.Incarnation != nil {
 			return &Rejection{Code: CodeInvalid}
 		}
@@ -297,26 +309,45 @@ func (h *handler) perform(r *http.Request, action string, input request) (respon
 		if err := p.Activate(r.Context(), input.Launch, *input.Incarnation); err != nil {
 			return output, err
 		}
-	case actionStop:
-		s, err := p.Stop(r.Context(), input.Launch, *input.Incarnation)
-		// A fenced writer with unsealed usage is a stop result, not a failure:
-		// its nil receipt tells the client to keep the allocation encumbered.
-		if errors.Is(err, session.ErrUsageUnsealed) && s.ActualStopped {
-			s.Receipt, s.Checkpoint, s.CheckpointDigest = nil, nil, ""
-			err = nil
+	case actionAbortPreparation:
+		// Unlike abort, it interrupts no stop: a stop names an incarnation
+		// the preparation never reported, and a visit with a stop is
+		// refused as not a preparation once the stop lets go of its lock.
+		aborter, ok := p.(session.PreparationAborter)
+		if !ok {
+			return output, &Rejection{Code: CodeUnsupported}
 		}
-		if err != nil {
+		if err := aborter.AbortPreparation(r.Context(), input.Launch); err != nil {
 			return output, err
 		}
-		output.Stopped = &s
-		output.Checkpoint = s.Checkpoint
+	case actionStop:
+		// The stop goes on to its outcome if home goes away or gives up, so
+		// a quiesce in flight is never abandoned; its retry joins it, and an
+		// abort of the same visit interrupts it.
+		return h.stops.run(r.Context(), input, h.stopBound, func(ctx context.Context) (response, error) {
+			output := response{Version: protocolVersion}
+			s, err := p.Stop(ctx, input.Launch, *input.Incarnation)
+			// A fenced writer with unsealed usage is a stop result, not a
+			// failure: its nil receipt tells the client to keep the allocation
+			// encumbered.
+			if errors.Is(err, session.ErrUsageUnsealed) && s.ActualStopped {
+				s.Receipt, s.Checkpoint, s.CheckpointDigest = nil, nil, ""
+				err = nil
+			}
+			if err != nil {
+				return output, err
+			}
+			output.Stopped = &s
+			output.Checkpoint = s.Checkpoint
+			return output, nil
+		})
 	case actionInspect, actionAbort:
 		var o session.Observation
 		var err error
 		if action == actionInspect {
 			o, err = p.Inspect(r.Context(), input.Launch)
 		} else {
-			o, err = p.Abort(r.Context(), input.Launch, *input.Incarnation)
+			o, err = h.abort(r.Context(), input)
 		}
 		if err != nil {
 			return output, err
@@ -328,6 +359,15 @@ func (h *handler) perform(r *http.Request, action string, input request) (respon
 	}
 	return output, nil
 }
+
+// abort interrupts the visit's stops, and keeps new ones from waiting for a
+// turn, while the placement aborts it.
+func (h *handler) abort(ctx context.Context, input request) (session.Observation, error) {
+	release := h.stops.abort(input)
+	defer release()
+	return h.config.Backend.Abort(ctx, input.Launch, *input.Incarnation)
+}
+
 func (h *handler) fail(w http.ResponseWriter, err error) {
 	if errors.Is(err, harness.ErrNativeTurnPending) {
 		// Still waiting is not unavailable: the client keeps the stop pending.

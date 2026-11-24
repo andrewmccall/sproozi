@@ -48,8 +48,19 @@ type Coordinator struct {
 	lock          *os.File
 	mu            sync.RWMutex
 	journals      JournalLocks
-	graceful      lifecycle.Control
-	closed        bool
+	// content orders writing retained content against its clean-up. An
+	// operation holds it shared only while it writes content and records
+	// it in fresh, and while it forgets what it recorded; Remove's clean-up
+	// holds it exclusively. Nobody holds it across a placement call.
+	content sync.RWMutex
+	// fresh is the content each execution's operation in progress has
+	// written, by execution ID, which its journal may not name yet. It is
+	// forgotten when the operation releases the execution's lock, after it
+	// has saved the journal that names the content, or failed to.
+	fresh    map[string][]string
+	freshMu  sync.Mutex
+	graceful lifecycle.Control
+	closed   bool
 	// now reads the clock for original-deadline checks.
 	now func() time.Time
 	// profile archives the user's current profile for a new visit; an empty
@@ -80,10 +91,19 @@ func (c *Coordinator) placement(name string) (Placement, bool) {
 	return p, ok
 }
 
+// Option configures a coordinator when it opens.
+type Option func(*Coordinator)
+
+// WithClock replaces the wall clock that deadline checks read. It is for
+// tests that pass a deadline without waiting for it; production code opens
+// a coordinator without options, so deadlines are judged against time.Now
+// alone. It is fixed when Open returns.
+func WithClock(now func() time.Time) Option { return func(c *Coordinator) { c.now = now } }
+
 // Open takes a nonblocking owner lock. Existing directories/files must be private
 // and owned by this user. Destination names are configured here, never imported
 // from checkpoint contents or an untrusted HTTP request's resource options.
-func Open(dir string, placements map[string]Placement, maxCheckpointBytes int64) (*Coordinator, error) {
+func Open(dir string, placements map[string]Placement, maxCheckpointBytes int64, options ...Option) (*Coordinator, error) {
 	if maxCheckpointBytes <= 0 || len(placements) == 0 {
 		return nil, errors.New("session: checkpoint limit and placements required")
 	}
@@ -110,6 +130,9 @@ func Open(dir string, placements map[string]Placement, maxCheckpointBytes int64)
 		return nil, fmt.Errorf("session: coordinator already owned: %w", err)
 	}
 	c := &Coordinator{dir: dir, placements: configured, maxCheckpoint: maxCheckpointBytes, lock: lock, now: time.Now}
+	for _, option := range options {
+		option(c)
+	}
 	for _, name := range []string{checkpointsDir, workspacesDir, profilesDir} {
 		sub := filepath.Join(dir, name)
 		if err = privatefs.EnsureDir(sub); err != nil {
@@ -137,7 +160,7 @@ func (c *Coordinator) ProfileArchive(digest string) ([]byte, error) {
 }
 
 // retainProfile archives the current profile for a new launch.
-func (c *Coordinator) retainProfile() (string, error) {
+func (c *Coordinator) retainProfile(execution string) (string, error) {
 	if c.profile == nil {
 		return "", nil
 	}
@@ -145,7 +168,7 @@ func (c *Coordinator) retainProfile() (string, error) {
 	if err != nil || digest == "" {
 		return "", err
 	}
-	return digest, c.retainImmutable(profilePath(digest), archive)
+	return digest, c.retainImmutable(execution, profilePath(digest), archive)
 }
 
 func (c *Coordinator) Close() error {
@@ -175,7 +198,36 @@ func (c *Coordinator) lockSession(id string) (func(), error) {
 		c.mu.RUnlock()
 		return nil, err
 	}
-	return func() { unlock(); c.mu.RUnlock() }, nil
+	return func() { c.forget(id); unlock(); c.mu.RUnlock() }, nil
+}
+
+// remember records content an operation on execution wrote; the caller
+// holds the content lock shared.
+func (c *Coordinator) remember(execution, path string) {
+	c.freshMu.Lock()
+	defer c.freshMu.Unlock()
+	if c.fresh == nil {
+		c.fresh = map[string][]string{}
+	}
+	c.fresh[execution] = append(c.fresh[execution], path)
+}
+
+// forget drops what the ending operation on execution wrote: its journal now
+// names what it keeps. It waits for a clean-up in progress, so a clean-up
+// that read the journals before the save still sees the content as fresh.
+func (c *Coordinator) forget(execution string) {
+	c.freshMu.Lock()
+	_, ok := c.fresh[execution]
+	c.freshMu.Unlock()
+	if !ok {
+		// Only this operation, which holds the execution's lock, adds to it.
+		return
+	}
+	c.content.RLock()
+	defer c.content.RUnlock()
+	c.freshMu.Lock()
+	defer c.freshMu.Unlock()
+	delete(c.fresh, execution)
 }
 
 func (c *Coordinator) save(r Record) error {
@@ -218,7 +270,7 @@ func (c *Coordinator) load(id string) (Record, error) {
 	}
 	return r, nil
 }
-func (c *Coordinator) commitCheckpoint(data []byte, kind harness.NativeKind, thread, digest string) (Checkpoint, error) {
+func (c *Coordinator) commitCheckpoint(execution string, data []byte, kind harness.NativeKind, thread, digest string) (Checkpoint, error) {
 	meta, err := checkpoint.Inspect(data, c.maxCheckpoint)
 	if err != nil {
 		return Checkpoint{}, err
@@ -227,23 +279,29 @@ func (c *Coordinator) commitCheckpoint(data []byte, kind harness.NativeKind, thr
 		return Checkpoint{}, errors.New("session: checkpoint identity/digest mismatch")
 	}
 	path := checkpointPath(meta.SHA256)
-	if err = c.retainImmutable(path, data); err != nil {
+	if err = c.retainImmutable(execution, path, data); err != nil {
 		return Checkpoint{}, err
 	}
 	return Checkpoint{Metadata: meta, Path: path}, nil
 }
 
 // retainWorkspace keeps a new execution's captured Git workspace input.
-func (c *Coordinator) retainWorkspace(data []byte) (string, error) {
+func (c *Coordinator) retainWorkspace(execution string, data []byte) (string, error) {
 	if len(data) == 0 || int64(len(data)) > c.maxCheckpoint {
 		return "", errors.New("session: workspace input exceeds bound")
 	}
 	digest := fmt.Sprintf("%x", sha256.Sum256(data))
-	return digest, c.retainImmutable(workspacePath(digest), data)
+	return digest, c.retainImmutable(execution, workspacePath(digest), data)
 }
 
-// retainImmutable writes content-addressed data once; a retry must match it.
-func (c *Coordinator) retainImmutable(path string, data []byte) error {
+// retainImmutable writes content-addressed data once for the operation on
+// execution, whose lock the caller holds; a retry must match it. The content
+// counts as named until that operation ends, so clean-up never deletes it
+// before the journal that names it is saved.
+func (c *Coordinator) retainImmutable(execution, path string, data []byte) error {
+	c.content.RLock()
+	defer c.content.RUnlock()
+	c.remember(execution, path)
 	existing, err := readFile(filepath.Join(c.dir, path), c.maxCheckpoint)
 	if err == nil {
 		if !bytes.Equal(existing, data) {

@@ -21,6 +21,11 @@ const (
 	problemRevoked = "its project no longer admits this installation"
 )
 
+// actionTaskComplete derives the operation of a task's completion wait: the
+// stop the driver asks for at once, which the supervisor carries out only
+// after the task's own turn completed.
+const actionTaskComplete = "task-complete"
+
 // backoff bounds the driver's automatic recovery of an execution the
 // coordinator could not settle.
 type backoff struct{ first, limit time.Duration }
@@ -151,10 +156,8 @@ func (o *Owner) step(ctx context.Context, id string) next {
 	switch {
 	case rec != nil && rec.Phase == session.PhaseCancelled:
 		return nextDone
-	case rec != nil && rec.Phase == session.PhaseIdle && interactive:
-		return nextDone
 	case rec != nil && rec.Phase == session.PhaseIdle:
-		return o.finish(r)
+		return o.stepIdle(ctx, r, *rec, interactive)
 	case interactive && rec != nil && (rec.CancelOperation != "" || !rec.Phase.Starting() && rec.Phase != session.PhaseActive):
 		// Only "recover" retries an interactive session's unsettled stop
 		// or cancellation.
@@ -168,21 +171,19 @@ func (o *Owner) step(ctx context.Context, id string) next {
 	case rec == nil:
 		return o.start(ctx, r)
 	case rec.Phase.Starting():
-		if deadline.At(rec.Deadline).Passed(time.Now()) {
-			return o.end(ctx, r, "deadline-expired", problemExpired)
-		}
-		_, err = coordinator.Recover(ctx, rec.ID)
-		return o.after(ctx, r, err, nextDone)
+		return o.stepStarting(ctx, r, *rec, interactive)
 	case interactive:
 		// Running: its owner attaches to it and stops it.
 		return nextDone
 	case rec.Phase == session.PhaseActive || rec.Phase == session.PhaseStopping:
 		// The task's stop is its completion wait: the supervisor stops the
 		// writer only after the task's own turn completed. Until then the
-		// stop stays pending and is repeated.
-		_, err = coordinator.Finalize(ctx, rec.ID, derivedOperation(rec.ID, "task-complete"))
+		// stop stays pending and is repeated. The task is running, not
+		// stopping (see completing), and nothing is wrong with it, so the
+		// wait clears any earlier problem rather than recording one.
+		_, err = coordinator.Finalize(ctx, rec.ID, derivedOperation(rec.ID, actionTaskComplete))
 		if errors.Is(err, harness.ErrNativeTurnPending) {
-			o.note(r.ID, "the executor waits for the task's turn to complete: "+err.Error())
+			o.note(r.ID, "")
 			return nextAgain
 		}
 		return o.after(ctx, r, err, nextWait)
@@ -192,6 +193,49 @@ func (o *Owner) step(ctx context.Context, id string) next {
 		_, err = coordinator.Recover(ctx, rec.ID)
 		return o.after(ctx, r, err, nextWait)
 	}
+}
+
+// stepIdle takes the next step of a session whose execution is idle. An
+// interactive session waits for its owner. A task whose start the deadline
+// overtook inside a recovery follows the rule for a task whose deadline
+// passed before it started: nothing ran, so there is no result to finish.
+// Any other task writes its tail.
+func (o *Owner) stepIdle(ctx context.Context, r record, rec session.Record, interactive bool) next {
+	switch {
+	case interactive:
+		return nextDone
+	case startEnded(rec):
+		return o.end(ctx, r, "deadline-expired", problemExpired)
+	}
+	return o.finish(r)
+}
+
+// stepStarting continues a session whose execution is starting. A task past
+// its deadline is cancelled. Past its deadline, an interactive session's
+// start ends instead of starting: it stays stopped with what its earlier
+// execution committed, and resume continues it (ADR 0060).
+func (o *Owner) stepStarting(ctx context.Context, r record, rec session.Record, interactive bool) next {
+	if !interactive && deadline.At(rec.Deadline).Passed(time.Now()) {
+		return o.end(ctx, r, "deadline-expired", problemExpired)
+	}
+	_, err := o.config.Coordinator.Recover(ctx, rec.ID)
+	if errors.Is(err, session.ErrDeadlinePassed) {
+		o.note(r.ID, problemExpired)
+		return nextAgain
+	}
+	return o.after(ctx, r, err, nextDone)
+}
+
+// startEnded reports an execution whose deadline ended its first visit
+// before it started (ADR 0060), so it holds no result. Once that visit is
+// ended the execution starts nothing again, so the only visit it can have is
+// the prepared incarnation the end aborted: that keeps its sealed usage, and
+// a checkpoint only if the abort captured one. A task's result is read from
+// its checkpoint, and its first visit starts from a workspace, so with no
+// checkpoint there is nothing a cancellation could discard. A cancellation
+// of the idle execution changes neither its visits nor its allowance.
+func startEnded(rec session.Record) bool {
+	return rec.Abandoned(rec.Operations[0].ID) && rec.Checkpoint.Path == ""
 }
 
 // after decides what follows a coordinator call. Success takes the next step.
@@ -232,8 +276,9 @@ func (o *Owner) note(id, problem string) {
 }
 
 // end cancels a session the executor must not run: its project was revoked,
-// or its deadline passed before it started. A session that already stopped
-// keeps its result.
+// or its deadline passed before it started and it has nothing to keep: a
+// task, or a session the coordinator never received. A session that already
+// stopped keeps its result.
 func (o *Owner) end(ctx context.Context, r record, action, problem string) next {
 	err := o.cancelExecution(ctx, r.ID, derivedOperation(r.Current, action), problem)
 	if err == nil || OutcomeCode(err) == profile.CodeConflict {

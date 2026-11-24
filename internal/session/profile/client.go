@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/agentprofile"
+	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/session"
 )
@@ -30,9 +31,13 @@ func fixedOrigin(raw string) bool {
 
 // Client implements Placement without holding Kubernetes credentials.
 type Client struct {
-	base          string
-	token         string
+	base  string
+	token string
+	// http is bounded by the connection's timeout, for short requests and an
+	// attachment's admission. long has no bound of its own: each request it
+	// carries waits as long as its action may take (wait).
 	http          *http.Client
+	long          *http.Client
 	maxCheckpoint int64
 	maxBody       int64
 	profiles      func(digest string) ([]byte, error)
@@ -46,6 +51,8 @@ func (c *Client) SetProfileSource(source func(digest string) ([]byte, error)) { 
 // origin its certificate covers; Roots, when set, replace the system roots.
 // Dial, when set, replaces the network path to Origin with a byte stream the
 // caller opens, such as a Kubernetes port-forward; TLS still runs over it.
+// Timeout, 45 seconds when zero, bounds short requests; prepare, stop and
+// the aborts wait as long as the executor may take over them, and never less.
 type Connection struct {
 	Origin             string
 	Token              string
@@ -71,7 +78,7 @@ func Connect(config Connection) (*Client, error) {
 	u, _ := url.Parse(config.Origin)
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: config.Roots}
 	if config.Timeout == 0 {
-		config.Timeout = 45 * time.Second
+		config.Timeout = defaultTimeout
 	}
 	if config.Timeout < 0 || config.Timeout > time.Hour {
 		return nil, errors.New("profile: invalid timeout")
@@ -80,12 +87,52 @@ func Connect(config Connection) (*Client, error) {
 	if dial := config.Dial; dial != nil {
 		transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) { return dial(ctx) }
 	}
-	client := &http.Client{Transport: transport, Timeout: config.Timeout, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
-	return &Client{base: strings.TrimSuffix(u.String(), "/"), token: token, http: client, maxCheckpoint: config.MaxCheckpointBytes, maxBody: maxBody}, nil
+	// A long action answers only when it ends, so its headers wait as long.
+	longTransport := transport.Clone()
+	longTransport.ResponseHeaderTimeout = 0
+	noRedirect := func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+	client := &http.Client{Transport: transport, Timeout: config.Timeout, CheckRedirect: noRedirect}
+	long := &http.Client{Transport: longTransport, CheckRedirect: noRedirect}
+	return &Client{base: strings.TrimSuffix(u.String(), "/"), token: token, http: client, long: long, maxCheckpoint: config.MaxCheckpointBytes, maxBody: maxBody}, nil
 }
 
 // Close releases idle transport connections; it does not revoke an allocation.
-func (c *Client) Close() { c.http.CloseIdleConnections() }
+func (c *Client) Close() {
+	c.http.CloseIdleConnections()
+	c.long.CloseIdleConnections()
+}
+
+// wait is how long a placement action may take on the executor, plus a
+// margin for its answer. It is zero for a short action, which the
+// connection's timeout bounds.
+func (c *Client) wait(action string) time.Duration {
+	switch action {
+	case actionPrepare:
+		return prepareWait
+	case actionStop:
+		return stopWait
+	case actionAbort, actionAbortPreparation:
+		return abortWait
+	}
+	return 0
+}
+
+// do sends req, bounded by wait, but never less than the connection's
+// timeout, when wait is set, and by the connection's timeout otherwise. The
+// caller reads the body before calling the returned release.
+func (c *Client) do(req *http.Request, wait time.Duration) (*http.Response, func(), error) {
+	if wait == 0 {
+		r, err := c.http.Do(req)
+		return r, func() {}, err
+	}
+	ctx, cancel := context.WithTimeout(req.Context(), max(wait, c.http.Timeout))
+	r, err := c.long.Do(req.WithContext(ctx))
+	if err != nil {
+		cancel()
+		return nil, func() {}, err
+	}
+	return r, cancel, nil
+}
 
 func (c *Client) Prepare(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
 	if err := validateCheckpoint(data, l, l.CheckpointDigest, c.maxCheckpoint); err != nil {
@@ -143,6 +190,77 @@ func (c *Client) Abort(ctx context.Context, l session.Launch, i session.Incarnat
 	}
 	return decodedObservation(r), nil
 }
+
+// AbortPreparation asks the executor to fence a launch whose preparation never
+// reported an incarnation. An executor older than this action, or one whose
+// placement cannot, gets what a coordinator did before the action existed:
+// an absent launch is fenced, one with an incarnation is aborted, and one
+// still preparing stays unproven. The error then says why.
+func (c *Client) AbortPreparation(ctx context.Context, l session.Launch) error {
+	_, err := c.call(ctx, actionAbortPreparation, request{Launch: l})
+	if !preparationAbortUnsupported(err) {
+		return err
+	}
+	return c.abortPreparationByInspection(ctx, l)
+}
+
+// preparationAbortUnsupported reports an executor that does not know the
+// action (404 invalid_request, as for any unknown action) or whose placement
+// cannot abort a preparation (unsupported).
+func preparationAbortUnsupported(err error) bool {
+	var answer *RemoteError
+	if !errors.As(err, &answer) {
+		return false
+	}
+	return answer.Code == CodeUnsupported || answer.Code == CodeInvalid && answer.Status == http.StatusNotFound
+}
+
+// errPreparationAbortUnsupported explains the fallback's unproven outcomes.
+var errPreparationAbortUnsupported = errors.New("the remote executor cannot abort a preparation that has not reported its Pod; " +
+	"it is older than this Sproozi. Update the executor, then run recover on the session")
+
+func (c *Client) abortPreparationByInspection(ctx context.Context, l session.Launch) error {
+	o, err := c.Inspect(ctx, l)
+	if err != nil {
+		return errors.Join(errPreparationAbortUnsupported, err)
+	}
+	if o.State == session.PlacementAbsent {
+		return nil
+	}
+	if !incarnationValid(o.Incarnation) {
+		return fmt.Errorf("%w; the cancelled preparation is still %s", errPreparationAbortUnsupported, o.State)
+	}
+	// Only a visit still preparing, or one already stopped (whose receipt is
+	// checked below), is aborted here. An active visit, or one whose state is
+	// unknown, as a stopping Kubernetes visit inspects, may have spent: it is
+	// not a preparation, and success would report no usage.
+	if o.State != session.PlacementPreparing && o.State != session.PlacementPrepared && o.State != session.PlacementStopped {
+		return fmt.Errorf("%w; the visit is %s, not a preparation, so only a stop or an abort with its incarnation can end it",
+			errPreparationAbortUnsupported, o.State)
+	}
+	a, err := c.Abort(ctx, l, o.Incarnation)
+	if err != nil {
+		return errors.Join(errPreparationAbortUnsupported, err)
+	}
+	if a.State != session.PlacementStopped || a.Incarnation != o.Incarnation {
+		return fmt.Errorf("%w; aborting the prepared Pod did not prove it stopped", errPreparationAbortUnsupported)
+	}
+	// As for any abort, a stopped writer without a receipt has unknown usage,
+	// which a successful preparation abort could not report.
+	if a.Stopped == nil || a.Stopped.Receipt == nil {
+		return fmt.Errorf("%w; the prepared Pod stopped, but its usage is not finalized yet", errPreparationAbortUnsupported)
+	}
+	// Success reports no usage, so only a receipt that sealed none is
+	// dropped. A visit that inspects as prepared or stopped may still have
+	// run; its usage is left for an abort that carries the receipt.
+	for _, usage := range a.Stopped.Receipt.Usage {
+		if usage != (budget.TrustedUsage{}) {
+			return fmt.Errorf("%w; the visit stopped but recorded usage, so it was not a preparation", errPreparationAbortUnsupported)
+		}
+	}
+	return nil
+}
+
 func decodedObservation(r response) session.Observation {
 	o := r.Observation
 	if o.Stopped != nil {
@@ -169,10 +287,11 @@ func (c *Client) call(ctx context.Context, action string, input request) (respon
 	}
 	req.Header.Set(headerAuthorization, bearerPrefix+c.token)
 	req.Header.Set(headerContentType, jsonMedia)
-	r, err := c.http.Do(req)
+	r, release, err := c.do(req, c.wait(action))
 	if err != nil {
 		return response{}, err
 	}
+	defer release()
 	defer func() { _ = r.Body.Close() }()
 	media, _, mediaErr := mime.ParseMediaType(r.Header.Get(headerContentType))
 	if mediaErr != nil || media != jsonMedia {
@@ -277,4 +396,7 @@ func validateCheckpoint(data []byte, l session.Launch, digest string, max int64)
 	return nil
 }
 
-var _ session.Placement = (*Client)(nil)
+var (
+	_ session.Placement          = (*Client)(nil)
+	_ session.PreparationAborter = (*Client)(nil)
+)

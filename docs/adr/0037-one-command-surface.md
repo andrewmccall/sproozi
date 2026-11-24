@@ -79,6 +79,16 @@ for operations in progress, so it never stalls the service behind a long stop.
 It keeps accounting and grant records and the Docker placement's record of
 each finished visit, which are small and are evidence for budgets and fencing.
 
+Correction (2026-11-15): `rm` no longer holds the coordinator exclusively.
+Every operation holds it shared for its whole run, including a stop waiting
+for a native turn, so `rm` was refused whenever any session was stopping.
+It now takes only the removed executions' locks and waits at most five
+seconds for an operation on one of them; the clean-up of shared content
+runs under a separate content lock, which operations hold only while they
+write content and while they release an execution
+([ADR 0057](0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md),
+section 12).
+
 ### Remote seam
 
 Remote commands reach a cluster through one file, `cmd/sproozi/remote.go`,

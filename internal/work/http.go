@@ -64,8 +64,9 @@ func (q taskSubmission) submit() Submit {
 }
 
 // homeActions are the owner actions only the home principal may take: the
-// one-way pull, and the interactive session's stop, resume and attach.
-var homeActions = []string{"begin", "claim", actionStop, actionResume, actionAttach}
+// one-way pull, the interactive session's stop, resume and attach, and
+// removing a session.
+var homeActions = []string{"begin", "claim", actionStop, actionResume, actionAttach, actionRemove}
 
 // actionAttach streams a terminal attachment rather than answering JSON.
 const actionAttach = "attach"
@@ -118,7 +119,11 @@ func NewHandler(o *Owner, taskToken string, home profile.Authorizer) (http.Handl
 		return nil, sessionList{Sessions: v}, nil
 	})
 	stream := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, DisableLocalhostProtection: true})
-	return &ownerHandler{owner: o, taskHash: sha256.Sum256([]byte(taskToken)), home: home, stream: stream}, nil
+	stops := o.config.Stops
+	if stops == nil {
+		stops = &profile.Stops{}
+	}
+	return &ownerHandler{owner: o, taskHash: sha256.Sum256([]byte(taskToken)), home: home, stream: stream, stops: stops}, nil
 }
 
 type ownerHandler struct {
@@ -126,6 +131,7 @@ type ownerHandler struct {
 	taskHash [32]byte
 	home     profile.Authorizer
 	stream   http.Handler
+	stops    *profile.Stops
 }
 
 func (h *ownerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -250,6 +256,12 @@ func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action 
 		if e == nil {
 			out, e = h.owner.Resume(r.Context(), q.ID, q.OperationID, q.MaxDuration)
 		}
+	case actionRemove:
+		var q removal
+		e = decodeInput(b, &q)
+		if e == nil {
+			out, e = h.owner.Remove(r.Context(), q.ID, q.PullFinished)
+		}
 	default:
 		var q reference
 		e = decodeInput(b, &q)
@@ -263,10 +275,11 @@ func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action 
 				out, e = h.owner.Claim(r.Context(), q.ID, q.OperationID, q.Digest)
 			case "cancel":
 				out, e = h.owner.CancelAs(r.Context(), caller, q.ID, q.OperationID)
-			case actionStop:
-				out, e = h.owner.Stop(r.Context(), q.ID, q.OperationID)
-			case "recover":
-				out, e = h.owner.Recover(r.Context(), q.ID)
+			case actionStop, "recover":
+				// A stop, or a recovery that continues one, goes on to its
+				// outcome if the caller goes away or gives up; the retry waits
+				// for it. Cancellation interrupts it through the coordinator.
+				out, e = h.detachedStop(r.Context(), action, q)
 			default:
 				http.NotFound(w, r)
 				return
@@ -279,6 +292,19 @@ func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+// detachedStop runs a stop, or a recovery that continues one, so that it goes
+// on to its outcome if the caller goes away or gives up; the retry waits for
+// it, cancellation interrupts it through the coordinator, and the executor
+// drains it at shutdown.
+func (h *ownerHandler) detachedStop(ctx context.Context, action string, q reference) (View, error) {
+	ctx, done := h.stops.Detach(ctx)
+	defer done()
+	if action == actionStop {
+		return h.owner.Stop(ctx, q.ID, q.OperationID)
+	}
+	return h.owner.Recover(ctx, q.ID)
 }
 
 // writeOutcome answers with an error's public code only.
@@ -345,6 +371,14 @@ func (c *Client) Stop(ctx context.Context, id, op string) (v View, e error) {
 }
 func (c *Client) Resume(ctx context.Context, id, op, maxDuration string) (v View, e error) {
 	e = c.transport.CallOwner(ctx, "resume", resumption{ID: id, OperationID: op, MaxDuration: maxDuration}, &v)
+	return
+}
+
+// Remove removes a session. pullFinished states that this machine holds the
+// session's pull as finished; only then does the executor remove a pulled
+// session.
+func (c *Client) Remove(ctx context.Context, id string, pullFinished bool) (v Removal, e error) {
+	e = c.transport.CallOwner(ctx, actionRemove, removal{ID: id, PullFinished: pullFinished}, &v)
 	return
 }
 

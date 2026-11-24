@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/deadline"
+	"github.com/andrewmccall/sproozi/internal/session/home"
 	"github.com/andrewmccall/sproozi/internal/work"
 )
 
@@ -34,7 +35,10 @@ func TestMaxDurationFlag(t *testing.T) {
 	}
 }
 
-const phaseActive = "active"
+const (
+	phaseActive    = "active"
+	phasePreparing = "preparing"
+)
 
 func TestDeadlineText(t *testing.T) {
 	at := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
@@ -48,7 +52,7 @@ func TestDeadlineText(t *testing.T) {
 		{phaseCancelled, at, "-"},
 		{phaseCancelled, time.Time{}, "-"},
 		// Remote work reports the same phases.
-		{"preparing", at, formatTime(at)},
+		{phasePreparing, at, formatTime(at)},
 		{"stopping", at, formatTime(at)},
 		{string(work.PhaseRetained), at, "-"},
 		// No phase is called starting; unresolved and retained ones have none.
@@ -67,6 +71,31 @@ func TestDeadlineText(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), deadline.NoneArg) {
 		t.Fatalf("live session without deadline listed as %q", out.String())
+	}
+}
+
+// A session still starting or moving after its deadline names resume, which
+// ends that start and continues the session (ADR 0060); one before its
+// deadline names nothing.
+func TestStatusOfAStartOverdueNamesResume(t *testing.T) {
+	id := "3f2b0000-0000-4000-8000-000000000000"
+	for _, tc := range []struct {
+		phase string
+		at    time.Time
+		want  bool
+	}{
+		{phasePreparing, time.Now().Add(-time.Minute), true},
+		{"activating", time.Now().Add(-time.Minute), true},
+		{phasePreparing, time.Now().Add(time.Hour), false},
+		{phasePreparing, time.Time{}, false},
+		{phaseActive, time.Now().Add(-time.Minute), false},
+	} {
+		text := statusText(cmdStatus, home.Status{ID: id, Phase: tc.phase, Deadline: tc.at}, false)
+		got := strings.Contains(text, "Continue it with: sproozi resume "+shortID(id)) &&
+			strings.Contains(text, "sproozi cancel "+shortID(id)+" records the cancellation")
+		if got != tc.want {
+			t.Errorf("%s %v: %q", tc.phase, tc.at, text)
+		}
 	}
 }
 

@@ -177,16 +177,16 @@ func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) 
 func (p *Placement) prepare(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
 	l.Deadline = l.Deadline.UTC()
 	l.IncludeIgnored = append([]string(nil), l.IncludeIgnored...)
-	if deadline.At(l.Deadline).Passed(time.Now()) {
-		return session.Incarnation{}, errors.New("docker launch deadline expired")
-	}
 	r, err := p.load(l)
 	if os.IsNotExist(err) {
-		r = placementRecord{Version: recordVersion, ConfigDigest: p.digest, Launch: l, Execution: "spz-" + operationKey(l)[:32], InputDigest: fmt.Sprintf("%x", sha256.Sum256(data)), Phase: phaseCreating}
+		r = placementRecord{Version: recordVersion, ConfigDigest: p.digest, Launch: l, Execution: "spz-" + operationKey(l)[:32], InputDigest: fmt.Sprintf("%x", sha256.Sum256(data))}
+		if err = r.admit(evCreate, p.now()); err != nil {
+			return session.Incarnation{}, err
+		}
 		if err = p.retain(operationKey(l)+".input", data); err != nil {
 			return session.Incarnation{}, err
 		}
-		if err = p.save(r); err != nil {
+		if err = p.commit(&r, evCreate); err != nil {
 			return session.Incarnation{}, err
 		}
 	} else if err != nil {
@@ -195,16 +195,15 @@ func (p *Placement) prepare(ctx context.Context, l session.Launch, data []byte) 
 	if r.InputDigest != fmt.Sprintf("%x", sha256.Sum256(data)) {
 		return session.Incarnation{}, errors.New("docker prepare input changed")
 	}
-	if err = r.permit(opPrepare); err != nil {
+	if r.Phase == phasePrepared {
+		// The preparation already happened: replay its incarnation.
+		return p.incarnation(r)
+	}
+	if err = r.admit(evPrepared, p.now()); err != nil {
 		return session.Incarnation{}, err
 	}
-	if r.Phase == phaseCreating {
-		if err = p.drivePrepare(ctx, &r, data); err != nil {
-			return session.Incarnation{}, err
-		}
-	}
-	if r.Phase != phasePrepared {
-		return session.Incarnation{}, errors.New("docker operation cannot be prepared again")
+	if err = p.drivePrepare(ctx, &r, data); err != nil {
+		return session.Incarnation{}, err
 	}
 	return p.incarnation(r)
 }
@@ -264,10 +263,10 @@ func (p *Placement) resource(ctx context.Context, r *placementRecord, role strin
 	}
 	return p.engine.Start(ctx, **target)
 }
+
+// drivePrepare creates and configures a creating visit's containers. The
+// caller has admitted evPrepared.
 func (p *Placement) drivePrepare(ctx context.Context, r *placementRecord, data []byte) error {
-	if deadline.At(r.Launch.Deadline).Passed(time.Now()) {
-		return errors.New("docker preparation deadline expired")
-	}
 	if r.Volume == nil {
 		v, err := p.engine.EnsureVolume(ctx, r.Execution+"-workspace", r.Launch.AllocationID, p.config.VolumeBytes)
 		if err != nil {
@@ -315,7 +314,7 @@ func (p *Placement) drivePrepare(ctx context.Context, r *placementRecord, data [
 		signIn = api.SignInDirectory
 	}
 	contract := harness.NativeLaunch{SignInDirectory: signIn, Harness: p.config.Harness, Deadline: r.Launch.Deadline, ThreadID: r.Launch.ThreadID, Task: r.Launch.Task, Instructions: p.config.Instructions, InstructionDigest: p.config.InstructionDigest, Env: access.Env, Model: access.Model, Options: access.Options, Args: r.Launch.HarnessArgs, ClientConfig: access.ClientConfig, TrustBundlePEM: access.TrustBundlePEM, RolloutMaxBytes: harness.NativeRolloutMaxBytes, ProfileArchive: profile}
-	if err := contract.Validate(time.Now()); err != nil {
+	if err := contract.Validate(p.now()); err != nil {
 		return err
 	}
 	input, err := json.Marshal(contract)
@@ -329,8 +328,7 @@ func (p *Placement) drivePrepare(ctx context.Context, r *placementRecord, data [
 	if _, err = harness.DecodeNativeReply(output, harness.NativeConfigure, harness.NativePrepared, contract.ThreadID); err != nil {
 		return err
 	}
-	r.Phase = phasePrepared
-	return p.save(*r)
+	return p.commit(r, evPrepared)
 }
 func (p *Placement) incarnation(r placementRecord) (session.Incarnation, error) {
 	return r.incarnation()
@@ -391,18 +389,19 @@ func (p *Placement) Activate(ctx context.Context, l session.Launch, i session.In
 
 // activate retries only the exact retained intent. The same trusted authority
 // and fixed native launch gate are revalidated before recording activation.
+// An active visit already holds the outcome, so it replays without repeating
+// the side effects or consulting the deadline (ADR 0058).
 func (p *Placement) activate(ctx context.Context, r *placementRecord, i session.Incarnation) error {
-	if err := r.permit(opActivate); err != nil {
-		return err
+	if r.Phase == phaseActive {
+		return nil
 	}
-	if deadline.At(r.Launch.Deadline).Passed(time.Now()) {
-		return errors.New("docker activation deadline expired")
+	if err := r.admit(evActivate, p.now()); err != nil {
+		return err
 	}
 	if err := p.verify(ctx, *r); err != nil {
 		return err
 	}
-	r.Phase = phaseActivating
-	if err := p.save(*r); err != nil {
+	if err := p.commit(r, evActivate); err != nil {
 		return err
 	}
 	if err := p.authority.Activate(ctx, r.Launch, i); err != nil {
@@ -415,8 +414,7 @@ func (p *Placement) activate(ctx context.Context, r *placementRecord, i session.
 	if _, err = harness.DecodeInitialNativeReply(output, harness.NativeActivate, harness.NativeActive, r.Launch.ThreadID); err != nil {
 		return err
 	}
-	r.Phase = phaseActive
-	return p.save(*r)
+	return p.commit(r, evActivated)
 }
 
 func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Observation, error) {
@@ -446,7 +444,7 @@ func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Obse
 		return o, err
 	}
 	o.Launch, o.Incarnation = r.Launch, inc
-	if r.permit(opRecoverActivation) == nil {
+	if r.Phase == phaseActivating {
 		// An activation interrupted after its record was saved is completed
 		// from the same retained intent rather than reported as prepared.
 		if err = p.activate(ctx, &r, inc); err != nil {
@@ -529,16 +527,15 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	}
 	// An aborting or aborted visit has no new move checkpoint, and a
 	// preparation is cancelled rather than stopped.
-	if err = r.permit(opStop); err != nil {
-		return session.Stopped{}, err
-	}
 	if r.Phase == phaseStopped {
 		// The stop is durable; removal failure is retried by the next call.
 		_ = p.release(ctx, &r)
 		return p.stopped(r)
 	}
-	r.Phase = phaseStopping
-	if err = p.save(r); err != nil {
+	if err = r.admit(evStop, p.now()); err != nil {
+		return session.Stopped{}, err
+	}
+	if err = p.commit(&r, evStop); err != nil {
 		return session.Stopped{}, err
 	}
 	// Preserve admitted capability work while input is gated and the native turn
@@ -585,8 +582,7 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 			return session.Stopped{}, err
 		}
 	}
-	r.Phase = phaseStopped
-	if err = p.save(r); err != nil {
+	if err = p.commit(&r, evStopped); err != nil {
 		return session.Stopped{}, err
 	}
 	// Retain every receipt and checkpoint before asking the helper to unmount.
@@ -627,11 +623,7 @@ func (p *Placement) Abort(ctx context.Context, l session.Launch, i session.Incar
 
 func (p *Placement) abort(ctx context.Context, r placementRecord, i session.Incarnation) (session.Observation, error) {
 	o := session.Observation{Launch: r.Launch, Incarnation: i, State: session.PlacementUnknown}
-	// A preparation that never completed is cancelled by AbortPreparation.
-	err := r.permit(opAbort)
-	if err != nil {
-		return o, err
-	}
+	var err error
 	if r.Phase == phaseStopped || r.Phase == phaseAborted {
 		// A retained receipt cannot substitute for current exact writer evidence.
 		// Only this placement's own recorded removal replaces that evidence.
@@ -650,8 +642,11 @@ func (p *Placement) abort(ctx context.Context, r placementRecord, i session.Inca
 		o.State, o.Stopped = session.PlacementStopped, &s
 		return o, err
 	}
-	r.Phase = phaseAborting
-	if err = p.save(r); err != nil {
+	// A preparation that never completed is cancelled by AbortPreparation.
+	if err = r.admit(evAbort, p.now()); err != nil {
+		return o, err
+	}
+	if err = p.commit(&r, evAbort); err != nil {
 		return o, err
 	}
 	if err = p.authority.Revoke(ctx, r.Launch, i); err != nil {
@@ -671,8 +666,7 @@ func (p *Placement) abort(ctx context.Context, r placementRecord, i session.Inca
 	// Cancellation does not depend on a completed native turn or a fresh artifact.
 	// Missing accounting is explicit; never turn it into zero consumption.
 	_ = p.seal(ctx, &r, i)
-	r.Phase = phaseAborted
-	if err = p.save(r); err != nil {
+	if err = p.commit(&r, evAborted); err != nil {
 		return o, err
 	}
 	s, err := p.stopped(r)
@@ -707,9 +701,6 @@ func (p *Placement) fenced(ctx context.Context, r placementRecord) error {
 // or a cancelled preparation that never granted authority. Usage that is still
 // unknown keeps the containers so a later Abort can retry sealing.
 func (r placementRecord) releasable() bool {
-	if r.permit(opRelease) != nil {
-		return false
-	}
 	switch r.Phase {
 	case phaseStopped, phaseAborted:
 		return r.ActualStopped && r.Receipt != nil
@@ -776,12 +767,10 @@ func (p *Placement) AbortPreparation(ctx context.Context, l session.Launch) erro
 	if err != nil {
 		return err
 	}
-	if err = r.permit(opAbortPreparation); err != nil {
-		return err
-	}
+	// A creating record becomes preparation-aborting; a prepared or later one
+	// is handed to Abort below.
 	if r.Phase == phaseCreating {
-		r.Phase = phasePreparationAborting
-		if err = p.save(r); err != nil {
+		if err = p.commit(&r, evAbortPreparation); err != nil {
 			return err
 		}
 	}
@@ -880,9 +869,9 @@ func (p *Placement) Attach(ctx context.Context, l session.Launch, i session.Inca
 		unlock()
 		return err
 	}
-	if r.Phase != phaseActive || deadline.At(r.Launch.Deadline).Passed(time.Now()) {
+	if err = r.admit(evAttach, p.now()); err != nil {
 		unlock()
-		return errors.New("docker attachment is not active")
+		return fmt.Errorf("docker attachment is not active: %w", err)
 	}
 	if err = p.verify(ctx, r); err != nil {
 		unlock()
@@ -958,7 +947,7 @@ func (p *Placement) recordExit(ctx context.Context, r *placementRecord, i sessio
 	default:
 		// No report, or a supervisor told to stop: the host's own deadline
 		// stop sends that signal.
-		r.Exited.Deadline = deadline.At(r.Launch.Deadline).Passed(time.Now())
+		r.Exited.Deadline = deadline.At(r.Launch.Deadline).Passed(p.now())
 	}
 	if harness.ProvesCompletion(r.Launch.Harness) && r.thread() == "" && report.Thread != "" {
 		if err := p.authority.BindNative(ctx, r.Launch, i, report.Thread); err != nil {
@@ -1033,7 +1022,7 @@ func (p *Placement) Exited(ctx context.Context, l session.Launch, i session.Inca
 	if err != nil {
 		return false, err
 	}
-	if state.Running && deadline.At(r.Launch.Deadline).Passed(time.Now()) {
+	if state.Running && deadline.At(r.Launch.Deadline).Passed(p.now()) {
 		// The supervisor ends its harness at the deadline, but its timer can
 		// run late after the host slept; the host's clock decides.
 		if err = p.engine.Stop(ctx, *r.Agent); err != nil {

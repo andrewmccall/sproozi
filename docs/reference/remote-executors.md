@@ -95,6 +95,84 @@ newer than this Sproozi, so update Sproozi and restart its service`. A service
 too old to know `turn_pending` reports `profile: invalid response` instead and
 records `unknown-stop`; update the service, then `recover` resumes the stop.
 
+### Cancelling a preparation
+
+`abort-preparation` cancels a visit whose `prepare` never answered with an
+incarnation, for example because its run waits under a concurrency cap. The
+request carries only the launch, as `inspect` does; an incarnation or a
+checkpoint is `invalid_request`. It is authorized like every placement
+action and is never `expired`: cancelling is accepted after the deadline.
+Success means no agent for that launch runs or can start; the answer has no
+fields besides `version`. One request waits at most 30 seconds once no
+other operation on the same visit holds it, under the service's 2-minute
+wait for it ([request timeouts](#request-timeouts-and-dropped-connections)); a Pod that uses its whole termination grace is seen to
+stop only by a later request. If the executor cannot prove the abort
+by then, because the controller has not ended the cancelled run or a Pod's
+agent container has not been seen to stop, it answers `503 unavailable`.
+The session stays `unknown-stop`, and `recover` sends the same request
+again, which resumes the abort. It answers `409 conflict` for a visit that
+may already have run (active, stopping or stopped), and when an
+administrator deleted the visit's registration or replaced its run
+([session commands](session-commands.md#status-and-listing-output)).
+
+| Service | Executor | What happens |
+| --- | --- | --- |
+| This release | This release | `abort-preparation`; the session ends `cancelled`. |
+| This release | Older | The executor answers `404 invalid_request`. The service inspects the visit as before: one never registered is `cancelled`, one already prepared is aborted, one active or in an unknown state is refused as not a preparation, and one still preparing stays `unknown-stop` with `the remote executor cannot abort a preparation that has not reported its Pod; it is older than this Sproozi`. Update the executor, then `recover`. |
+| Older | This release | The service never sends `abort-preparation`; nothing changes. |
+
+## Request timeouts and dropped connections
+
+Each request waits as long as the executor may take over it, plus a minute for
+the answer to arrive
+([ADR 0036](../adr/0036-remote-executors-through-kubeconfig-contexts.md#amendment-a-stop-outlives-its-request-2026-11-16)).
+
+| Request | The executor takes at most | The client waits |
+| --- | --- | --- |
+| Placement `stop`; owner `stop` and `recover` | 9 minutes 43 seconds: two 2-minute waits for a first visit's conversation and turn, the supervisor's 30-second wait for the agent to quit, 3 seconds after killing one that did not, and 10 seconds for its reply to be read ([native control](native-control.md)), then 5 minutes to end the container (at most 1 minute), seal usage and capture the checkpoint | 10 minutes 43 seconds |
+| Placement `prepare` | 2 minutes for an interactive visit's Pod to run, plus sending and restoring the checkpoint | 8 minutes |
+| Placement `abort`; owner `cancel` | The Pod's termination grace period, 30 seconds by default, and sealing usage | 2 minutes |
+| Placement `abort-preparation` | 30 seconds once no other operation on the same visit holds it ([cancelling a preparation](#cancelling-a-preparation)) | 2 minutes |
+| Everything else, and the wait for an `attach` to be admitted | A few API calls | 45 seconds |
+
+A stop still waiting for the turn answers `turn_pending` about two minutes
+after it asked (four for a first visit), well inside the client's wait.
+
+When the connection drops or the client gives up during a stop, because the
+laptop closed, the port-forward broke or the user pressed Ctrl-C, the executor
+carries the stop on to its outcome, for at most the time in the table. The
+session meanwhile reads `unknown-stop` at home, or `stopping` on the
+executor. Repeat `stop`, or run `recover`, with the same operation: the retry
+waits for the stop in progress and returns its result, the same checkpoint an
+uninterrupted stop keeps. `stop --remote` does this by itself after up to
+three dropped connections in a row. `cancel` still interrupts the stop at
+once. Other requests end with their connection and are retried the same way;
+none loses state. A load balancer in front of the API server that cuts idle
+connections (often after four minutes) can end a stop's request early in the
+same way: the stop still finishes on the executor.
+
+### Restarts and rollouts
+
+On `SIGTERM` the executor stops accepting requests, gives those in flight 10
+seconds and closes their connections, attachments included. It then waits up
+to 9 minutes 43 seconds for the stops it carries on and refuses new ones,
+interrupts any still running, waits up to 15 seconds for them to return, and
+exits. For a stop in flight at a rollout to finish, set the executor Pod's
+`terminationGracePeriodSeconds` above 608 seconds; the
+[examples](../../examples/portable-workflows/kubernetes/owner.yaml) set 620.
+With less, the kubelet kills the executor at the grace period. That is
+safe, since nothing half-written is kept, but like an interrupted stop it
+loses the reply of an agent's stop in flight: a Claude Code visit then keeps
+the checkpoint it started from, and a Codex visit records an exit. The
+executor logs `Interrupted stops still running after … at shutdown; repeat
+each stop to finish it` when it had to interrupt any, and `Exited without
+closing the placement: …` when one still ran 15 seconds later.
+
+Stops of one visit with the same launch and incarnation share one run: a
+repeated stop while one runs gets that one's answer. An abort that names
+another incarnation answers `conflict` only once the visit's stop ends, which
+can be after home's two-minute wait for an abort.
+
 ## Interactive sessions
 
 The executor owns the sessions it starts, tasks and interactive sessions alike
@@ -113,7 +191,8 @@ Codex and Claude Code on one cluster are two executors, one per namespace
 Owner requests are `POST` to `/work/ACTION` with a JSON body, over the same
 TLS connection as the placement protocol, and answer JSON: the session's
 status, or `{"error":"CODE"}` with the codes and HTTP statuses
-[above](#placement-outcomes) (`turn_pending` excepted).
+[above](#placement-outcomes) (`turn_pending` excepted), or one of the codes
+of a [full executor](#retention).
 
 | Action | Body | Answer |
 | --- | --- | --- |
@@ -121,6 +200,7 @@ status, or `{"error":"CODE"}` with the codes and HTTP statuses
 | `stop` | `id`, `operationId` | The session after a graceful stop that waits for the current turn: `retained`, or `failed` when the agent exited with a failure. `stopping`, with a `problem`, while it still waits; repeat the request with the same operation, or `cancel`. |
 | `resume` | `id`, `operationId`, optional `maxDuration` | The session with a new execution (`executionId`) that continues from the last checkpoint, or from the starting workspace when it stopped before any conversation. |
 | `attach` | One line `{"id":"..."}`, then terminal frames | A stream of terminal frames (below). |
+| `remove` | `id`, optional `pullFinished` | `{"id":"..."}` once the executor keeps nothing of the session ([removing sessions](#removing-sessions)). Tasks too. |
 | `cancel`, `recover`, `info`, `list` | as for tasks | as for tasks |
 
 Each `operationId` is a UUID the caller keeps for retries: repeating a `stop`
@@ -178,6 +258,79 @@ before either. Ending an attachment never stops the session.
 
 `attach` answers `conflict` before streaming when the session is not
 `active`, and `unsupported` when the server cannot stream both ways.
+
+### Retention
+
+`retainedBytes` bounds what the executor keeps under `directory/work` and
+`directory/sessions`; 1024 bounds its sessions. Only admitting new work
+checks them: a submission (`run`, with or without an upload) and a `resume`.
+Admission reserves what the work may still come to keep, `maxCheckpointBytes`
+each: a submission its input workspace and its checkpoint, a resume its
+checkpoint, since it starts from one the executor already keeps. It is
+refused while what is kept, plus the reservations of every session not yet
+`retained`, `failed`, `cancelled`, `exporting` or `pulled` (two for one whose
+first visit has not started, one after), plus its own, would exceed
+`retainedBytes`. A running interactive session therefore reserves a
+checkpoint until it stops. A stop, a cancellation and a task's completion are
+never refused for space: what they keep was reserved, and refusing them would
+lose work.
+
+Outside the bound: removal marks (below), and scratch space. Validating an
+upload before admission, and capturing a revision or an empty workspace for
+a task after it, each write up to `maxCheckpointBytes` under
+`directory/work` and delete it when done; a concurrent admission counts that
+as kept, but the volume may briefly hold that much beyond `retainedBytes`.
+
+At the smallest `retainedBytes`, twice `maxCheckpointBytes`, a submission is
+admitted only when the executor keeps nothing, so it keeps one session, and a
+resume only when that session's workspace, checkpoint and metadata fit in one
+`maxCheckpointBytes`: a larger session can be removed but not resumed there.
+
+| Code | HTTP status | Meaning |
+| --- | --- | --- |
+| `sessions_full` | 507 | The executor keeps 1024 sessions. Remove some, then retry. |
+| `retention_full` | 507 | What the executor keeps and has reserved leaves no room for this submission or resume. Remove sessions, stop running ones, or raise `retainedBytes`, then retry. |
+| `executions_full` | 507 | A `resume` of a session that has had 256 executions. Pull it, or start new work. |
+| `operations_full` | 507 | A `stop` or `resume` of a session with 1024 bound operations. Cancel it, or pull it once stopped. |
+
+Nothing changed when any of these answers, and repeating the request does
+not help until something changes. Hermes reads the same text from
+`sproozi_run`. A Sproozi older than these codes reports them as
+`unavailable`.
+
+### Removing sessions
+
+`remove` deletes a session the executor no longer needs: its record, its
+executions' journals, and the workspaces, checkpoints and profiles no other
+session names. Profiles the placement keeps by digest stay. Only the home
+principal removes; the work token gets `403`. The body is `id`, the
+session's, and `pullFinished`, which a pulled session needs.
+
+| Phase | `remove` |
+| --- | --- |
+| `retained`, `failed`, `cancelled` | Removed. |
+| `pulled` | Removed when `pullFinished` is `true`, otherwise `conflict`. Once removed, the executor answers neither `info` nor `claim` for it, so a home whose claim reply was lost could never finish its pull. `sproozi rm ID --remote` sends it only after this machine's service reports the session as its own. |
+| `preparing`, `activating`, `active`, `stopping` | `conflict`: wait for it to start or finish, or cancel it; an interactive session can also be stopped. A task is `active` while its turn runs and `stopping` only while its answer is recorded. |
+| `unknown-stop`, `unknown-usage`, `cancelling` | `conflict`: `recover` it first. |
+| `exporting` | `conflict`: finish the pull first. |
+| Any, while a session whose first visit has not started names it in `workspaceFrom` | `conflict`: that session's start reads this one's checkpoint. Wait for it to start, or cancel it. |
+| A version 1 record (`retained`, `cancelled`, `pulled`) | Removed with the checkpoint it kept, `pulled` with `pullFinished`; `exporting` answers `conflict`. |
+
+A removed session leaves a mark of about 50 bytes, outside `retainedBytes`
+and the session count, so its ID never starts again: a `run` that repeats its
+`requestId` answers `conflict`, and so does a `run` whose `workspaceFrom`
+names it. Removing it again answers `{"id":"..."}`. An ID the executor never
+held answers `invalid_request`.
+
+Removal does not wait for other sessions: it takes only the removed
+session's executions, and waits at most five seconds for an operation on one
+of them before it answers `unavailable`; repeat it. The mark is written
+first, then the journals and the record go, and the mark shrinks last; after
+a crash the executor finishes the removal before it starts any session. A
+removal it cannot finish is logged (`Could not finish removing work session
+ID`) and the executor starts anyway; the session is not listed or run, and
+`remove` retries it. A pulled session can be removed only while the machine
+that pulled it still holds it: remove the cluster's record first.
 
 ### Agents that exit by themselves
 

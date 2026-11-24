@@ -274,6 +274,10 @@ type fileRenameInfo struct {
 	FileName       [1]uint16
 }
 
+// SyncDir makes the directory's entries durable. Windows offers no directory
+// flush; NTFS journals its metadata, so it does nothing.
+func SyncDir(string) error { return nil }
+
 func replaceFile(temp, target, _ string) error {
 	to, err := nativePath(target)
 	if err != nil {

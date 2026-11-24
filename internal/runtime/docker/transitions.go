@@ -3,24 +3,21 @@ package docker
 import (
 	"fmt"
 	"slices"
+	"time"
 
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/session"
 )
 
 // dockerPhase is where a Docker placement record is in its lifecycle. The
-// record declares its phases, the operations each accepts and the flags each
-// may carry (ADR 0058):
+// record declares its phases, the events that move it (placementTransitions)
+// and the flags each phase may carry (ADR 0058).
 //
-//	(none) --Prepare--> creating --configured--> prepared
-//	prepared|activating|active --Activate--> activating --native active--> active
-//	activating --Inspect--> active (an interrupted activation is completed)
-//	prepared|activating|active|stopping --Stop--> stopping --sealed--> stopped
-//	prepared|activating|active|stopping|aborting --Abort--> aborting --fenced--> aborted
-//	creating --AbortPreparation--> preparation-aborting
-//
-// Stop of a stopped record, and Abort of a stopped or aborted one, replay the
-// retained result. Removing and Removed are an ordered release sub-machine on
-// top of stopped, aborted and preparation-aborting.
+// An operation on a record that already holds its outcome replays it without
+// an event: Prepare of a prepared record, Activate of an active one, Stop of a
+// stopped one and Abort of a stopped or aborted one. Removing and Removed are
+// an ordered release sub-machine on top of stopped, aborted and
+// preparation-aborting.
 type dockerPhase string
 
 const (
@@ -33,45 +30,109 @@ const (
 	phaseAborting            dockerPhase = "aborting"
 	phaseAborted             dockerPhase = "aborted"
 	phasePreparationAborting dockerPhase = "preparation-aborting"
+
+	// phaseNone is the phase before Prepare retains a record.
+	phaseNone dockerPhase = ""
 )
 
 var dockerPhases = []dockerPhase{phaseCreating, phasePrepared, phaseActivating, phaseActive, phaseStopping,
 	phaseStopped, phaseAborting, phaseAborted, phasePreparationAborting}
 
-// placementOp names an operation checked against placementTransitions.
-type placementOp string
+// placementEvent is a request to the placement or the outcome of its work.
+type placementEvent string
 
 const (
-	opPrepare           placementOp = "Prepare"
-	opActivate          placementOp = "Activate"
-	opRecoverActivation placementOp = "Inspect activation"
-	opStop              placementOp = "Stop"
-	opAbort             placementOp = "Abort"
-	opAbortPreparation  placementOp = "AbortPreparation"
-	opRelease           placementOp = "release"
+	// evCreate retains a new visit's record.
+	evCreate placementEvent = "create"
+	// evPrepared: the containers exist and the native supervisor is configured.
+	evPrepared placementEvent = "prepared"
+	// evActivate begins, or after an interruption resumes, activation.
+	evActivate placementEvent = "activate"
+	// evActivated: the grant and the native gate are active.
+	evActivated placementEvent = "activated"
+	// evAttach connects a terminal to the active visit; the phase stays.
+	evAttach placementEvent = "attach"
+	// evStop begins, or resumes, a graceful stop.
+	evStop placementEvent = "stop"
+	// evStopped: the writer is fenced, its usage sealed and its checkpoint kept.
+	evStopped placementEvent = "stopped"
+	// evAbort begins, or resumes, a cancellation of a prepared or later visit.
+	evAbort placementEvent = "abort"
+	// evAborted: the writer is fenced; its usage is sealed when it could be.
+	evAborted placementEvent = "aborted"
+	// evAbortPreparation cancels, or resumes cancelling, a preparation that
+	// never completed.
+	evAbortPreparation placementEvent = "abort-preparation"
 )
 
-// placementTransitions lists the phases each operation accepts. Every
-// operation checks it under the visit's operation lock before changing
-// anything; a phase missing here is an explicit refusal.
-var placementTransitions = map[placementOp][]dockerPhase{
-	opPrepare:           {phaseCreating, phasePrepared},
-	opActivate:          {phasePrepared, phaseActivating, phaseActive},
-	opRecoverActivation: {phaseActivating},
-	opStop:              {phasePrepared, phaseActivating, phaseActive, phaseStopping, phaseStopped},
-	opAbort:             {phasePrepared, phaseActivating, phaseActive, phaseStopping, phaseAborting, phaseStopped, phaseAborted},
-	// AbortPreparation accepts every phase: it moves a creating record to
-	// preparation-aborting and hands a prepared or later one to Abort.
-	opAbortPreparation: dockerPhases,
-	opRelease:          {phaseStopped, phaseAborted, phasePreparationAborting},
+// placementRule is what an event may do.
+type placementRule struct {
+	// refusedAfterDeadline: the event starts or extends work, so it is not
+	// attempted once the launch's deadline has passed. A launch without a
+	// deadline refuses nothing (ADR 0056).
+	refusedAfterDeadline bool
+	// to maps each phase the event may happen in to the phase it leads to.
+	to map[dockerPhase]dockerPhase
 }
 
-// permit refuses op from a phase its table entry leaves out.
-func (r placementRecord) permit(op placementOp) error {
-	if !slices.Contains(placementTransitions[op], r.Phase) {
-		return fmt.Errorf("docker placement: %s refused from phase %s", op, r.Phase)
+// placementTransitions declares every phase change the placement makes.
+// Inspect resumes an interrupted activation with the same events as Activate.
+var placementTransitions = map[placementEvent]placementRule{
+	evCreate:    {refusedAfterDeadline: true, to: map[dockerPhase]dockerPhase{phaseNone: phaseCreating}},
+	evPrepared:  {refusedAfterDeadline: true, to: map[dockerPhase]dockerPhase{phaseCreating: phasePrepared}},
+	evActivate:  {refusedAfterDeadline: true, to: map[dockerPhase]dockerPhase{phasePrepared: phaseActivating, phaseActivating: phaseActivating}},
+	evActivated: {to: map[dockerPhase]dockerPhase{phaseActivating: phaseActive}},
+	evAttach:    {refusedAfterDeadline: true, to: map[dockerPhase]dockerPhase{phaseActive: phaseActive}},
+	evStop: {to: map[dockerPhase]dockerPhase{
+		phasePrepared: phaseStopping, phaseActivating: phaseStopping, phaseActive: phaseStopping, phaseStopping: phaseStopping}},
+	evStopped: {to: map[dockerPhase]dockerPhase{phaseStopping: phaseStopped}},
+	evAbort: {to: map[dockerPhase]dockerPhase{
+		phasePrepared: phaseAborting, phaseActivating: phaseAborting, phaseActive: phaseAborting, phaseStopping: phaseAborting,
+		phaseAborting: phaseAborting}},
+	evAborted: {to: map[dockerPhase]dockerPhase{phaseAborting: phaseAborted}},
+	evAbortPreparation: {to: map[dockerPhase]dockerPhase{
+		phaseCreating: phasePreparationAborting, phasePreparationAborting: phasePreparationAborting}},
+}
+
+// admit checks, before the placement attempts ev's side effect, that ev may
+// happen in r's phase and, for an event that starts work, that the launch's
+// deadline has not passed at now.
+func (r placementRecord) admit(ev placementEvent, now time.Time) error {
+	rule := placementTransitions[ev]
+	if _, ok := rule.to[r.Phase]; !ok {
+		return refused(r.Phase, ev)
+	}
+	if rule.refusedAfterDeadline && deadline.At(r.Launch.Deadline).Passed(now) {
+		return fmt.Errorf("docker placement: %s refused after the launch deadline", ev)
 	}
 	return nil
+}
+
+// apply records ev: it moves r to the phase placementTransitions declares, or
+// refuses an undeclared transition and leaves r unchanged. It is the only
+// place a placement record's phase changes; save then validates the record.
+func (r *placementRecord) apply(ev placementEvent) error {
+	to, ok := placementTransitions[ev].to[r.Phase]
+	if !ok {
+		return refused(r.Phase, ev)
+	}
+	r.Phase = to
+	return nil
+}
+
+func refused(from dockerPhase, ev placementEvent) error {
+	if from == phaseNone {
+		return fmt.Errorf("docker placement: %s refused without a record", ev)
+	}
+	return fmt.Errorf("docker placement: %s refused from phase %s", ev, from)
+}
+
+// commit applies ev and saves the record.
+func (p *Placement) commit(r *placementRecord, ev placementEvent) error {
+	if err := r.apply(ev); err != nil {
+		return err
+	}
+	return p.save(*r)
 }
 
 // Stopping has three sub-states that decide what the stop retains: a visit

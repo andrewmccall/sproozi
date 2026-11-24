@@ -37,6 +37,54 @@ const (
 	actionAbort    = "abort"
 	actionAttach   = "attach"
 	actionDescribe = "describe"
+	// actionAbortPreparation fences a launch whose preparation never
+	// reported an incarnation. An executor older than this action answers
+	// 404 invalid_request, as for any unknown action.
+	actionAbortPreparation = "abort-preparation"
+)
+
+// How long the executor and its client take over each placement action (ADR
+// 0036, amendment of 2026-11-16). A stop's graceful handoff lasts at most
+// stopHandoffBound: a first visit waits up to harness.NativeQuiesceWait for
+// its conversation ID and as long again for its turn (ADR 0035), then the
+// supervisor waits harness.NativeQuitWait for the harness to exit after its
+// quit, harness.NativeForcedStopWait after killing it, and
+// harness.NativeQuiesceReplyGrace for its reply to be read.
+// What follows (revoking the grant, the container ending, sealing usage,
+// capturing and recording the checkpoint) gets stopSettleBound. The executor
+// carries a stop on for StopBound after its request ends; the client waits
+// answerMargin longer than an executor may take, so even an answer at the
+// bound arrives.
+const (
+	stopHandoffBound = 2*harness.NativeQuiesceWait + harness.NativeQuitWait + harness.NativeForcedStopWait +
+		harness.NativeQuiesceReplyGrace
+	stopSettleBound = 5 * time.Minute
+	// StopBound is how long an executor carries one stop on, whether or not
+	// its request is still there to read the answer.
+	StopBound    = stopHandoffBound + stopSettleBound
+	answerMargin = time.Minute
+	// interactivePodWait is how long a preparation waits for an interactive
+	// visit's Pod to run; sending and restoring its checkpoint gets five
+	// minutes more.
+	interactivePodWait = 2 * time.Minute
+	prepareWait        = interactivePodWait + 5*time.Minute + answerMargin
+	// abortWait covers the Pod's termination grace period, 30 seconds by
+	// default, and sealing usage; for abort-preparation, the Kubernetes
+	// placement's 30-second bound once it holds the visit's lock.
+	abortWait = 2 * time.Minute
+	stopWait  = StopBound + answerMargin
+	// defaultTimeout bounds every other request, and the wait for an
+	// attachment to be admitted.
+	defaultTimeout = 45 * time.Second
+	// ShutdownRequestGrace is how long an executor shutting down gives the
+	// requests in flight before it closes their connections and drains the
+	// stops it carries on, for up to StopBound and then DrainTail. An
+	// executor Pod's terminationGracePeriodSeconds must exceed their sum for
+	// a stop in flight at a rollout to finish.
+	ShutdownRequestGrace = 10 * time.Second
+	// DrainTail bounds the wait, after a drain interrupted the stops still
+	// running, for them to let go of their locks.
+	DrainTail = 15 * time.Second
 )
 
 // Code describes a stable transport outcome. Unavailable never means absence.
@@ -53,7 +101,26 @@ const (
 	// changed, the writer runs with input gated and repeating the stop waits
 	// again. Only a stop answers with it, together with what it waits for.
 	CodeTurnPending Code = "turn_pending"
+	// CodeSessionsFull and CodeRetentionFull are a remote executor's owner
+	// refusing to start or resume work because it keeps as many sessions,
+	// or as many bytes, as it may. Nothing changed; removing sessions or
+	// raising the bound makes room. Only the owner protocol uses them.
+	CodeSessionsFull  Code = "sessions_full"
+	CodeRetentionFull Code = "retention_full"
+	// CodeExecutionsFull and CodeOperationsFull are a remote executor's owner
+	// refusing a resume or stop because one session already has as many
+	// executions, or bound owner operations, as it may. Nothing changed, and
+	// repeating the request never helps.
+	CodeExecutionsFull Code = "executions_full"
+	CodeOperationsFull Code = "operations_full"
 )
+
+// OwnerFull reports a remote executor's owner refusing work because a bound
+// was reached: nothing changed, so the request is not repeated.
+func OwnerFull(code Code) bool {
+	return code == CodeSessionsFull || code == CodeRetentionFull || code == CodeExecutionsFull ||
+		code == CodeOperationsFull
+}
 
 // waitingMax bounds what a turn_pending answer says the stop waits for.
 const waitingMax = 160

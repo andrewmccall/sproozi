@@ -54,31 +54,93 @@ func (s *Service) Stop(ctx context.Context, id, operation string) (Status, error
 	if err = s.bindCatalogOperation(&r, operation, catalogOperation{Action: ActionStop, Execution: r.Current}); err != nil {
 		return Status{}, err
 	}
-	stopped, err := s.stopExecution(ctx, r.Current, operation)
+	execution, err := s.coordinator.Finalize(ctx, r.Current, operation)
 	if err != nil {
 		return Status{}, err
 	}
-	if stopped.CheckpointDigest != "" {
-		if err = s.retainCatalogArtifact(stopped.Checkpoint, stopped.CheckpointDigest); err != nil {
-			return Status{}, err
-		}
-	}
-	r.Committed = stopped
-	r.Current = ""
-	if err = s.saveCatalog(r); err != nil {
+	if err = s.retire(&r, execution); err != nil {
 		return Status{}, err
 	}
 	return s.catalogStatus(r)
 }
 
-// stopExecution finalizes an execution and returns its last stopped visit with
-// the execution's committed checkpoint.
-func (s *Service) stopExecution(ctx context.Context, id, operation string) (session.Stopped, error) {
-	r, err := s.coordinator.Finalize(ctx, id, operation)
+// retire commits what a session keeps from its current execution once that
+// execution is idle, and saves the session as stopped. The caller holds the
+// session's lock.
+func (s *Service) retire(r *localSession, execution session.Record) error {
+	stopped, err := s.settledStop(*r, execution)
 	if err != nil {
-		return session.Stopped{}, err
+		return err
 	}
-	return s.lastStop(r)
+	// A stop the session already kept has its artifact retained.
+	if stopped.CheckpointDigest != "" && stopped.CheckpointDigest != r.Committed.CheckpointDigest {
+		if err = s.retainCatalogArtifact(stopped.Checkpoint, stopped.CheckpointDigest); err != nil {
+			return err
+		}
+	}
+	r.Committed = stopped
+	r.Current = ""
+	return s.saveCatalog(*r)
+}
+
+// retireSettled retires the session's current execution if it is idle and
+// not cancelled: a recovery finished its stop, or its deadline ended its start
+// or move (ADR 0060). Anything else stays current. The caller holds the
+// session's lock.
+func (s *Service) retireSettled(r *localSession) error {
+	if r.Current == "" {
+		return nil
+	}
+	execution, err := s.coordinator.Inspect(r.Current)
+	if err != nil || execution.Phase != session.PhaseIdle || execution.CancelOperation != "" {
+		return err
+	}
+	return s.retire(r, execution)
+}
+
+// retireSettledSession is retireSettled for a session the caller has locked
+// by ID; an execution without a session has nothing to retire.
+func (s *Service) retireSettledSession(id string) error {
+	if id == "" {
+		return nil
+	}
+	r, err := s.readCatalog(id)
+	if err != nil {
+		return err
+	}
+	return s.retireSettled(&r)
+}
+
+// endLate ends the session's current start or move once its deadline has
+// passed and retires the idle execution, so resume can continue the session
+// from what it kept (ADR 0060). A destination that did become active stays
+// current. The caller holds the session's lock.
+func (s *Service) endLate(ctx context.Context, r *localSession) error {
+	execution, err := s.coordinator.Inspect(r.Current)
+	if err != nil {
+		return err
+	}
+	if execution.Phase.Starting() && execution.CancelOperation == "" && s.coordinator.PastDeadline(execution) {
+		if _, err = s.coordinator.Recover(ctx, execution.ID); err != nil && !errors.Is(err, session.ErrDeadlinePassed) {
+			return err
+		}
+	}
+	return s.retireSettled(r)
+}
+
+// settledStop is what a session keeps from an idle execution: its last
+// stopped visit and checkpoint. An execution whose deadline ended its first
+// visit before any visit ran leaves the session's earlier stop, or, for a
+// session whose first execution never ran, the workspace it was started
+// from, which resume restores.
+func (s *Service) settledStop(r localSession, execution session.Record) (session.Stopped, error) {
+	switch {
+	case len(execution.Visits) != 0:
+		return s.lastStop(execution)
+	case r.Committed.Launch.ExecutionID != "":
+		return r.Committed, nil
+	}
+	return session.Stopped{Launch: *execution.Operations[0].Launch}, nil
 }
 
 // lastStop is an idle execution's last stopped visit with the execution's

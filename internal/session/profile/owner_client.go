@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/andrewmccall/sproozi/internal/agentprofile"
 )
@@ -16,7 +17,7 @@ import (
 // remote work catalogue. It cannot select a different origin or arbitrary path.
 func (c *Client) CallOwner(ctx context.Context, action string, input, output any) error {
 	switch action {
-	case "run", "info", "list", "begin", "claim", "cancel", "recover", "stop", "resume":
+	case "run", "info", "list", "begin", "claim", "cancel", "recover", "stop", "resume", "remove":
 	default:
 		return errors.New("profile: unsupported owner action")
 	}
@@ -36,11 +37,12 @@ func (c *Client) CallOwner(ctx context.Context, action string, input, output any
 	}
 	r.Header.Set(headerAuthorization, bearerPrefix+c.token)
 	r.Header.Set(headerContentType, jsonMedia)
-	response, err := c.http.Do(r)
+	response, release, err := c.do(r, ownerWait(action))
 	if err != nil {
 		return fmt.Errorf("%s: %w", OwnerOutcomeMessage(CodeUnavailable),
 			&RemoteError{Code: CodeUnavailable, Transport: err})
 	}
+	defer release()
 	defer func() { _ = response.Body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(response.Body, c.maxBody+1))
 	if err != nil || int64(len(data)) > c.maxBody {
@@ -65,6 +67,19 @@ func (c *Client) CallOwner(ctx context.Context, action string, input, output any
 		return ownerFailure(CodeUnavailable, response.StatusCode)
 	}
 	return nil
+}
+
+// ownerWait is how long an owner action may take on the executor: a stop, or
+// a recovery that continues one, as long as a placement stop; a cancellation
+// as long as an abort. It is zero for a short action.
+func ownerWait(action string) time.Duration {
+	switch action {
+	case "stop", "recover":
+		return stopWait
+	case "cancel":
+		return abortWait
+	}
+	return 0
 }
 
 // OpenOwnerAttachment attaches to an interactive session the remote work
@@ -154,13 +169,30 @@ func OwnerOutcomeMessage(code Code) string {
 		return "Work execution expired; inspect retained status before submitting fresh work"
 	case CodeUnsupported:
 		return "Work continuity is incompatible; check harness support and the retained checkpoint before retrying"
+	case CodeSessionsFull:
+		return "Remote executor full: it keeps its maximum number of sessions; remove sessions you no longer need " +
+			"with \"sproozi rm ID --remote\", then retry"
+	case CodeRetentionFull:
+		return "Remote executor full: what it keeps, plus the room its unfinished sessions and this request may " +
+			"still need, would exceed its retainedBytes; remove sessions you no longer need with " +
+			"\"sproozi rm ID --remote\", stop running ones, or raise retainedBytes, then retry"
+	case CodeExecutionsFull:
+		return "This session has run its maximum number of executions, so it cannot be resumed again there; " +
+			"bring it to this machine with \"sproozi pull ID\", or start new work"
+	case CodeOperationsFull:
+		return "This session has used its maximum number of stop and resume operations; cancel it, or bring it " +
+			"to this machine with \"sproozi pull ID\" once it is stopped"
 	default:
 		return "Work owner unavailable; restore connectivity or owner storage, then inspect status and retry with the same operation UUID"
 	}
 }
 
 // ownerErrorStatus accepts a work outcome; turn_pending is a placement stop's
-// answer only, so the owner never uses it.
+// answer only, so the owner never uses it, and only the owner answers that
+// it is full.
 func ownerErrorStatus(code Code, status int) bool {
+	if OwnerFull(code) {
+		return status == http.StatusInsufficientStorage
+	}
 	return code != CodeTurnPending && errorResponse(response{Error: code}, status)
 }

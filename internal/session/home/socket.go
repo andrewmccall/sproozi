@@ -403,8 +403,30 @@ func needsRecovery(err error, id, continueWith string) error {
 		return rejectedError(fmt.Sprintf("%v; run \"sproozi recover %s\" to finish the cancellation", err, id))
 	case errors.Is(err, session.ErrSessionCancelled):
 		return cancelledProblem(id)
+	case errors.Is(err, session.ErrDeadlinePassed):
+		return deadlineProblem(id)
+	case errors.Is(err, session.ErrEndUnproven):
+		return unprovenProblem(id, err)
 	}
 	return err
+}
+
+// unprovenProblem says a start or move reached its deadline but could not
+// be ended yet, because the placement has not shown that nothing runs at the
+// destination, and how each way on works (ADR 0060).
+func unprovenProblem(id string, err error) error {
+	return rejectedError(fmt.Sprintf("session %s reached its deadline before it started, but %s; repeat the command "+
+		"once Docker or the cluster is reachable to end the start with the work kept, or run \"sproozi cancel %s\", "+
+		"which records the cancellation now and finishes it once the placement can show that nothing runs there",
+		id, strings.TrimPrefix(err.Error(), "session: "), id))
+}
+
+// deadlineProblem says a start or move reached its deadline first, so the
+// session stopped with its work kept, and names the one command that
+// continues it (ADR 0060).
+func deadlineProblem(id string) error {
+	return rejectedError(fmt.Sprintf("session %s reached its deadline before it started, so it is stopped with its "+
+		"work kept; continue it on this machine with \"sproozi resume %s\", which gives it a new deadline", id, id))
 }
 
 // cancelledProblem says a cancelled session cannot continue and how to remove it.

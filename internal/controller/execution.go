@@ -17,6 +17,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -31,6 +32,11 @@ import (
 	k8sresources "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 )
+
+// errRunEnded refuses a sandbox for a run whose live copy is cancelled,
+// terminal, deleted or replaced although the cached copy was not. The next
+// reconcile reads the newer run and ends it.
+var errRunEnded = errors.New("AgentRun ended before its sandbox was created")
 
 // ensureSandbox creates the Sandbox Pod if not yet provisioned and stores its name
 // in run.Status.Identity.SandboxName. It is idempotent: if SandboxName is already set
@@ -56,6 +62,12 @@ func (r *AgentRunReconciler) ensureSandbox(
 		if live.UID == run.UID && live.Status.Identity.SandboxName != "" {
 			live.DeepCopyInto(run)
 			return run.Status.Identity.SandboxName, nil
+		}
+		// A cached run can predate its cancellation, terminal phase or
+		// deletion. Never create a Pod for such a run: an executor that saw
+		// the run cancelled and ended relies on no Pod appearing afterwards.
+		if live.UID != run.UID || live.Spec.Cancel || live.Status.Phase.IsTerminal() || !live.DeletionTimestamp.IsZero() {
+			return "", errRunEnded
 		}
 	}
 

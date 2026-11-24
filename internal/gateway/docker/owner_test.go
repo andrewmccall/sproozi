@@ -478,6 +478,84 @@ func TestRevokeMissingGrantReportsAbsence(t *testing.T) {
 	}
 }
 
+// Initializing or activating a grant that already holds the outcome replays
+// it after the deadline; a new grant is refused (ADR 0058).
+func TestGrantReplaysAfterDeadline(t *testing.T) {
+	f := newOwner(t)
+	token := f.initialized(t)
+	if err := f.owner.Activate(t.Context(), f.launch, f.instance); err != nil {
+		t.Fatal(err)
+	}
+	late := f.launch.Deadline.Add(time.Hour)
+	gatewaydocker.SetClock(f.owner, func() time.Time { return late })
+	if again, err := f.owner.Initialize(t.Context(), f.launch, f.instance); err != nil || again != token {
+		t.Fatalf("initialize replay after the deadline: %v", err)
+	}
+	if err := f.owner.Activate(t.Context(), f.launch, f.instance); err != nil {
+		t.Fatalf("activate replay after the deadline: %v", err)
+	}
+	if _, err := f.owner.Authenticate(t.Context(), token); err == nil {
+		t.Fatal("grant authenticated after its deadline")
+	}
+	fresh := f.launch
+	fresh.AllocationID = "allocation-2"
+	instance := f.instance
+	instance.ExecutionID = fresh.AllocationID
+	if _, err := f.owner.Initialize(t.Context(), fresh, instance); err == nil || !strings.Contains(err.Error(), "deadline") {
+		t.Fatalf("new grant after its deadline: %v", err)
+	}
+	if err := f.owner.Revoke(t.Context(), f.launch, f.instance); err != nil {
+		t.Fatalf("revoke after the deadline: %v", err)
+	}
+	if _, err := f.owner.Seal(t.Context(), f.launch, f.instance); err != nil {
+		t.Fatalf("seal after the deadline: %v", err)
+	}
+}
+
+// Save refuses a grant that load would refuse.
+func TestGrantSaveValidates(t *testing.T) {
+	f := newOwner(t)
+	f.initialized(t)
+	for name, change := range map[string]struct {
+		phase   string
+		receipt bool
+	}{
+		"unknown phase":         {phase: "paused"},
+		"no phase":              {phase: ""},
+		"receipt before revoke": {phase: "inactive", receipt: true},
+	} {
+		if err := gatewaydocker.SaveRetained(f.owner, allocationID, change.phase, change.receipt); err == nil {
+			t.Errorf("%s: save accepted the record", name)
+		}
+	}
+	// The same receipt is accepted on a revoked grant, so only the phase rule
+	// refused it above.
+	if err := gatewaydocker.SaveRetained(f.owner, allocationID, "revoked", true); err != nil {
+		t.Fatalf("valid revoked record refused: %v", err)
+	}
+	if err := gatewaydocker.SaveRetained(f.owner, allocationID, "inactive", false); err != nil {
+		t.Fatalf("valid record refused: %v", err)
+	}
+}
+
+// An Activate replay of an active grant answers from the record and no longer
+// re-observes the container, so it succeeds after the container stopped; the
+// next Authenticate, which observes it on every request, refuses.
+func TestGrantActivateReplayDoesNotReobserveAndAuthenticateRefuses(t *testing.T) {
+	f := newOwner(t)
+	token := f.initialized(t)
+	if err := f.owner.Activate(t.Context(), f.launch, f.instance); err != nil {
+		t.Fatal(err)
+	}
+	f.observer.state.Running, f.observer.state.Status, f.observer.state.PID = false, "exited", 0
+	if err := f.owner.Activate(t.Context(), f.launch, f.instance); err != nil {
+		t.Fatalf("activation replay: %v", err)
+	}
+	if _, err := f.owner.Authenticate(t.Context(), token); !errors.Is(err, gateway.ErrGrantRevoked) {
+		t.Fatalf("authenticated a grant whose container stopped: %v", err)
+	}
+}
+
 // Each operation is refused from the phases its table leaves out.
 func TestGrantOperationsRefusedOutsideTheirPhases(t *testing.T) {
 	f := newOwner(t)

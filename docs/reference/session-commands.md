@@ -27,7 +27,7 @@ usage, a short description and one line per flag. An unknown help topic fails.
 | Sessions | `stop ID` | Stop after the agent's current turn and keep the work. With `--remote`, a session in a cluster. |
 | Sessions | `resume ID [-- AGENT ARGS]` | Continue a stopped session where it left off, with a new deadline and allowance. With `--remote`, a session in a cluster, which takes no agent arguments. |
 | Sessions | `cancel ID` | Stop now, discarding the agent's current turn. Cancelling a cancelled session succeeds. |
-| Sessions | `rm ID` | Delete a stopped or cancelled session and its saved work. |
+| Sessions | `rm ID` | Delete a stopped or cancelled session and its saved work. With `--remote`, a session in a cluster, also a pulled one. |
 | Remote | `move ID --local\|--remote` | Move a running session after its current turn: `--local` brings it to this machine, `--remote` sends it to a cluster. |
 | Remote | `pull ID` | Bring a stopped session from a cluster to this machine; `resume` then continues it. |
 | Setup | `init` | Set up this machine: image, network, certificates, provider key and service. Run again to add an agent with `--harness` or to repair. |
@@ -92,7 +92,7 @@ anything is read or sent. `-d` is short for `--detach`.
 | `stop` | `--remote`, `--context`, `--namespace`, `--json`, `--root` |
 | `resume` | `--detach`, `--max-duration`, `--remote`, `--context`, `--namespace`, `--json`, `--root` |
 | `cancel` | `--remote`, `--context`, `--namespace`, `--json`, `--root` |
-| `rm` | `--json`, `--root` |
+| `rm` | `--remote`, `--context`, `--namespace`, `--json`, `--root` |
 | `move` | `--local`, `--remote`, `--context`, `--namespace`, `--json`, `--root` |
 | `pull` | `--context`, `--namespace`, `--json`, `--root` |
 | `recover` | `--remote`, `--context`, `--namespace`, `--json`, `--root` |
@@ -207,6 +207,54 @@ its JSON `exit` has `"deadline": true`. The deadline is wall-clock time. If the
 computer slept past it, the service stops the agent within about five seconds
 of waking.
 
+A deadline can also pass before the session starts at its destination: a
+`run` or `resume` interrupted before its agent started and retried later, or
+a `move` that begins after the deadline, such as `sproozi move ID --local` of
+a session on a cluster. Nothing starts after the deadline, but the session is
+not left waiting
+([ADR 0060](../adr/0060-no-state-waits-on-a-deadline-to-end.md)):
+
+- `resume` ends that start or move, then continues the session with a new
+  deadline.
+- `recover`, `move`, and a retried `run` or `resume` with the same operation,
+  end it and reply with `session ID reached its deadline before it started, so it is stopped with its work kept; continue it on this machine with "sproozi resume ID", which gives it a new deadline`.
+- `stop` ends it and reports the session stopped, as for any other stop.
+
+The session is then `retained` with what it had kept. That is the checkpoint
+the move's stop saved, the checkpoint from before an interrupted resume, or,
+for a run that never started, the workspace it captured, which `resume` starts
+a new conversation from. If the destination had in fact started without the
+service recording it, it is stopped forcibly, so whatever the agent did there
+by itself is not kept; no input can be lost, because nothing could attach to
+it.
+
+Before it ends the start, the service makes sure no agent runs, or can start,
+at the destination. Until Docker or the cluster can show that, nothing is
+recorded: the session stays `preparing` or `activating`, and the command
+replies `session ID reached its deadline before it started, but the placement
+has not shown that nothing runs at the destination: WHAT; repeat the command
+once Docker or the cluster is reachable to end the start with the work kept,
+or run "sproozi cancel ID", which records the cancellation now and finishes it once the placement can show that nothing runs there`. `WHAT` names what is missing,
+such as `it cannot be inspected` or `its preparation remains unknown`, with
+the placement's own error. On a cluster the executor shows it by aborting the
+preparation, as for a [cancelled session whose sandbox has not started
+yet](#status-and-listing-output): a run waiting under a concurrency cap, one
+admitted with no Pod, and one the executor recorded but never registered all
+end this way once the controller has ended the cancelled run and any Pod it
+created is seen to stop, and repeating the command finishes an attempt that
+could not show that yet. Two cluster cases cannot be shown to hold no agent,
+however often the command is repeated: an executor older than this release,
+which cannot abort a preparation that has not reported its Pod, and a visit
+whose registration an administrator deleted or whose run one replaced. In
+those, `cancel` records the cancellation but replies that the placement has
+not yet proved the agent stopped, and `recover ID` finishes it only once the
+placement can show that: for an older executor, once it is updated.
+
+Until one of these commands runs, `status` prints `Overdue    its deadline
+passed before it started` and `Continue it with: sproozi resume ID, which
+ends this start with the work kept; if the placement cannot show that nothing
+runs there, sproozi cancel ID records the cancellation and finishes it once the placement can`.
+
 An agent whose container was stopped from outside, or which Sproozi stopped
 forcibly after a graceful stop failed, is also `retained`, whatever its code:
 `status` prints `Stopped    its container was stopped before the agent
@@ -236,7 +284,7 @@ each finished container. It refuses:
 | `session ID is running; stop it with "sproozi stop ID" or "sproozi cancel ID" first` | The session has a running agent. | `sproozi stop ID` or `sproozi cancel ID`, then `rm`. |
 | `session ID has unfinished work (PHASE); run "sproozi recover ID", then remove it` | A stop, move or cancellation was interrupted, or its usage is not settled. | `sproozi recover ID`. |
 | `session ID is still being pulled; finish with "sproozi pull ID" before removing it` | A pull has not finished. | The same `pull` command. |
-| `another operation is in progress; run the command again shortly` | Another command held the service's records for more than five seconds. | `rm` again. |
+| `another operation is in progress; run the command again shortly` | Another command on this session held it for more than five seconds. Operations on other sessions never delay `rm`. | `rm` again. |
 
 When an earlier operation blocks a command, the service refuses it and names
 the command that unblocks it. Nothing was recorded, so there is no retry
@@ -244,7 +292,9 @@ hint. `ID` is the session and `OP` an operation.
 
 | Reply | Cause | Run |
 | --- | --- | --- |
-| `session: previous KIND requires recovery; run "sproozi recover ID" to finish it, or "sproozi cancel ID" to stop it now` | A `move` or `stop` while an earlier `start`, `resume` or `move` is unfinished. | `sproozi recover ID`, or `sproozi cancel ID`. |
+| `session: previous KIND requires recovery; run "sproozi recover ID" to finish it, or "sproozi cancel ID" to stop it now` | A `move` or `stop` while an earlier `start`, `resume` or `move` is unfinished, before its deadline. After the deadline, `stop` and `move` end it instead. | `sproozi recover ID`, or `sproozi cancel ID`. |
+| `session ID reached its deadline before it started, so it is stopped with its work kept; continue it on this machine with "sproozi resume ID", which gives it a new deadline` | `recover`, `move`, or a retried `run` or `resume`, of a session whose start or move its deadline passed. The command ended it, and the session is `retained`. | `sproozi resume ID`. |
+| `session ID reached its deadline before it started, but the placement has not shown that nothing runs at the destination: WHAT; repeat the command once Docker or the cluster is reachable to end the start with the work kept, or run "sproozi cancel ID", which records the cancellation now and finishes it once the placement can show that nothing runs there` | `resume`, `recover`, `stop` or `move` of such a session while Docker or the cluster cannot show that no agent runs there. Nothing was recorded. | The same command once it is reachable, or `sproozi cancel ID`, then `sproozi recover ID` until it finishes. |
 | `session ID is still stopping; run "sproozi stop ID" to keep waiting, or "sproozi cancel ID" to force-stop it` | A `move` while a stop is unfinished. | `sproozi stop ID`, or `sproozi cancel ID`. |
 | `session: cancellation unfinished; run "sproozi recover ID" to finish the cancellation` | A `move` or `stop` while a cancellation hasn't yet proved the agent stopped and its usage settled. | `sproozi recover ID`. |
 | `session: the writer stopped, but its usage is not finalized yet; recover again once the placement can finalize it` | `recover` of a cancellation whose usage could not be settled yet. | `sproozi recover ID` again; the service log has the cause. |
@@ -331,11 +381,14 @@ stop ID --remote   List: sproozi ls`. The suggested commands repeat
 this machine: raw mode, resizing and output replay after reconnecting, within
 the executor's per-attachment bounds of 8 MiB of input and 64 MiB of output.
 
-`stop ID --remote` waits for the agent's current turn. While the executor
-still waits, the CLI prints `Waiting for the agent's current turn in session
-ID to finish; run "sproozi cancel ID --remote" in another terminal to stop it
-now instead.` once and asks again with the same operation, also after a
-request that timed out, until the session stops. It then prints `Stopped
+`stop ID --remote` waits for the agent's current turn. After 30 seconds, or
+when the executor answers that it still waits, the CLI prints `Waiting for the
+agent's current turn in session ID to finish; run "sproozi cancel ID --remote"
+in another terminal to stop it now instead.` once and asks again with the same
+operation, also after a request that timed out or, up to three times in a
+row, a dropped connection, through a new one, until the session stops. More
+drops in a row end the command with a retry hint naming the operation. The executor carries the stop on while the CLI is away
+([request timeouts](remote-executors.md#request-timeouts-and-dropped-connections)). It then prints `Stopped
 session ID; its work is kept.` and the commands that continue it there
 (`sproozi resume ID --remote`) or bring it here (`sproozi pull ID`). Ctrl-C
 leaves the session `stopping` and ends with a retry hint naming the
@@ -345,6 +398,45 @@ operation.
 fresh deadline and allowance, and attaches unless `-d`. Each resume is a new
 operation; a resume whose outcome is unknown ends with a retry hint naming
 it. It takes no agent arguments after `--`.
+
+`rm ID --remote` deletes a cluster's `retained`, `failed`, `cancelled` or
+`pulled` session and everything its [remote
+executor](remote-executors.md#removing-sessions) keeps for it, and prints
+`Deleted session ID from cluster NAME.` It refuses a session that is
+starting, running, stopping, has unfinished work or is being pulled, with the
+replies [`rm`](#stopping-removing-and-recovering) gives on this machine, naming the commands
+with `--remote`: `session ID is running; stop it with "sproozi stop ID
+--remote" or "sproozi cancel ID --remote" first`, `session ID has unfinished
+work (PHASE); run "sproozi recover ID --remote", then remove it`, `session ID
+is PHASE; wait for it to finish, then remove it` and `session ID is still
+being pulled; finish with "sproozi pull ID" before removing it`. A task takes
+no `stop`; one that is `active` while its turn runs, or `stopping` while its
+answer is recorded, gets `session ID is a task that is still running;
+wait for it to finish, or cancel it with "sproozi cancel ID --remote", then
+remove it`. A session another, unstarted session starts from (`run --remote
+--workspace-from`) is kept until that one starts: `session OTHER starts from
+session ID and has not started yet; wait for it to start, or cancel it with
+"sproozi cancel OTHER --remote", then remove session ID`. Removing a removed
+session succeeds, so a removal whose outcome is unknown ends with `run
+"sproozi rm ID --remote" again`. Removal does not wait for other sessions.
+
+A `pulled` session is removed from the cluster only when the Sproozi service
+on this machine holds it as pulled, because the cluster then no longer
+answers a claim the service repeats after a lost reply. So remove the
+cluster's record (`rm ID --remote`) before the local one (`rm ID`): once the
+machine that pulled a session no longer holds it, the cluster's record cannot
+be removed. Otherwise `rm --remote` refuses:
+
+| Reply | Cause | Run |
+| --- | --- | --- |
+| `session ID was pulled from the cluster, and the Sproozi service on this machine is not running, ...` | The command cannot ask the service. | `sproozi service start`, then `rm` again. |
+| `session ID was pulled from the cluster, but the Sproozi service on this machine does not hold it, so the cluster's record cannot be removed from here: ...` | Another machine pulled it, or this machine already removed its copy. | `rm --remote` on a machine that still holds it; if none does, the record stays. |
+| `session ID is still being pulled to this machine; finish with "sproozi pull ID", then remove it` | The pull's claim is not recorded here yet. | `sproozi pull ID`, then `rm` again. |
+
+When the executor is full it refuses `run --remote` and `resume ID --remote`
+and says which bound it reached, and a session at its own cap of executions
+or operations refuses `resume` or `stop` the same way; nothing changed, so
+there is no retry hint.
 
 | Error | Cause | Run |
 | --- | --- | --- |
@@ -358,6 +450,11 @@ it. It takes no agent arguments after `--`.
 | `... the cluster's remote executor NAME refused a HARNESS task; an executor older than this release may run no HARNESS tasks ...` | A task for an executor of the same harness that refused it, such as a Claude Code executor from before Claude Code tasks. | Update the executor, or leave out `--task`. |
 | `... does not run interactive sessions for HARNESS; update the executor, ...` | The executor answered `unsupported` to an interactive session of its own harness. | Update the executor, or give `--task`. |
 | `the cluster's remote executor NAME is older than remote stop; update the executor ...` | The executor has no `stop`, `resume` or `attach` route. | Update the executor, or `sproozi pull ID`. |
+| `the cluster's remote executor NAME is older than remote rm; update the executor ...` | The executor has no `remove` route. | Update the executor. |
+| `Remote executor full: it keeps its maximum number of sessions; remove sessions you no longer need with "sproozi rm ID --remote", then retry: ...` | The executor keeps 1024 sessions. | `sproozi ls --remote`, then `sproozi rm ID --remote` for sessions you no longer need. |
+| `Remote executor full: what it keeps, plus the room its unfinished sessions and this request may still need, would exceed its retainedBytes; ...` | What the executor keeps, plus what its unfinished sessions and this request may still keep, exceeds [`retainedBytes`](remote-executors.md#retention). | `sproozi rm ID --remote`, stop running sessions, or ask the administrator to raise `retainedBytes`. |
+| `This session has run its maximum number of executions, so it cannot be resumed again there; ...` | `resume --remote` of a session resumed 255 times. | `sproozi pull ID`, or start new work. |
+| `This session has used its maximum number of stop and resume operations; ...` | `stop` or `resume --remote` of a session with 1024 of them. | `cancel`, or `sproozi pull ID` once it is stopped. |
 | `session ID is a task, which stops by itself when it completes; ...` | `attach`, `stop` or `resume` of a task. | `sproozi status ID --remote`, or `cancel`. |
 | `session ID is running; attach to it with "sproozi attach ID --remote", or stop it ...` | `resume` of a running session. | `attach`, or `stop` then `resume`. |
 | `session ID is stopped; "sproozi resume ID --remote" continues it` | `attach` or `stop` of a `retained` session. | `sproozi resume ID --remote`. |
@@ -383,9 +480,9 @@ its execution journal, plus two for a pull
 
 | Remote phase | Meaning |
 | --- | --- |
-| `preparing` | The executor is capturing the task's input or preparing its first visit. A failed preparation keeps this phase with a problem; `recover ID --remote` retries it. |
-| `activating`, `active` | The sandbox is being admitted, or the task runs. |
-| `stopping` | The executor is waiting for the task's own turn to complete, then stops the sandbox. While the turn runs, the problem says what the stop waits for; it is not an error. |
+| `preparing` | The executor is capturing the task's input or preparing its first visit. A failed preparation keeps this phase with a problem; `recover ID --remote` retries it. An interactive session still preparing when its deadline passes becomes `retained` with the problem `the deadline passed before it started`, keeping its last checkpoint; `resume ID --remote` continues it. |
+| `activating`, `active` | The sandbox is being admitted, or the session runs. A task stays `active`, with no problem, until its own turn completes. |
+| `stopping` | The session is stopping: a task's turn completed and the executor is stopping its sandbox and recording its answer, or an interactive session's stop waits for the agent's current turn, with a problem that says so. |
 | `unknown-stop` | The placement has not proved the sandbox stopped. The executor retries by itself, waiting one second and doubling up to a minute; `recover ID --remote` retries now. |
 | `unknown-usage` | The sandbox stopped, but its usage is not finalized. The executor retries as for `unknown-stop`. |
 | `cancelling`, `cancelled` | A cancellation is in progress, or finished. A task whose deadline passed before it started is `cancelled` with the problem `the deadline passed before it started`. |
@@ -394,6 +491,26 @@ its execution journal, plus two for a pull
 | `exporting`, `pulled` | A machine began to pull the session, or pulled it. |
 
 `cancel ID --remote` of a `retained` session is refused: its result is kept.
+
+Cancelling a session whose cluster sandbox has not started yet ends it
+`cancelled`: its run may be waiting under a concurrency cap, admitted with
+no Pod, or failed before its Pod. The executor cancels the visit's
+registration and run and waits until the controller ends the run. A Pod that
+appears meanwhile is stopped and must be observed terminated first, as for
+any cancellation. One attempt waits at most 30 seconds, so a Pod that takes
+its whole termination grace needs a second `recover`. The cancellation
+stays unfinished (`unknown-stop`), and `recover ID` (or `recover ID
+--remote`) resumes the same cancellation, in these cases only. A session the
+executor owns shows the executor's own problem; a session that moved there
+from this machine shows only the executor's answer.
+
+| Problem of a session the executor owns contains | A session moved from this machine shows | Cause | Run |
+| --- | --- | --- | --- |
+| `the controller has not ended it, so its Pod may still be created` | `session profile: unavailable (HTTP 503)` | The run is cancelled, but the Sproozi controller has not reconciled it within the 30 seconds. | Check the controller is running, then `recover`. |
+| `writer fence remains unknown`, or `absent Pod has no retained writer fence` | `session profile: unavailable (HTTP 503)` | A Pod appeared and its agent container was not seen to stop within the 30 seconds, for example because its node is unreachable or the container never started. | Restore the node, then `recover`. |
+| `the session registration … was deleted, so its Pod cannot be fenced`, or `AgentRun … now has UID …; an administrator replaced it` | `session profile: conflict (HTTP 409)` | An administrator deleted the visit's registration or replaced its run. The message names the Pod label to check. | An administrator confirms no such Pod remains; the session cannot be recovered. |
+| `… is active, not a preparation` (or `stopping`, `stopped`, `cancelled`) | `session profile: conflict (HTTP 409)` | The visit may already have run, so it is not cancelled as a preparation. A coordinator never asks this; it points to a defect. | Report it. |
+| — | `the remote executor cannot abort a preparation that has not reported its Pod; it is older than this Sproozi` | The executor is from before this release. | Update the executor, then `recover ID`. |
 
 With `--json`, `status` and the session commands print the session:
 

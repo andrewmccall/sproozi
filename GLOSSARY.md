@@ -520,8 +520,11 @@ work sets it: `sproozi run` and `resume` take `--max-duration DURATION|none`,
 otherwise the session's earlier choice, otherwise the home's `maxDuration`,
 otherwise none. A remote executor's `maxDuration` and an AgentPolicy's
 `maxExecutionDuration` cap it when set and refuse an execution without one. A
-move keeps it. A set deadline is reached at its instant, not after it. See
-[ADR 0056](docs/adr/0056-whoever-starts-work-sets-its-deadline.md). Also seen
+move keeps it. A set deadline is reached at its instant, not after it. Once
+it passes, nothing starts, but no state waits on it to end: a start or move it
+overtakes ends with the execution idle and its last checkpoint kept. See
+[ADR 0056](docs/adr/0056-whoever-starts-work-sets-its-deadline.md) and
+[ADR 0060](docs/adr/0060-no-state-waits-on-a-deadline-to-end.md). Also seen
 as: original deadline, session deadline.
 
 ### Placement
@@ -552,8 +555,9 @@ Also seen as: coordinator journal, coordinator record, `session.Record`.
 A trusted record that steps a writer through declared phases: a typed phase
 validated on load and save, a `(from, event) → to` table that says which events
 the deadline refuses, and one apply function used by live code and recovery.
-The execution journal and the session registration are lifecycle records; the
-ADR lists the records still adopting the pattern. See
+The execution journal, the Docker placement record and the Docker gateway
+grant are lifecycle records; the ADR lists the records still adopting the
+pattern. See
 [ADR 0058](docs/adr/0058-lifecycle-records-declare-states-and-transitions.md).
 
 ### Turnless visit

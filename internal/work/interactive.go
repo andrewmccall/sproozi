@@ -122,7 +122,7 @@ func (o *Owner) bindStop(r *record, operation string) (string, error) {
 		return "", err
 	}
 	if len(r.Operations) >= maxOperations {
-		return "", &profile.Rejection{Code: profile.CodeUnavailable}
+		return "", &profile.Rejection{Code: profile.CodeOperationsFull}
 	}
 	if r.Operations == nil {
 		r.Operations = map[string]boundOperation{}
@@ -180,8 +180,11 @@ func (o *Owner) Resume(ctx context.Context, id, operation, maxDuration string) (
 	if rec == nil || rec.Phase != session.PhaseIdle || rec.PendingOperation != "" || rec.CancelOperation != "" {
 		return View{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
-	if len(r.Executions) >= maxExecutions || len(r.Operations) >= maxOperations {
-		return View{}, &profile.Rejection{Code: profile.CodeUnavailable}
+	if len(r.Executions) >= maxExecutions {
+		return View{}, &profile.Rejection{Code: profile.CodeExecutionsFull}
+	}
+	if len(r.Operations) >= maxOperations {
+		return View{}, &profile.Rejection{Code: profile.CodeOperationsFull}
 	}
 	execution, err := o.resumedExecution(r, *rec, operation, cmp.Or(maxDuration, r.DeadlineChoice))
 	if err != nil {
@@ -212,6 +215,14 @@ func (o *Owner) resumedExecution(r record, last session.Record, operation, choic
 		}
 		return existing, nil
 	} else if !os.IsNotExist(err) {
+		return session.Record{}, err
+	}
+	// A new execution will commit another checkpoint: admit it as a
+	// submission is admitted (admitRetention). An adopted one above was
+	// admitted before it was created.
+	o.retention.Lock()
+	defer o.retention.Unlock()
+	if err := o.admitRetention(false); err != nil {
 		return session.Record{}, err
 	}
 	_, until, err := o.taskDeadline(CallerHome, choice, time.Now())

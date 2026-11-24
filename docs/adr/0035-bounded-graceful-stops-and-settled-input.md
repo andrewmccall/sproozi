@@ -5,7 +5,9 @@ Date: 2026-10-20
 
 Extended: [ADR 0038](0038-exited-agents-and-one-recovery-path.md) makes a
 repeated stop continue the pending one and names `sproozi stop ID` in every
-message for a stuck stop.
+message for a stuck stop. [ADR 0036](0036-remote-executors-through-kubeconfig-contexts.md#amendment-a-stop-outlives-its-request-2026-11-16)
+(2026-11-16) sizes remote request timeouts from these bounds and has a remote
+executor finish a stop whose request ended.
 
 ## Problem and constraints
 
@@ -74,6 +76,49 @@ prompt could follow.
 
 Revisit if Claude Code offers a lifecycle signal for queued prompts, or if
 users need status to show what a running stop waits for.
+
+## Correction: the wait after the quit (2026-11-15)
+
+The two-minute bound covered only the wait for a completed turn. The wait
+that followed, for the harness to exit once asked to quit, ended only at the
+execution deadline. Since [ADR 0056](0056-whoever-starts-work-sets-its-deadline.md)
+a session may have none, so a harness that ignored its quit, because of a
+modal prompt, a hang or a client whose quit changed, held the supervisor's
+action lock for ever. The stop never returned, the control client gave up
+after five minutes, and every repeated stop waited behind the first.
+
+That wait now ends at the earlier of the deadline and 30 seconds. Codex
+exits within seconds of its quit; the bound, with the two-minute turn wait
+and a three-second kill, fits inside the five minutes the control client
+waits for the reply. A Codex still running then is killed and waited for at
+most three more seconds, within the deadline. The turn was observed complete
+and input was gated, so no work is in flight, and the supervisor observes the
+same completed turn again before it accepts the stop. The reply is then
+`stopped` with the conversation and turn, its exit reason is `forced-stop`,
+and no exit report is written: the stop is neither a deadline nor the
+harness's own exit ([ADR 0038](0038-exited-agents-and-one-recovery-path.md)).
+The supervisor exits 0, as after any graceful stop, so a placement that lost
+the reply and reads only the exit code does not take it for a failed agent.
+The placement still fences the container itself and validates the captured
+state. The stop counts as forced only when the supervisor's kill ended the
+harness; one that exited by itself as the bound passed keeps its own code
+and reason, so a crash is not hidden. A turn that changed, or a kill not
+confirmed, fails the stop with the cause `failed`.
+
+A Codex whose terminal input buffer is full cannot take the quit at all: it
+is not reading its terminal, which is the hang the bound exists for, and
+waiting longer would not change that. With the turn complete and input gated
+the same argument holds, so it is killed at once, as at the bound.
+
+Claude Code and Copilot are always stopped by a kill after completion, so
+for them the bound limits only the wait for that kill to be confirmed. One
+confirmed within three more seconds stops them as usual, and the supervisor
+logs that the confirmation was late, not that a quit was ignored; one not
+confirmed by then fails the stop. A deadline earlier than the bound, or
+inside the three seconds, ends the stop as the deadline. The turnless stop's
+wait has the same 30-second bound.
+
+This applies the principle that no state depends on a deadline to end.
 
 Implementation: [native supervisor](../../cmd/native-session/main.go),
 [Claude lifecycle](../../cmd/native-session/claude.go),

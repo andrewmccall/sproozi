@@ -266,10 +266,16 @@ type fakePlacement struct {
 	prepared, activated, stopped, aborted int
 	lostPrepare, lostActivate, lostStop   bool
 	partialPrepare                        bool
-	prepareCalls                          int
-	unknownStop                           bool
-	missingUsage                          bool
-	unsealed                              bool
+	// failActivate refuses activation, leaving the incarnation prepared.
+	failActivate bool
+	// inspectErr fails Inspect, as Docker does once a prepared supervisor
+	// stopped itself at its deadline.
+	inspectErr error
+	// inspections counts Inspect calls.
+	prepareCalls, inspections int
+	unknownStop               bool
+	missingUsage              bool
+	unsealed                  bool
 	// turnless stops a visit from the retained workspace with no native
 	// conversation: no thread and no checkpoint.
 	turnless    bool
@@ -324,6 +330,9 @@ func (p *fakePlacement) Activate(_ context.Context, l Launch, i Incarnation) err
 	if o.State != PlacementPrepared {
 		return errors.New("not inert")
 	}
+	if p.failActivate {
+		return errors.New("activation refused")
+	}
 	p.activated++
 	o.State = PlacementActive
 	p.records[l.AllocationID] = o
@@ -334,6 +343,10 @@ func (p *fakePlacement) Activate(_ context.Context, l Launch, i Incarnation) err
 	return nil
 }
 func (p *fakePlacement) Inspect(_ context.Context, l Launch) (Observation, error) {
+	p.inspections++
+	if p.inspectErr != nil {
+		return Observation{}, p.inspectErr
+	}
 	if o, ok := p.records[l.AllocationID]; ok {
 		return o, nil
 	}
@@ -927,19 +940,23 @@ func TestCheckpointDigestMismatchCannotActivateDestination(t *testing.T) {
 }
 func TestExpiredOriginalDeadlinePreventsPreparation(t *testing.T) {
 	t.Parallel()
-	c, _, local, remote, start := setup(t)
-	deadline := time.Now().Add(time.Second).UTC()
-	source := start.Source
-	source.ExecutionID, source.OperationID, source.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
-	source.Deadline = deadline
-	expiring := seedExecution(t, c, local, source, start.Input)
-	// The deadline passes on the coordinator's clock without waiting for it.
-	c.now = func() time.Time { return deadline }
-	if _, err := c.Move(context.Background(), expiring.Source.ExecutionID, uuid.NewString(), testRemote); err == nil {
-		t.Fatal("move reset expired deadline")
+	c, _, _, remote, start := setup(t)
+	id := start.Source.ExecutionID
+	before, err := c.Inspect(id)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if remote.prepared != 0 || remote.activated != 0 {
+	// The deadline passes on the coordinator's clock without waiting for it.
+	c.now = func() time.Time { return start.Source.Deadline }
+	r, err := c.Move(context.Background(), id, uuid.NewString(), testRemote)
+	if !errors.Is(err, ErrDeadlinePassed) || r.Phase != PhaseIdle {
+		t.Fatalf("move after the deadline: %s %v", r.Phase, err)
+	}
+	if remote.prepareCalls != 0 || remote.activated != 0 || remote.inspections != 0 {
 		t.Fatal("expired session prepared a destination")
+	}
+	if stored, err := c.Inspect(id); err != nil || stored.Phase != PhaseIdle || len(stored.Operations) != len(before.Operations) {
+		t.Fatalf("refused move was retained: %s %d operations %v", stored.Phase, len(stored.Operations), err)
 	}
 }
 

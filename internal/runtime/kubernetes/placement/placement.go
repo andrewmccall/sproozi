@@ -78,6 +78,8 @@ type Placement struct {
 	mu       sync.RWMutex
 	journals session.JournalLocks
 	lock     *os.File
+	// abortWait bounds one AbortPreparation (abortPreparationWait).
+	abortWait time.Duration
 }
 
 // Open holds one filesystem owner lock for the configured profile. Kubernetes
@@ -121,7 +123,7 @@ func Open(config Config) (*Placement, error) {
 		_ = lock.Close()
 		return nil, err
 	}
-	return &Placement{config: config, registry: store, ledger: budgetkube.NewLedger(config.Kube, config.BudgetNamespace), exec: executor, lock: lock}, nil
+	return &Placement{config: config, registry: store, ledger: budgetkube.NewLedger(config.Kube, config.BudgetNamespace), exec: executor, lock: lock, abortWait: abortPreparationWait}, nil
 }
 func validateConfig(config Config) error {
 	if config.Harness.Validate() != nil || config.Kube == nil || config.RESTConfig == nil || len(validation.IsDNS1123Label(config.Namespace)) != 0 || len(validation.IsDNS1123Label(config.BudgetNamespace)) != 0 || config.AgentNamespace != runtimekube.AgentsNamespace || len(validation.IsDNS1123Subdomain(config.TemplateName)) != 0 || config.Principal == "" || config.Name == "" || !digestValid(config.InstructionDigest) || config.MaxDuration < 0 || config.MaxCheckpointBytes <= 0 || config.MaxCheckpointBytes > 256<<20 || !filepath.IsAbs(config.Directory) || len(config.Allowances) == 0 || len(config.Allowances) > 32 {
@@ -280,6 +282,9 @@ func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) 
 		return session.Incarnation{}, err
 	}
 	defer unlock()
+	if local, err := p.load(l); err == nil && local.PreparationAborted {
+		return session.Incarnation{}, &profile.Rejection{Code: profile.CodeConflict}
+	}
 	if l.ThreadID == "" && l.CheckpointDigest == "" {
 		return p.prepareWorkspace(ctx, l, data)
 	}

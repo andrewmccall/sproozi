@@ -126,6 +126,113 @@ per-phase validation. Its guards may later move into a table without changing
 behaviour. Remote work keeps its own phases until it runs through the
 execution journal.
 
+> **Correction, 2026-11-15.** Two statements in this paragraph were not
+> true. Which records have a declared table today:
+>
+> - **With a table:** the execution journal, the Docker placement record
+>   and the Docker gateway grant.
+> - **Typed phases and guards, but no table yet:** the Kubernetes session
+>   registration. It has from-phase checks, compare-and-swap and per-phase
+>   validation, but no `(from, event) → to` table or deadline column, so it
+>   does not yet follow the pattern.
+> - **Remote work** no longer keeps its own phases: it runs through the
+>   execution journal ([ADR 0057](0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md)).
+>
+> The parallel change did not bring the Docker records to this pattern.
+> Each kept a list of the phases every operation accepted, assigned target
+> phases inline and checked the deadline inline; the grant validated only on
+> load. Four checks ran before replay detection, against rule 5, so these
+> replays were refused after the deadline: a Docker `Prepare` and `Activate`,
+> and a grant `Initialize` and `Activate`. A Docker `Activate` replay of an
+> active visit also rewrote it to `activating` and repeated the native
+> activation, so a failed replay left it unattachable.
+>
+> Both Docker records now have rules 1 to 5. Each has an event type, a
+> table beside the record, an `admit` step before each side effect and one
+> `apply` function, the only place its phase changes. The grant validates on
+> save as well as on load. Stored formats did not change.
+>
+> An operation whose outcome the record already holds replays it before
+> admission and applies no event: `Prepare` of `prepared`, `Activate` of
+> `active`, `Stop` of `stopped` and `Abort` of `stopped` or `aborted`, and
+> for the grant `Initialize` of `inactive` or `active`, `Activate` of
+> `active` and `Revoke` of `revoked`. A replay answers from the record
+> alone. An `Activate` replay of an active Docker visit no longer
+> re-verifies its containers or repeats the native activation, and one of an
+> active grant no longer re-observes the container, re-reads its accounts or
+> checks the deadline. A replay after the containers have died therefore
+> succeeds instead of failing. Three things keep that safe:
+>
+> - an active record is written only after its side effects completed;
+> - the placement reaches the grant's `Activate` only from `activating`,
+>   after its own verification;
+> - the placement's `Inspect` still verifies the containers, and the grant's
+>   `Authenticate` and `Revalidate` observe the container on every request.
+>
+> The deadline column is consulted only by `admit`, which runs before a
+> request's side effect. Outcome events (`activated`, `stopped`, `aborted`)
+> and `abort-preparation` are applied without `admit`. So the Docker
+> placement's `activated` row is not refused after the deadline: the
+> request, `activate`, was admitted before the side effect, and refusing the
+> outcome afterwards would refuse an activation that already happened. The
+> execution journal has a single `activated` event that serves as both. It
+> is admitted before the coordinator calls a placement's `Activate`, so its
+> row says yes. The coordinator still records it without `admit` when
+> `Inspect` reports the destination already active.
+>
+> The Kubernetes registration's `Store.Activate` checked the deadline
+> before replay detection. It now replays an active registration first. The
+> operation is still refused earlier after the deadline: the coordinator
+> does not admit `activated`, and the placement's `Activate` refuses in its
+> live-profile check before it reaches the store. Whether a late activation
+> that already happened should be recordable through `Activate` is left to
+> the execution journal's own work.
+>
+> The Docker placement record, in `internal/runtime/docker/transitions.go`.
+> Its terminal phases are `stopped`, `aborted` and `preparation-aborting`;
+> `Removing` and `Removed` are release flags on those, not phases. `Inspect`
+> resumes an interrupted activation with `activate` and `activated`.
+>
+> | Event | From → to | Refused after the deadline |
+> | --- | --- | --- |
+> | `create` | none → `creating` | yes |
+> | `prepared` | `creating` → `prepared` | yes |
+> | `activate` | `prepared`, `activating` → `activating` | yes |
+> | `activated` | `activating` → `active` | no |
+> | `attach` | `active` → `active` | yes |
+> | `stop` | `prepared`, `activating`, `active`, `stopping` → `stopping` | no |
+> | `stopped` | `stopping` → `stopped` | no |
+> | `abort` | `prepared`, `activating`, `active`, `stopping`, `aborting` → `aborting` | no |
+> | `aborted` | `aborting` → `aborted` | no |
+> | `abort-preparation` | `creating`, `preparation-aborting` → `preparation-aborting` | no |
+>
+> The Docker gateway grant, in `internal/gateway/docker/owner.go`. Its only
+> terminal phase is `revoked`.
+>
+> | Event | From → to | Refused after the deadline |
+> | --- | --- | --- |
+> | `initialize` | none → `initializing` | yes |
+> | `initialized` | `initializing` → `inactive` | yes |
+> | `activate` | `inactive` → `active` | yes |
+> | `revoke` | `initializing`, `inactive`, `active` → `revoked` | no |
+> | `seal` | `revoked` → `revoked` | no |
+> | `bind native` | `inactive`, `active`, `revoked` → unchanged | no |
+>
+> Two deadline checks stay outside the tables because they record no event:
+> the grant refuses to authenticate after the deadline, and the placement's
+> `Exited` stops an agent still running past it.
+
+**Correction, 2026-11-15: two session registration guards changed.** Aborting
+a Kubernetes preparation ([ADR 0057](0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md),
+section 13) can find a Pod the controller created after the registration
+was cancelled. `BindPod` now also records that Pod on a `cancelled`
+registration that has a bound run and no Pod, once, so the placement can
+fence and seal that exact Pod. The record stays `cancelled` and grants
+nothing. `Prepared` no longer treats a `cancelled` record that names the Pod
+as a replay: it is a conflict, since such a record may name a Pod it never
+restored into. Every other guard is unchanged. The registration's stored
+format is unchanged.
+
 ## Alternatives
 
 - **Check transitions in `save` by rereading the journal.** This catches an
@@ -175,11 +282,33 @@ execution journal.
   `internal/session/cancel.go`, `internal/session/finalize.go`,
   `internal/session/store.go`, `internal/session/remove.go`,
   `internal/session/home/exits.go`, `internal/session/home/remove.go`,
-  `cmd/sproozi/output.go`, `internal/deadline`
+  `cmd/sproozi/output.go`, `internal/deadline`,
+  `internal/runtime/docker/transitions.go`, `internal/gateway/docker/owner.go`
 - Tests: `internal/session/phase_test.go`, `internal/session/rules_test.go`,
-  `cmd/sproozi/deadline_test.go`
+  `cmd/sproozi/deadline_test.go`, `internal/runtime/docker/transitions_test.go`,
+  `internal/gateway/docker/transitions_test.go`
 - Reference: [status and listing output](../reference/session-commands.md#status-and-listing-output)
 - Related: [ADR 0018](0018-coordinator-owns-every-visit.md),
   [ADR 0038](0038-exited-agents-and-one-recovery-path.md),
   [ADR 0041](0041-gateway-state-namespace-and-retained-state-owners.md),
   [ADR 0056](0056-whoever-starts-work-sets-its-deadline.md)
+
+## Later correction (2026-11-15)
+
+The table had no exit from `preparing` or `activating` once the deadline
+refused `prepared` and `activated`. A move that began after the deadline, or a
+first visit interrupted before its activation and retried after it, could then
+only be cancelled. [ADR 0060](0060-no-state-waits-on-a-deadline-to-end.md)
+adds the row:
+
+| Event | From → to | Refused after the deadline |
+| --- | --- | --- |
+| `abandoned` | `preparing`, `activating` → `idle` | no |
+
+Recover, stop and move take it after the deadline, once nothing can run at the
+destination. The deadline check for `prepared` now runs before a move's launch
+is created, and the check for `activated` runs whenever the destination is not
+already active. A move of an idle execution after its deadline is refused
+before anything is recorded. One test now checks that every phase has an exit
+the deadline never refuses, and that every phase without cancellation intent
+can reach `idle` without cancelling.

@@ -184,6 +184,26 @@ func TestDetachedReaderWakesAndNewReaderReceivesOutput(t *testing.T) {
 	until(t, b, "<fresh>")
 }
 
+// A process without a deadline that ignores its quit is forced when the
+// caller's bound passes, so the caller can bound the wait for any harness.
+func TestIgnoredQuitIsForcedWhenTheCallerGivesUp(t *testing.T) {
+	s := start(t, `stty -echo; printf 'READY\n'; exec sleep 30`, 256, time.Time{})
+	a := attach(t, s, 0)
+	until(t, a, "READY")
+	s.GateInput()
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	if _, err := s.QuitAfterCompletedTurn(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ignored quit: %v", err)
+	}
+	wait, done := context.WithTimeout(context.Background(), 5*time.Second)
+	defer done()
+	exit, err := s.Wait(wait)
+	if err != nil || exit.Reason != nativepty.ForcedStop {
+		t.Fatalf("ignored quit outcome: %+v %v", exit, err)
+	}
+}
+
 func TestNativeQuitRequiresInputGate(t *testing.T) {
 	s := start(t, `stty -echo; printf 'READY\n'; while IFS= read -r line; do [ "$line" = /quit ] && exit 0; done`, 256, time.Now().Add(10*time.Second))
 	a := attach(t, s, 0)

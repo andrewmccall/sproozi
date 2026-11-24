@@ -106,19 +106,37 @@ func (e entry) association() project.Association {
 
 func (o *Owner) path(id, suffix string) string { return filepath.Join(o.config.Directory, id+suffix) }
 
-// ids lists the catalogue's session IDs.
+// ids lists the catalogue's session IDs. A session with a removal mark is
+// left out, even while its record is still there because the removal is
+// unfinished: nothing lists, drives or counts a session being removed.
 func (o *Owner) ids() ([]string, error) {
 	entries, err := os.ReadDir(o.config.Directory)
 	if err != nil {
 		return nil, err
 	}
+	removed := map[string]bool{}
+	for _, e := range entries {
+		if id, ok := strings.CutSuffix(e.Name(), removedSuffix); ok {
+			removed[id] = true
+		}
+	}
 	var ids []string
 	for _, e := range entries {
-		if id, ok := strings.CutSuffix(e.Name(), ".json"); ok {
+		if id, ok := strings.CutSuffix(e.Name(), ".json"); ok && !removed[id] {
 			ids = append(ids, id)
 		}
 	}
 	return ids, nil
+}
+
+// readRecord reads id's record file. A session with a removal mark reads as
+// missing, finished or not, so no action and no driver takes it up again;
+// only Remove and Open's finishing of removals look past the mark.
+func (o *Owner) readRecord(id string) ([]byte, error) {
+	if o.wasRemoved(id) {
+		return nil, &fs.PathError{Op: "read", Path: o.path(id, ".json"), Err: fs.ErrNotExist}
+	}
+	return privatefs.ReadFile(o.path(id, ".json"), maxRecordBytes)
 }
 
 // entry reads id's record in either format.
@@ -126,7 +144,7 @@ func (o *Owner) entry(id string) (entry, error) {
 	if !CanonicalID(id) {
 		return entry{}, &profile.Rejection{Code: profile.CodeInvalid}
 	}
-	b, err := privatefs.ReadFile(o.path(id, ".json"), maxRecordBytes)
+	b, err := o.readRecord(id)
 	if os.IsNotExist(err) {
 		return entry{}, &profile.Rejection{Code: profile.CodeInvalid}
 	}
@@ -153,7 +171,7 @@ func (o *Owner) read(id string) (record, error) {
 	if !CanonicalID(id) {
 		return record{}, &profile.Rejection{Code: profile.CodeInvalid}
 	}
-	b, err := privatefs.ReadFile(o.path(id, ".json"), maxRecordBytes)
+	b, err := o.readRecord(id)
 	if err != nil {
 		return record{}, err
 	}
@@ -240,8 +258,12 @@ func (o *Owner) execution(r record) (*session.Record, error) {
 }
 
 // replay answers a repeated submission from its retained session. replayed is
-// false only when no session exists yet.
+// false only when no session exists yet. A removed session's request is a
+// conflict, so it never starts again.
 func (o *Owner) replay(id, digest string) (View, bool, error) {
+	if o.wasRemoved(id) {
+		return View{}, true, &profile.Rejection{Code: profile.CodeConflict}
+	}
 	if _, err := os.Lstat(o.path(id, ".json")); os.IsNotExist(err) {
 		return View{}, false, nil
 	}
@@ -395,22 +417,49 @@ func executionProblem(rec session.Record, interactive bool) string {
 	return ""
 }
 
-// admitRetention refuses a new session once the catalogue holds maxSessions
-// records, or once what is retained, plus one checkpoint for every unsettled
-// session and for the new one, would exceed RetainedBytes.
-func (o *Owner) admitRetention() error {
+// admitRetention admits a new session (newSession) or a new execution of a
+// kept one under the retention invariant; the caller holds o.retention until
+// it has saved what it admits.
+//
+// The invariant: RetainedBytes bounds what the executor keeps under work/
+// and sessions/ (ADR 0057). Only admission checks it, and admission reserves
+// everything the admitted execution may still come to keep, at most
+// MaxCheckpointBytes each: the input workspace the coordinator retains when
+// it starts (a submission's snapshot, revision or upload) and the checkpoint
+// its stop commits. A resume's input is the session's own kept checkpoint or
+// workspace, which the coordinator keeps once by digest, so it reserves only
+// its checkpoint. An admission is refused unless what is kept now, plus the
+// reservation of every admitted execution that may still add to it, plus the
+// new one's, fits. A stop, a checkpoint commit, a cancellation and a task's
+// tail write only what was reserved and never check the bound: refusing them
+// would lose work. A session stops reserving once it is settled, so an
+// interactive session reserves its checkpoint for as long as it runs. Records
+// and journals are bounded metadata and are not reserved; a kept upload is
+// counted twice, as kept and as its session's reserved input.
+//
+// Two things sit outside the bound. A removed session's mark is not counted
+// (see removedSuffix). Scratch space is not reserved: an upload's
+// validation before admission, and a driver's capture of a revision or an
+// empty workspace after it, each write up to MaxCheckpointBytes under the
+// catalogue's directory and delete it when done. While it exists a
+// concurrent admission counts it as kept, which only refuses work sooner,
+// but the volume may briefly hold that much beyond RetainedBytes.
+//
+// The catalogue's count, maxSessions, bounds records; a resume adds none.
+func (o *Owner) admitRetention(newSession bool) error {
 	ids, err := o.ids()
 	if err != nil {
 		return err
 	}
-	if len(ids) >= maxSessions {
-		return &profile.Rejection{Code: profile.CodeUnavailable}
+	if newSession && len(ids) >= maxSessions {
+		return &profile.Rejection{Code: profile.CodeSessionsFull}
 	}
 	reserved := int64(1)
+	if newSession {
+		reserved = 2
+	}
 	for _, id := range ids {
-		if v, err := o.info(id); err == nil && !v.Phase.Settled() {
-			reserved++
-		}
+		reserved += o.reserved(id)
 	}
 	_, coordinated, err := o.config.Coordinator.Retained()
 	if err != nil {
@@ -418,7 +467,10 @@ func (o *Owner) admitRetention() error {
 	}
 	var own int64
 	err = filepath.WalkDir(o.config.Directory, func(_ string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil || d.IsDir() {
+		// A removed session's mark is not counted: otherwise an executor at
+		// its smallest bound, room for one session, could never admit
+		// another after its first removal.
+		if walkErr != nil || d.IsDir() || strings.HasSuffix(d.Name(), removedSuffix) {
 			return walkErr
 		}
 		info, err := d.Info()
@@ -431,9 +483,28 @@ func (o *Owner) admitRetention() error {
 		return err
 	}
 	if coordinated+own+reserved*o.config.MaxCheckpointBytes > o.config.RetainedBytes {
-		return &profile.Rejection{Code: profile.CodeUnavailable}
+		return &profile.Rejection{Code: profile.CodeRetentionFull}
 	}
 	return nil
+}
+
+// reserved is how many checkpoint-sized reservations session id holds: one
+// for the checkpoint an unsettled session may still commit, and one more for
+// the input the coordinator has not retained yet. A settled session, a
+// version 1 record and a record that cannot be read hold none.
+func (o *Owner) reserved(id string) int64 {
+	e, err := o.entry(id)
+	if err != nil || e.legacy != nil {
+		return 0
+	}
+	rec, err := o.execution(*e.current)
+	if err != nil || derivePhase(*e.current, rec).Settled() {
+		return 0
+	}
+	if rec == nil {
+		return 2
+	}
+	return 1
 }
 
 // lastExit is the exit of the execution's last stopped visit, if its harness

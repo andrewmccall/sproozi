@@ -555,9 +555,12 @@ sproozi move ID --operation MOVE_OPERATION_UUID --remote
 
 The start retry must repeat every original ignored-file flag. A changed operation
 or destination cannot supersede an unfinished move. Remote control requests
-default to 45 seconds; a slower completed-turn wait can return uncertainty with
-input gated. Repeat the exact intent or recover after the backend can establish
-its retained state. Attachment disconnects do not cancel the native turn.
+wait as long as the executor may take over them
+([timeouts](../reference/remote-executors.md#request-timeouts-and-dropped-connections)):
+a stop up to 10 minutes 43 seconds, and the executor finishes a stop even when
+the connection drops. Repeat the exact intent or recover after the backend can
+establish its retained state. Attachment disconnects do not cancel the native
+turn.
 
 If stop is unknown, the execution is unreachable or usage is missing, the visit
 stays open and its allowance stays held. The destination cannot start. A lost reply is not proof

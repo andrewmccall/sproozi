@@ -318,11 +318,11 @@ func waitNotice(q *options) func() {
 }
 
 // remoteSession runs a session command on a cluster's session: status,
-// cancel and recover for any session, and attach, stop and resume for an
+// cancel, recover and rm for any session, and attach, stop and resume for an
 // interactive one.
 func (q *options) remoteSession(ctx context.Context) error {
 	switch q.action() {
-	case cmdStatus, cmdCancel, cmdRecover, cmdStop, cmdResume:
+	case cmdStatus, cmdCancel, cmdRecover, cmdStop, cmdResume, cmdRemove:
 	case cmdAttach:
 		// Attaching needs a terminal; find out before reaching the cluster.
 		if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -375,6 +375,8 @@ func (q *options) remoteSession(ctx context.Context) error {
 		return q.stopRemote(ctx, target)
 	case cmdResume:
 		return q.resumeRemote(ctx, target)
+	case cmdRemove:
+		return q.removeRemote(ctx, target)
 	}
 	if err != nil {
 		return err
@@ -452,6 +454,9 @@ func (q *options) submitError(err error, target remoteTarget, kind harness.Nativ
 	var remote *profile.RemoteError
 	if errors.As(err, &remote) {
 		switch {
+		case profile.OwnerFull(remote.Code):
+			// Refused, and the message names the remedy: nothing to repeat.
+			return err
 		case q.maxDuration != "" && remote.Code == profile.CodeDenied:
 			return fmt.Errorf("%w: the cluster's maxDuration may not allow --max-duration %s; try a shorter "+
 				"duration, or leave it out for the cluster's limit", err, q.maxDuration)

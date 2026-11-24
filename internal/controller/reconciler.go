@@ -445,6 +445,10 @@ func (r *AgentRunReconciler) handleRunning(ctx context.Context, run *sprooziv1al
 	}
 
 	sandboxName, err := r.ensureSandbox(ctx, run, admitted.runtime, admitted.binding)
+	if errors.Is(err, errRunEnded) {
+		logger.Info("Skipped sandbox Pod for ended AgentRun", "name", run.Name)
+		return ctrl.Result{RequeueAfter: time.Second}, nil
+	}
 	if k8sresources.IsQuotaExceeded(err) {
 		return r.waitForQuota(ctx, run, err, admitted.deadline)
 	}

@@ -44,18 +44,25 @@ type placementFixture struct {
 	digest                                         string
 	initials, prepares, activations, stops, aborts int
 	lostStop, lostActivate, unknownUsage           bool
+	// lostPrepare prepares the visit, then loses the reply once.
+	lostPrepare bool
 	// turnless stops a visit from a workspace with no conversation.
 	turnless                    bool
 	exited                      *session.Exit
 	rejectActivate, failInspect bool
-	partialCreate               bool
-	inspections                 int
-	charge                      int64
+	// failInspectOf fails Inspect of one allocation, as Docker does once its
+	// prepared supervisor stopped itself at the deadline.
+	failInspectOf string
+	partialCreate bool
+	inspections   int
+	charge        int64
 	// Non-nil hold channels are closed when the call is reached; the call then
 	// waits for its context, as a native turn that has not completed would.
 	holdPrepare, holdStop chan struct{}
 	// abortEntered, when non-nil, is closed by the first Abort.
 	abortEntered chan struct{}
+	// unreachableAbort fails Abort, as an unreachable Docker or cluster does.
+	unreachableAbort bool
 }
 
 func (p *placementFixture) prepare(l session.Launch) session.Incarnation {
@@ -86,6 +93,10 @@ func (p *placementFixture) Prepare(ctx context.Context, l session.Launch, data [
 		p.prepares++
 	}
 	i := p.prepare(l)
+	if p.lostPrepare {
+		p.lostPrepare = false
+		return session.Incarnation{}, errors.New("lost prepare reply")
+	}
 	if p.holdPrepare != nil {
 		close(p.holdPrepare)
 		<-ctx.Done()
@@ -115,7 +126,7 @@ func (p *placementFixture) Activate(_ context.Context, l session.Launch, i sessi
 }
 func (p *placementFixture) Inspect(_ context.Context, l session.Launch) (session.Observation, error) {
 	p.inspections++
-	if p.failInspect {
+	if p.failInspect || l.AllocationID == p.failInspectOf {
 		return session.Observation{}, errors.New("activation recovery still fails")
 	}
 	if r, ok := p.rows[l.AllocationID]; ok {
@@ -177,6 +188,9 @@ func (p *placementFixture) Abort(_ context.Context, l session.Launch, i session.
 	if p.abortEntered != nil {
 		close(p.abortEntered)
 		p.abortEntered = nil
+	}
+	if p.unreachableAbort {
+		return session.Observation{}, errors.New("docker unreachable")
 	}
 	r := p.rows[l.AllocationID]
 	if r.Incarnation != i {

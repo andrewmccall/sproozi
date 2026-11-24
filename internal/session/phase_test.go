@@ -149,7 +149,7 @@ func TestPrepareAndActivateOutcomesProduceOnePhaseEach(t *testing.T) {
 		{name: "prepare reply lost", configure: func(p *fakePlacement) { p.lostPrepare = true }, want: PhasePreparing, recovered: PhaseActive},
 		{name: "prepare fails partway", configure: func(p *fakePlacement) { p.partialPrepare = true }, want: PhasePreparing, recovered: PhaseActive},
 		{name: "activate reply lost", configure: func(p *fakePlacement) { p.lostActivate = true }, want: PhaseActivating, recovered: PhaseActive},
-		{name: "deadline passed", configure: func(*fakePlacement) {}, want: PhasePreparing, recovered: PhasePreparing, pastExpiry: true},
+		{name: "deadline passed", configure: func(*fakePlacement) {}, want: PhaseIdle, recovered: PhaseIdle, pastExpiry: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -215,6 +215,61 @@ func TestTransitionTableIsClosed(t *testing.T) {
 		}
 		if leaves == (p == PhaseCancelled) {
 			t.Errorf("phase %s: has a way on = %v", p, leaves)
+		}
+	}
+}
+
+// No phase depends on the deadline to end, and a passed deadline never leaves
+// cancellation as the only way on (ADR 0060). Every phase but cancelled has
+// an event the deadline never refuses that leads to another phase other than
+// cancelled, and is not a cancellation. Every phase without cancellation
+// intent reaches idle, where the last checkpoint stands and a new execution
+// continues it, through such events alone.
+//
+// From preparing and activating, finalized is left out: it follows only a
+// pending stop, and the deadline strands a pending move or first visit there,
+// which cannot rely on it. From the other phases a stop may lead through
+// finalized. The table still cannot tell which operation is pending, so
+// abandoned_test.go drives each starting state through every command past
+// its deadline.
+func TestEveryPhaseHasAnExitAfterTheDeadline(t *testing.T) {
+	for _, p := range phases {
+		if p == PhaseCancelled {
+			continue
+		}
+		cancels := []event{evCancel, evCancelUnsettled, evCancelled}
+		if p.Starting() {
+			cancels = append(cancels, evFinalized)
+		}
+		exit := false
+		for ev, rule := range transitions {
+			if to, ok := rule.to[p]; ok && !rule.refusedAfterDeadline && !slices.Contains(cancels, ev) &&
+				to != p && to != PhaseCancelled {
+				exit = true
+			}
+		}
+		if !exit {
+			t.Errorf("phase %s has no exit after the deadline", p)
+		}
+		if p == PhaseCancelling {
+			continue
+		}
+		reached := map[Phase]bool{p: true}
+		for changed := true; changed; {
+			changed = false
+			for ev, rule := range transitions {
+				if rule.refusedAfterDeadline || slices.Contains(cancels, ev) {
+					continue
+				}
+				for from, to := range rule.to {
+					if reached[from] && !reached[to] {
+						reached[to], changed = true, true
+					}
+				}
+			}
+		}
+		if !reached[PhaseIdle] {
+			t.Errorf("phase %s cannot reach idle after the deadline without cancelling", p)
 		}
 	}
 }

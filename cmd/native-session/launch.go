@@ -35,6 +35,8 @@ type nativeAdapter struct {
 	completion func(s *server) *harness.NativeCompletion
 	// finish ends the process once its turn completed.
 	finish func(n *nativepty.Supervisor, ctx context.Context) (nativepty.Exit, error)
+	// quits: finish asks the harness to quit rather than killing it.
+	quits bool
 	// settle maps that exit to the supervisor's exit code and, when the
 	// process did not stop as expected, a problem to report.
 	settle func(nativepty.Exit) (int, string)
@@ -51,6 +53,7 @@ var nativeAdapters = map[harness.NativeKind]nativeAdapter{
 		turnless:   func(*server) bool { return !codexJournalExists(nativeHome) },
 		// Codex quits itself after the completed turn and must exit cleanly.
 		finish: (*nativepty.Supervisor).QuitAfterCompletedTurn,
+		quits:  true,
 		settle: func(exit nativepty.Exit) (int, string) {
 			if exit.Code != 0 || exit.Reason != nativepty.NativeExit {
 				code := exit.Code

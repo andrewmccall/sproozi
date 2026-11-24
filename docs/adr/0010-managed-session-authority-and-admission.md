@@ -214,6 +214,14 @@ deadline; it cannot reopen an old allocation or modify sealed usage. Exact
 writer fencing and conservative unknown-state handling remain required in both
 paths.
 
+[ADR 0057](0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md),
+section 13 (2026-11-15), lets cancellation fence a preparation that has no
+Pod, and adds one form of fence evidence: a Pod that is being deleted, has
+no node and never started a container ran nothing and never will, since the
+API server refuses to bind a Pod that is being deleted. Termination evidence
+is still required for every Pod that was scheduled, and
+`ContainerStatusUnknown` still does not qualify.
+
 [ADR 0036](0036-remote-executors-through-kubeconfig-contexts.md) changes how the
 developer reaches the fixed remote profile: through a kubeconfig context and a
 port-forward, signed in as a narrow ServiceAccount that Kubernetes RBAC

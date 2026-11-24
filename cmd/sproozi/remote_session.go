@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/session"
@@ -211,22 +212,36 @@ func (q *options) stopRemote(ctx context.Context, target remoteTarget) error {
 	if q.operation == "" {
 		q.operation = uuid.NewString()
 	}
-	noticed := false
+	// The executor answers a stop when it ends or after about two minutes of
+	// waiting for the turn, so say why it waits after stopNoticeAfter, as a
+	// local stop does (ADR 0035).
+	n := &stopNotice{out: os.Stderr, text: fmt.Sprintf("Waiting for the agent's current turn in session %s to "+
+		"finish; run \"%s\" in another terminal to stop it now instead.\n", shortID(q.id), q.remoteCommand(cmdCancel, q.id))}
+	notify, finish := n.notify, n.finish
+	timer := time.AfterFunc(stopNoticeAfter, notify)
+	defer timer.Stop()
+	dropped := 0
 	for {
 		v, err := target.Client.Stop(ctx, q.id, q.operation)
-		waiting := err == nil && string(v.Phase) == phaseStopping || timedOut(err)
+		// A dropped connection, such as a broken port-forward, leaves the
+		// stop running on the executor; the next request reconnects. Only a
+		// few in a row are taken for drops rather than an unreachable cluster.
+		if lostConnection(err) && !timedOut(err) && ctx.Err() == nil {
+			dropped++
+		} else {
+			dropped = 0
+		}
+		waiting := err == nil && string(v.Phase) == phaseStopping || timedOut(err) ||
+			dropped > 0 && dropped <= remoteStopDrops
 		if err != nil && !waiting {
+			finish()
 			return q.remoteActionError(ctx, target, q.id, cmdStop, err)
 		}
 		if !waiting {
+			finish()
 			return q.printStopped(target.Name, v)
 		}
-		if !noticed {
-			noticed = true
-			_, _ = fmt.Fprintf(os.Stderr, "Waiting for the agent's current turn in session %s to finish; "+
-				"run \"%s\" in another terminal to stop it now instead.\n", shortID(q.id),
-				q.remoteCommand(cmdCancel, q.id))
-		}
+		notify()
 		select {
 		case <-ctx.Done():
 			return &retryError{err: errors.New("interrupted while the stop waited for the agent's current turn"),
@@ -234,6 +249,43 @@ func (q *options) stopRemote(ctx context.Context, target remoteTarget) error {
 		case <-time.After(remoteStopRetry):
 		}
 	}
+}
+
+// stopNotice prints a stop's waiting notice at most once, and never once the
+// stop's result was decided: a timer that already fired cannot print after it.
+type stopNotice struct {
+	out  io.Writer
+	text string
+
+	mu                sync.Mutex
+	noticed, finished bool
+}
+
+func (n *stopNotice) notify() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.noticed || n.finished {
+		return
+	}
+	n.noticed = true
+	_, _ = io.WriteString(n.out, n.text)
+}
+
+// finish ends the notice before the result is printed.
+func (n *stopNotice) finish() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.finished = true
+}
+
+// remoteStopDrops is how many lost connections in a row stop retries.
+const remoteStopDrops = 3
+
+// lostConnection reports a request that never got the executor's answer:
+// the connection failed, dropped or could not be opened.
+func lostConnection(err error) bool {
+	var remote *profile.RemoteError
+	return errors.As(err, &remote) && remote.Transport != nil
 }
 
 // timedOut reports a request the executor did not answer in time, as a stop
@@ -272,6 +324,131 @@ func (q *options) resumeRemote(ctx context.Context, target remoteTarget) error {
 		return q.remoteActionError(ctx, target, q.id, cmdResume, err)
 	}
 	return q.startedRemote(ctx, target, v, "Resumed")
+}
+
+// removeRemote deletes a cluster's stopped, cancelled or pulled session and
+// everything its executor keeps for it. Removing again is safe: the executor
+// answers that a removed session is removed.
+//
+// The executor removes a pulled session only when the request says this
+// machine holds its pull as finished, which it says only after
+// pullFinishedHere checked this machine's service: once removed, the cluster
+// can no longer answer a claim the service repeats.
+func (q *options) removeRemote(ctx context.Context, target remoteTarget) error {
+	removal, err := target.Client.Remove(ctx, q.id, false)
+	var remote *profile.RemoteError
+	if errors.As(err, &remote) && remote.Code == profile.CodeConflict {
+		v, infoErr := target.Client.Info(ctx, q.id)
+		switch {
+		case infoErr != nil:
+			return err
+		case v.Phase != work.PhasePulled:
+			return q.removalConflict(ctx, target, v, err)
+		}
+		if err = q.pullFinishedHere(ctx, v.ID); err != nil {
+			return err
+		}
+		removal, err = target.Client.Remove(ctx, q.id, true)
+	}
+	if err != nil {
+		return q.removeError(target, err)
+	}
+	if q.json {
+		return writeJSON(q.out, removal)
+	}
+	_, err = fmt.Fprintf(q.out, "Deleted session %s from cluster %s.\n", removal.ID, target.Name)
+	return err
+}
+
+// pullFinishedHere checks that this machine's service holds session id as
+// pulled, its claim recorded, and says what to do when it does not.
+func (q *options) pullFinishedHere(ctx context.Context, id string) error {
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	response, err := home.Call(callCtx, q.socket, home.Request{Action: home.ActionStatus, ID: id})
+	switch {
+	case errors.Is(err, home.ErrControlUnavailable):
+		return fmt.Errorf("session %s was pulled from the cluster, and the Sproozi service on this machine is not "+
+			"running, so this command cannot check that the pull finished here; start it with \"sproozi service "+
+			"start\", then run \"%s\" again", id, q.remoteCommand(cmdRemove, id))
+	case errors.Is(err, home.ErrUnknownSession):
+		return fmt.Errorf("session %s was pulled from the cluster, but the Sproozi service on this machine does "+
+			"not hold it, so the cluster's record cannot be removed from here: only a machine that still holds the "+
+			"pulled session can remove it, so remove the cluster's record before the local one", id)
+	case err != nil:
+		return err
+	case response.Status == nil || response.Status.Ownership != serviceOwnership:
+		return fmt.Errorf("session %s is still being pulled to this machine; finish with \"sproozi pull %s\", "+
+			"then remove it", id, shortID(id))
+	}
+	return nil
+}
+
+// removalConflict explains a removal the executor refused for the session's
+// state v, in local rm's words, with the commands that reach the cluster.
+func (q *options) removalConflict(ctx context.Context, target remoteTarget, v work.View, err error) error {
+	if problem := q.removalProblem(v); problem != nil {
+		return problem
+	}
+	if problem := q.dependantProblem(ctx, target, v.ID); problem != nil {
+		return problem
+	}
+	return err
+}
+
+// removeError explains a removal that failed for another reason than the
+// session's state.
+func (q *options) removeError(target remoteTarget, err error) error {
+	var remote *profile.RemoteError
+	if !errors.As(err, &remote) {
+		return err
+	}
+	switch {
+	case remote.Code == profile.CodeUnavailable && remote.Status == http.StatusNotFound:
+		return fmt.Errorf("the cluster's remote executor %s is older than remote rm; update the executor "+
+			"(docs/reference/remote-executors.md)", target.Name)
+	case remote.Code == profile.CodeUnavailable:
+		return fmt.Errorf("%w; the outcome is unknown: run \"%s\" again", err, q.remoteCommand(cmdRemove, q.id))
+	}
+	return err
+}
+
+// removalProblem says why a cluster's session cannot be removed in its
+// phase, or nil when its phase allows it. A task takes no stop, so a running
+// one is cancelled or left to finish. A task reads active while its turn
+// runs and stopping while its answer is recorded; an executor older than
+// that reads stopping for the whole turn.
+func (q *options) removalProblem(v work.View) error {
+	switch v.Phase {
+	case work.PhaseRetained, work.PhaseFailed, work.PhasePulled, work.Phase(phaseCancelled):
+		return nil
+	case work.PhaseExporting:
+		return fmt.Errorf("session %s is still being pulled; finish with \"%s\" before removing it", v.ID,
+			q.pullCommand(v.ID))
+	}
+	if v.Mode != work.ModeInteractive && (string(v.Phase) == phaseRunning || string(v.Phase) == phaseStopping) {
+		return fmt.Errorf("session %s is a task that is still running; wait for it to finish, or cancel it with "+
+			"\"%s\", then remove it", v.ID, q.remoteCommand(cmdCancel, v.ID))
+	}
+	return errors.New(session.RemovalRefusal(v.ID, session.Phase(v.Phase), func(name string) string {
+		return q.remoteCommand(name, v.ID)
+	}))
+}
+
+// dependantProblem names a session that starts from id and has not started
+// yet: the executor keeps id until it has.
+func (q *options) dependantProblem(ctx context.Context, target remoteTarget, id string) error {
+	views, err := target.Client.List(ctx, work.SessionQuery{})
+	if err != nil {
+		return nil
+	}
+	for _, v := range views {
+		if v.WorkspaceFrom != nil && v.WorkspaceFrom.SessionID == id && string(v.Phase) == phaseStarting {
+			return fmt.Errorf("session %s starts from session %s and has not started yet; wait for it to start, "+
+				"or cancel it with \"%s\", then remove session %s", v.ID, id, q.remoteCommand(cmdCancel, v.ID), id)
+		}
+	}
+	return nil
 }
 
 // remoteActionError explains a refused attach, stop or resume: an executor

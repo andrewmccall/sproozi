@@ -274,13 +274,24 @@ func (s *Service) StartWithMaxDuration(ctx context.Context, id, operationID, pat
 	if err = s.catalogStarted(r, maxDuration); err != nil {
 		return Status{}, err
 	}
-	return s.startFirstVisit(ctx, r)
+	status, err := s.startFirstVisit(ctx, r)
+	if errors.Is(err, session.ErrDeadlinePassed) {
+		// The deadline ended the first visit: the session keeps the
+		// workspace it started from, and resume continues it.
+		unlock, lockErr := s.lockSession(id)
+		if lockErr != nil {
+			return Status{}, lockErr
+		}
+		defer unlock()
+		return status, errors.Join(err, s.retireSettledSession(id))
+	}
+	return status, err
 }
 
 // catalogStarted records a session created by start in the home catalogue,
 // once. Its first execution shares the session UUID. A started execution that
-// is already idle (catalogued late, after an interruption) is recorded as
-// stopped, ready to resume.
+// is already idle (catalogued late, after an interruption, or ended by its
+// deadline before it started) is recorded as stopped, ready to resume.
 func (s *Service) catalogStarted(r session.Record, maxDuration string) error {
 	unlock, err := s.lockSession(r.ID)
 	if err != nil {
@@ -308,7 +319,7 @@ func (s *Service) catalogStartedLocked(r session.Record, maxDuration string) err
 		Original: work.Export{ID: r.ID, Harness: r.Harness, OperationID: first.OperationID, Claimed: true},
 		Current:  r.ID, Executions: []string{r.ID}, MaxDuration: maxDuration}
 	if r.Phase == session.PhaseIdle && r.CancelOperation == "" {
-		if c.Committed, err = s.lastStop(r); err != nil {
+		if c.Committed, err = s.settledStop(c, r); err != nil {
 			return err
 		}
 		if c.Committed.CheckpointDigest != "" {
@@ -381,6 +392,9 @@ func workspaceProblem(path string, err error, limit int64) string {
 // startFirstVisit prepares and activates a retained first visit that has not
 // started yet, after checking current Project approval.
 func (s *Service) startFirstVisit(ctx context.Context, r session.Record) (Status, error) {
+	if r.Abandoned(r.Operations[0].ID) {
+		return executionStatus(r), session.ErrDeadlinePassed
+	}
 	if r.PendingOperation != r.Operations[0].ID || r.CancelOperation != "" {
 		return executionStatus(r), nil
 	}

@@ -187,6 +187,21 @@ var ErrSessionCancelled = errors.New("session: session cancelled")
 // Recover finishes it.
 var ErrCancellationUnfinished = errors.New("session: cancellation unfinished")
 
+// ErrDeadlinePassed reports that the execution's deadline passed before a
+// move or first visit made its destination active. The coordinator ended
+// that operation without a new visit, so the execution is idle with its last
+// checkpoint; a new execution continues it (ADR 0060). A move of an idle
+// execution whose deadline passed is refused with it too.
+var ErrDeadlinePassed = errors.New("session: the execution's deadline passed before it started at its destination; " +
+	"it is stopped with its last checkpoint")
+
+// ErrEndUnproven reports that the deadline passed before a move or first
+// visit made its destination active, but the placement has not yet shown
+// that nothing runs or can start there, so the operation was not ended and
+// nothing was recorded (ADR 0060). Repeating the request tries again once the
+// placement is reachable; cancellation ends the execution if it never can.
+var ErrEndUnproven = errors.New("session: the placement has not shown that nothing runs at the destination")
+
 // pendingRecovery is the refusal for a new move or stop while the record's
 // pending operation is unfinished. It names that operation: the first visit's
 // start (or resume), a move, or a stop.
@@ -272,10 +287,13 @@ type Visit struct {
 type Stage string
 
 const (
-	stagePrepare   Stage = "prepare"
-	stageActivate  Stage = "activate"
-	stageStop      Stage = "stop"
-	stageComplete  Stage = "complete"
+	stagePrepare  Stage = "prepare"
+	stageActivate Stage = "activate"
+	stageStop     Stage = "stop"
+	stageComplete Stage = "complete"
+	// stageCancelled ends an operation without its destination becoming
+	// active: cancellation intent carried it out, or, in a record without
+	// that intent, its deadline passed first (ADR 0060).
 	stageCancelled Stage = "cancelled"
 )
 

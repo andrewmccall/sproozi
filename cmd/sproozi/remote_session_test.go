@@ -321,6 +321,104 @@ func TestRemoteStopShowsTheWaitingNoticeAndRepeatsTheSameOperation(t *testing.T)
 	}
 }
 
+// A stop request waits as long as the executor's stop may take, so the CLI
+// says why it waits after stopNoticeAfter, as a local stop does, even while
+// its one request has not been answered yet.
+func TestRemoteStopShowsTheWaitingNoticeWhileItsRequestWaits(t *testing.T) {
+	f := serveFakeExecutor(t, interactiveView(phaseRunning))
+	answer := f.answerView(interactiveView(work.PhaseRetained))
+	f.reply("stop", func(w http.ResponseWriter) {
+		time.Sleep(300 * time.Millisecond)
+		answer(w)
+	})
+	previous := stopNoticeAfter
+	stopNoticeAfter = 50 * time.Millisecond
+	t.Cleanup(func() { stopNoticeAfter = previous })
+	var code int
+	var out, errOut string
+	stderr := captureStderr(t, func() { code, out, errOut = runCLI("stop", "4215", "--remote") })
+	if code != 0 || !strings.Contains(out, "Stopped session "+remoteTestID+"; its work is kept.") {
+		t.Fatalf("stop exited %d: %s %s", code, out, errOut)
+	}
+	if strings.Count(stderr, "Waiting for the agent's current turn in session 4215d7d1 to finish;") != 1 ||
+		len(f.recorded("stop")) != 1 {
+		t.Fatalf("notice %q after %d requests", stderr, len(f.recorded("stop")))
+	}
+}
+
+// dropConnection answers a request by closing its connection, as a broken
+// port-forward does.
+func dropConnection(t *testing.T) func(http.ResponseWriter) {
+	return func(w http.ResponseWriter) {
+		conn, _, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_ = conn.Close()
+	}
+}
+
+// A dropped connection leaves the stop running on the executor, so stop
+// asks again with the same operation, through a new connection, and reports
+// the result.
+func TestRemoteStopRetriesADroppedConnection(t *testing.T) {
+	f := serveFakeExecutor(t, interactiveView(phaseRunning))
+	f.reply("stop", dropConnection(t))
+	f.reply("stop", dropConnection(t))
+	f.reply("stop", f.answerView(interactiveView(work.PhaseRetained)))
+	previous := remoteStopRetry
+	remoteStopRetry = time.Millisecond
+	t.Cleanup(func() { remoteStopRetry = previous })
+	var code int
+	var out, errOut string
+	captureStderr(t, func() { code, out, errOut = runCLI("stop", "4215", "--remote") })
+	if code != 0 || !strings.Contains(out, "Stopped session "+remoteTestID+"; its work is kept.") {
+		t.Fatalf("stop exited %d: %s %s", code, out, errOut)
+	}
+	stops := f.recorded("stop")
+	if len(stops) != 3 || string(stops[0].body) != string(stops[2].body) {
+		t.Fatalf("stop asked %d times, first %s, last %s", len(stops), stops[0].body, stops[len(stops)-1].body)
+	}
+}
+
+// Connections that keep failing are an unreachable executor, not a drop:
+// stop gives up after a few and names the operation to repeat.
+func TestRemoteStopGivesUpOnAConnectionThatKeepsFailing(t *testing.T) {
+	f := serveFakeExecutor(t, interactiveView(phaseRunning))
+	for range remoteStopDrops + 1 {
+		f.reply("stop", dropConnection(t))
+	}
+	previous := remoteStopRetry
+	remoteStopRetry = time.Millisecond
+	t.Cleanup(func() { remoteStopRetry = previous })
+	var code int
+	var errOut string
+	captureStderr(t, func() { code, _, errOut = runCLI("stop", "4215", "--remote") })
+	if code == 0 || len(f.recorded("stop")) != remoteStopDrops+1 {
+		t.Fatalf("stop exited %d after %d requests: %s", code, len(f.recorded("stop")), errOut)
+	}
+}
+
+// The waiting notice prints once, and never once the result is decided, even
+// from a timer that fired as the answer arrived.
+func TestRemoteStopNoticeNeverFollowsTheResult(t *testing.T) {
+	var out strings.Builder
+	n := &stopNotice{out: &out, text: "waiting\n"}
+	n.notify()
+	n.notify()
+	if out.String() != "waiting\n" {
+		t.Fatalf("notice printed %q", out.String())
+	}
+	out.Reset()
+	late := &stopNotice{out: &out, text: "waiting\n"}
+	late.finish()
+	late.notify()
+	if out.Len() != 0 {
+		t.Fatalf("notice after the result: %q", out.String())
+	}
+}
+
 // Each resume is a new operation; a repeated one names its operation.
 func TestRemoteResumeUsesANewOperation(t *testing.T) {
 	f := serveFakeExecutor(t, interactiveView(work.PhaseRetained))
@@ -520,6 +618,167 @@ func TestRemoteTaskRefusesInteractiveActions(t *testing.T) {
 	code, _, errOut := runCLI("stop", remoteTestID, "--remote")
 	if code != 1 || !strings.Contains(errOut, "is a task") {
 		t.Fatalf("task stop: %d %s", code, errOut)
+	}
+}
+
+// A full executor's refusal says what is full and how to make room; nothing
+// started, so it names no operation to repeat.
+func TestRemoteFullExecutorNamesTheRemedy(t *testing.T) {
+	f := serveFakeExecutor(t, interactiveView(work.PhaseRetained))
+	f.reply("run", answerStatus(http.StatusInsufficientStorage, `{"error":"retention_full"}`))
+	code, _, errOut := runCLI("run", "--remote", "--repository", "sproozi", "--task", "fix it")
+	if code != 1 || !strings.Contains(errOut, "retainedBytes") || !strings.Contains(errOut, "sproozi rm ID --remote") ||
+		strings.Contains(errOut, "--operation") || strings.Contains(errOut, "unavailable") {
+		t.Fatalf("full run: %d %s", code, errOut)
+	}
+	f.reply("run", answerStatus(http.StatusInsufficientStorage, `{"error":"sessions_full"}`))
+	code, _, errOut = runCLI("run", "--remote", "--repository", "sproozi", "-d")
+	if code != 1 || !strings.Contains(errOut, "maximum number of sessions") || strings.Contains(errOut, "--operation") {
+		t.Fatalf("full interactive run: %d %s", code, errOut)
+	}
+	f.reply("resume", answerStatus(http.StatusInsufficientStorage, `{"error":"retention_full"}`))
+	code, _, errOut = runCLI("resume", remoteTestID, "--remote", "-d")
+	if code != 1 || !strings.Contains(errOut, "retainedBytes") || strings.Contains(errOut, "--operation") {
+		t.Fatalf("full resume: %d %s", code, errOut)
+	}
+	f.reply("resume", answerStatus(http.StatusInsufficientStorage, `{"error":"executions_full"}`))
+	code, _, errOut = runCLI("resume", remoteTestID, "--remote", "-d")
+	if code != 1 || !strings.Contains(errOut, "maximum number of executions") || strings.Contains(errOut, "--operation") {
+		t.Fatalf("resume at the execution cap: %d %s", code, errOut)
+	}
+}
+
+// rm --remote removes a cluster's session; a refusal says why in local rm's
+// words, with the commands that reach the cluster.
+func TestRemoteRemove(t *testing.T) {
+	f := serveFakeExecutor(t, interactiveView(work.PhaseRetained))
+	f.reply("remove", answerStatus(http.StatusOK, `{"id":"`+remoteTestID+`"}`))
+	code, out, errOut := runCLI("rm", "4215", "--remote")
+	if code != 0 || !strings.Contains(out, "Deleted session "+remoteTestID+" from cluster "+testExecutor+".") {
+		t.Fatalf("rm exited %d: %s %s", code, out, errOut)
+	}
+	if removes := f.recorded("remove"); len(removes) != 1 || string(removes[0].body) != `{"id":"`+remoteTestID+`"}` {
+		t.Fatalf("executor received %+v", removes)
+	}
+	f.reply("remove", answerStatus(http.StatusOK, `{"id":"`+remoteTestID+`"}`))
+	if code, out, _ = runCLI("rm", remoteTestID, "--remote", "--json"); code != 0 ||
+		!strings.Contains(out, `"id"`) || !strings.Contains(out, remoteTestID) || strings.Contains(out, "Deleted") {
+		t.Fatalf("rm --json exited %d: %s", code, out)
+	}
+
+	for phase, want := range map[work.Phase]string{
+		work.Phase(phaseRunning): `session ` + remoteTestID + ` is running; stop it with "sproozi stop 4215d7d1 --remote" ` +
+			`or "sproozi cancel 4215d7d1 --remote" first`,
+		work.Phase(phaseUnknownStop): `session ` + remoteTestID + ` has unfinished work (unknown-stop); run ` +
+			`"sproozi recover 4215d7d1 --remote", then remove it`,
+		work.Phase(phaseStarting): `session ` + remoteTestID + ` is preparing; wait for it to finish, then remove it`,
+		work.PhaseExporting: `session ` + remoteTestID + ` is still being pulled; finish with "sproozi pull 4215d7d1" ` +
+			`before removing it`,
+	} {
+		f.reply("remove", answerStatus(http.StatusConflict, `{"error":"conflict"}`))
+		f.reply("info", f.answerView(interactiveView(phase)))
+		if code, _, errOut = runCLI("rm", remoteTestID, "--remote"); code != 1 || !strings.Contains(errOut, want) {
+			t.Errorf("rm of a %s session exited %d: %s", phase, code, errOut)
+		}
+	}
+
+	// A task takes no stop: it is cancelled, or left to finish. It is active
+	// while its turn runs and stopping while its answer is recorded.
+	for _, phase := range []string{phaseRunning, phaseStopping} {
+		task := interactiveView(phase)
+		task.Mode = ""
+		f.reply("remove", answerStatus(http.StatusConflict, `{"error":"conflict"}`))
+		f.reply("info", f.answerView(task))
+		want := `session ` + remoteTestID + ` is a task that is still running; wait for it to finish, or cancel it ` +
+			`with "sproozi cancel 4215d7d1 --remote", then remove it`
+		if code, _, errOut = runCLI("rm", remoteTestID, "--remote"); code != 1 || !strings.Contains(errOut, want) ||
+			strings.Contains(errOut, "sproozi stop") {
+			t.Errorf("rm of a %s task exited %d: %s", phase, code, errOut)
+		}
+	}
+
+	// A session another, unstarted one starts from names that one.
+	dependant := interactiveView(phaseStarting)
+	dependant.ID = "9b7c4a8e-1d2f-4c3b-8a6e-5f4d3c2b1a09"
+	dependant.WorkspaceFrom = &work.RevisionSource{SessionID: remoteTestID}
+	f.reply("remove", answerStatus(http.StatusConflict, `{"error":"conflict"}`))
+	f.reply("info", f.answerView(interactiveView(work.PhaseRetained)))
+	f.reply("list", func(w http.ResponseWriter) {
+		_ = json.NewEncoder(w).Encode([]work.View{interactiveView(work.PhaseRetained), dependant})
+	})
+	want := `session 9b7c4a8e-1d2f-4c3b-8a6e-5f4d3c2b1a09 starts from session ` + remoteTestID + ` and has not ` +
+		`started yet; wait for it to start, or cancel it with "sproozi cancel 9b7c4a8e --remote", then remove ` +
+		`session ` + remoteTestID
+	if code, _, errOut = runCLI("rm", remoteTestID, "--remote"); code != 1 || !strings.Contains(errOut, want) {
+		t.Errorf("rm of a session another starts from exited %d: %s", code, errOut)
+	}
+
+	f.reply("remove", answerStatus(http.StatusNotFound, "404 page not found"))
+	if code, _, errOut = runCLI("rm", remoteTestID, "--remote"); code != 1 ||
+		!strings.Contains(errOut, "older than remote rm") {
+		t.Fatalf("old executor rm: %d %s", code, errOut)
+	}
+	f.reply("remove", answerStatus(http.StatusServiceUnavailable, `{"error":"unavailable"}`))
+	if code, _, errOut = runCLI("rm", remoteTestID, "--remote"); code != 1 ||
+		!strings.Contains(errOut, `run "sproozi rm 4215d7d1 --remote" again`) || strings.Contains(errOut, "--operation") {
+		t.Fatalf("lost rm: %d %s", code, errOut)
+	}
+}
+
+// A pulled session is removed from the cluster only when this machine's
+// service holds its pull as finished: the cluster then no longer answers a
+// repeated claim.
+func TestRemoteRemoveOfAPulledSessionNeedsThePullFinishedHere(t *testing.T) {
+	f := serveFakeExecutor(t, interactiveView(work.PhasePulled))
+	conflict := answerStatus(http.StatusConflict, `{"error":"conflict"}`)
+
+	f.reply("remove", conflict)
+	code, _, errOut := runCLI("rm", remoteTestID, "--remote", "--socket",
+		"/sproozi-missing-"+uuid.NewString()+".sock")
+	if code != 1 || !strings.Contains(errOut, "the Sproozi service on this machine is not running") ||
+		!strings.Contains(errOut, "sproozi service start") {
+		t.Fatalf("pulled, no service: %d %s", code, errOut)
+	}
+
+	for ownership, want := range map[string]string{
+		"": `the Sproozi service on this machine does not hold it, so the cluster's record cannot be removed from ` +
+			`here`,
+		"source": `session ` + remoteTestID + ` is still being pulled to this machine; finish with "sproozi pull ` +
+			`4215d7d1", then remove it`,
+	} {
+		socket, _ := fakeService(t, func(home.Request) home.Response {
+			if ownership == "" {
+				return home.Response{Error: "no session", UnknownSession: true}
+			}
+			return home.Response{Status: &home.Status{ID: remoteTestID, Ownership: ownership}}
+		})
+		f.reply("remove", conflict)
+		if code, _, errOut = runCLI("rm", remoteTestID, "--remote", "--socket", socket); code != 1 ||
+			!strings.Contains(errOut, want) {
+			t.Errorf("pulled, local ownership %q: %d %s", ownership, code, errOut)
+		}
+	}
+	for _, c := range f.recorded("remove") {
+		if strings.Contains(string(c.body), "pullFinished") {
+			t.Fatalf("claimed a finished pull it does not hold: %s", c.body)
+		}
+	}
+
+	socket, requests := fakeService(t, func(home.Request) home.Response {
+		return home.Response{Status: &home.Status{ID: remoteTestID, Ownership: "home"}}
+	})
+	f.reply("remove", conflict)
+	f.reply("remove", answerStatus(http.StatusOK, `{"id":"`+remoteTestID+`"}`))
+	if code, out, errOut := runCLI("rm", remoteTestID, "--remote", "--socket", socket); code != 0 ||
+		!strings.Contains(out, "Deleted session "+remoteTestID) {
+		t.Fatalf("pulled and held here: %d %s %s", code, out, errOut)
+	}
+	removes := f.recorded("remove")
+	if last := removes[len(removes)-1]; string(last.body) != `{"id":"`+remoteTestID+`","pullFinished":true}` {
+		t.Fatalf("executor received %s", last.body)
+	}
+	if len(*requests) != 1 || (*requests)[0].Action != home.ActionStatus || (*requests)[0].ID != remoteTestID {
+		t.Fatalf("service received %+v", *requests)
 	}
 }
 

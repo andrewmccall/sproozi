@@ -30,14 +30,14 @@ import (
 
 const engineRunning = "running"
 
-// grantPhase is where a grant record is in its lifecycle (ADR 0058):
+// grantPhase is where a grant record is in its lifecycle. The record declares
+// its phases and the events that move it (grantTransitions, ADR 0058). Only an
+// active grant authenticates. Revoking an initializing grant first finishes
+// creating its accounts, so every revoked grant can seal.
 //
-//	(none) --Initialize--> initializing --accounts created--> inactive
-//	inactive --Activate--> active --Activate replay--> active
-//	initializing|inactive|active --Revoke--> revoked --Seal--> revoked with receipt
-//
-// Only an active grant authenticates. Revoking an initializing grant first
-// finishes creating its accounts, so every revoked grant can seal.
+// An operation on a grant that already holds its outcome replays it without
+// an event: Initialize of an inactive or active grant, Activate of an active
+// one and Revoke of a revoked one.
 type grantPhase string
 
 const (
@@ -45,35 +45,90 @@ const (
 	inactive     grantPhase = "inactive"
 	active       grantPhase = "active"
 	revoked      grantPhase = "revoked"
+
+	// grantNone is the phase before Initialize retains a record.
+	grantNone grantPhase = ""
 )
 
-// grantOp names a mutator checked against grantTransitions.
-type grantOp string
+var grantPhases = []grantPhase{initializing, inactive, active, revoked}
+
+// grantEvent is a request to the grant owner or the outcome of its work.
+type grantEvent string
 
 const (
-	grantInitialize grantOp = "initialize"
-	grantActivate   grantOp = "activate"
-	grantRevoke     grantOp = "revoke"
-	grantSeal       grantOp = "seal"
-	grantBind       grantOp = "bind native"
+	// evInitialize retains a new grant and its credential.
+	evInitialize grantEvent = "initialize"
+	// evInitialized: every account of the allocation exists.
+	evInitialized grantEvent = "initialized"
+	// evActivate lets the grant authenticate.
+	evActivate grantEvent = "activate"
+	// evRevoke ends the grant.
+	evRevoke grantEvent = "revoke"
+	// evSeal retains the receipt of a revoked grant; the phase stays.
+	evSeal grantEvent = "seal"
+	// evBindNative records a first visit's native UUID; the phase stays.
+	evBindNative grantEvent = "bind native"
 )
 
-// grantTransitions lists the phases each operation accepts. Replays of a
-// completed operation are accepted and change nothing.
-var grantTransitions = map[grantOp][]grantPhase{
-	grantInitialize: {initializing, inactive, active},
-	grantActivate:   {inactive, active},
-	grantRevoke:     {initializing, inactive, active, revoked},
-	grantSeal:       {revoked},
-	grantBind:       {inactive, active, revoked},
+// grantRule is what an event may do.
+type grantRule struct {
+	// refusedAfterDeadline: the event starts or extends work, so it is not
+	// attempted once the launch's deadline has passed. A launch without a
+	// deadline refuses nothing (ADR 0056).
+	refusedAfterDeadline bool
+	// to maps each phase the event may happen in to the phase it leads to.
+	to map[grantPhase]grantPhase
 }
 
-// permit refuses op from a phase its table entry leaves out.
-func (r record) permit(op grantOp) error {
-	if !slices.Contains(grantTransitions[op], r.Phase) {
-		return fmt.Errorf("docker gateway: %s refused while the allocation is %s", op, r.Phase)
+// grantTransitions declares every phase change the grant owner makes.
+var grantTransitions = map[grantEvent]grantRule{
+	evInitialize:  {refusedAfterDeadline: true, to: map[grantPhase]grantPhase{grantNone: initializing}},
+	evInitialized: {refusedAfterDeadline: true, to: map[grantPhase]grantPhase{initializing: inactive}},
+	evActivate:    {refusedAfterDeadline: true, to: map[grantPhase]grantPhase{inactive: active}},
+	evRevoke:      {to: map[grantPhase]grantPhase{initializing: revoked, inactive: revoked, active: revoked}},
+	evSeal:        {to: map[grantPhase]grantPhase{revoked: revoked}},
+	evBindNative:  {to: map[grantPhase]grantPhase{inactive: inactive, active: active, revoked: revoked}},
+}
+
+// admit checks, before the owner attempts ev's side effect, that ev may
+// happen in r's phase and, for an event that starts work, that the launch's
+// deadline has not passed at now.
+func (r record) admit(ev grantEvent, now time.Time) error {
+	rule := grantTransitions[ev]
+	if _, ok := rule.to[r.Phase]; !ok {
+		return refused(r.Phase, ev)
+	}
+	if rule.refusedAfterDeadline && deadline.At(r.Launch.Deadline).Passed(now) {
+		return fmt.Errorf("docker gateway: %s refused after the launch deadline", ev)
 	}
 	return nil
+}
+
+// apply records ev: it moves r to the phase grantTransitions declares, or
+// refuses an undeclared transition and leaves r unchanged. It is the only
+// place a grant's phase changes; save then validates the record.
+func (r *record) apply(ev grantEvent) error {
+	to, ok := grantTransitions[ev].to[r.Phase]
+	if !ok {
+		return refused(r.Phase, ev)
+	}
+	r.Phase = to
+	return nil
+}
+
+func refused(from grantPhase, ev grantEvent) error {
+	if from == grantNone {
+		return fmt.Errorf("docker gateway: %s refused without a record", ev)
+	}
+	return fmt.Errorf("docker gateway: %s refused while the allocation is %s", ev, from)
+}
+
+// commit applies ev and saves the record.
+func (o *Owner) commit(r *record, ev grantEvent) error {
+	if err := r.apply(ev); err != nil {
+		return err
+	}
+	return o.save(*r)
 }
 
 var identifier = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
@@ -105,6 +160,8 @@ type Owner struct {
 	profileDigest      string
 	instructionDigest  string
 	nativeCapabilities []api.CapabilityKind
+	// now is the clock deadlines are checked against.
+	now func() time.Time
 }
 
 // recordVersion 2 keeps Launch exactly as initialized and records a first
@@ -153,7 +210,7 @@ func Open(config Config) (*Owner, error) {
 		return nil, err
 	}
 	return &Owner{files: files, ledger: config.Ledger, observer: config.Observer, policy: profile.Policy, template: profile.Template,
-		profileDigest: fmt.Sprintf("%x", sha256.Sum256(data)), instructionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(profile.Template.Spec.Instructions))), nativeCapabilities: slices.Clone(config.NativeCapabilities)}, nil
+		profileDigest: fmt.Sprintf("%x", sha256.Sum256(data)), instructionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(profile.Template.Spec.Instructions))), nativeCapabilities: slices.Clone(config.NativeCapabilities), now: time.Now}, nil
 }
 
 func (o *Owner) Close() error { o.mu.Lock(); defer o.mu.Unlock(); return o.files.close() }
@@ -230,33 +287,50 @@ func (o *Owner) load(id string) (record, error) {
 	if err != nil {
 		return record{}, err
 	}
+	if err = o.validate(r, id); err != nil {
+		return record{}, err
+	}
+	return r, nil
+}
+
+// save validates r as load does before writing it, so a record that
+// contradicts itself is never retained.
+func (o *Owner) save(r record) error {
+	if err := o.validate(r, r.Launch.AllocationID); err != nil {
+		return err
+	}
+	return o.files.save(r)
+}
+
+// validate checks a grant record retained, or about to be retained, under id.
+func (o *Owner) validate(r record, id string) error {
 	if r.Version != recordVersion || r.Launch.AllocationID != id || r.ProfileDigest != o.profileDigest || o.validateIntent(r.Launch, r.Incarnation, r.initial()) != nil ||
 		r.Thread != "" && (!r.initial() || !nativeUUID.MatchString(r.Thread)) {
-		return record{}, errors.New("docker gateway: registry binding is unavailable")
+		return errors.New("docker gateway: registry binding is unavailable")
 	}
 	separator := strings.LastIndex(r.Token, ".")
 	if separator < 1 || r.Token[:separator] != id {
-		return record{}, errors.New("docker gateway: invalid retained token")
+		return errors.New("docker gateway: invalid retained token")
 	}
 	secret, err := base64.RawURLEncoding.DecodeString(r.Token[separator+1:])
 	if err != nil || len(secret) != 32 {
-		return record{}, errors.New("docker gateway: invalid retained token")
+		return errors.New("docker gateway: invalid retained token")
 	}
-	if !slices.Contains([]grantPhase{initializing, inactive, active, revoked}, r.Phase) {
-		return record{}, errors.New("docker gateway: invalid retained lifecycle")
+	if !slices.Contains(grantPhases, r.Phase) {
+		return errors.New("docker gateway: invalid retained lifecycle")
 	}
 	if r.Receipt != nil {
 		if r.Phase != revoked || len(r.Receipt) != len(r.Launch.Allowances) {
-			return record{}, errors.New("docker gateway: invalid retained receipt")
+			return errors.New("docker gateway: invalid retained receipt")
 		}
 		for cap, a := range r.Launch.Allowances {
 			u, ok := r.Receipt[cap]
 			if !ok || u.Units < 0 || u.CostMicros < 0 || (a.Units.Bounded && u.Units > a.Units.Value) || (a.CostMicros.Bounded && u.CostMicros > a.CostMicros.Value) {
-				return record{}, errors.New("docker gateway: inconsistent retained receipt")
+				return errors.New("docker gateway: inconsistent retained receipt")
 			}
 		}
 	}
-	return r, nil
+	return nil
 }
 
 // initial reports a first visit started from a Git workspace, whose launch
@@ -291,13 +365,14 @@ func (o *Owner) Initialize(ctx context.Context, launch session.Launch, instance 
 	if err := o.validateIntent(launch, instance, launch.CheckpointDigest == ""); err != nil {
 		return "", err
 	}
-	if deadline.At(launch.Deadline).Passed(time.Now()) {
-		return "", errors.New("docker gateway: launch expired")
-	}
 	r, err := o.load(launch.AllocationID)
 	if errors.Is(err, errRecordMissing) {
 		if launch.CheckpointDigest == "" && launch.ThreadID != "" {
 			return "", errors.New("docker gateway: initial UUID must come from actual native binding")
+		}
+		r = record{Version: recordVersion, Launch: launch, Incarnation: instance, ProfileDigest: o.profileDigest}
+		if err = r.admit(evInitialize, o.now()); err != nil {
+			return "", err
 		}
 		for capability := range launch.Allowances {
 			if _, stateErr := o.ledger.State(ctx, account(launch.AllocationID, capability)); !errors.Is(stateErr, budget.ErrAccountNotFound) {
@@ -308,11 +383,11 @@ func (o *Owner) Initialize(ctx context.Context, launch session.Launch, instance 
 		if _, err = rand.Read(secret); err != nil {
 			return "", err
 		}
-		r = record{Version: recordVersion, Launch: launch, Incarnation: instance, ProfileDigest: o.profileDigest, Token: launch.AllocationID + "." + base64.RawURLEncoding.EncodeToString(secret), Phase: initializing}
+		r.Token = launch.AllocationID + "." + base64.RawURLEncoding.EncodeToString(secret)
 		if err = o.bound(ctx, r, false); err != nil {
 			return "", err
 		}
-		if err = o.files.save(r); err != nil {
+		if err = o.commit(&r, evInitialize); err != nil {
 			return "", err
 		}
 	} else if err != nil {
@@ -321,15 +396,15 @@ func (o *Owner) Initialize(ctx context.Context, launch session.Launch, instance 
 	if !session.SameLaunch(r.Launch, launch) || r.Incarnation != instance {
 		return "", errors.New("docker gateway: allocation intent changed")
 	}
-	if err = r.permit(grantInitialize); err != nil {
-		return "", err
-	}
-	if r.Phase == initializing {
+	// An inactive or active grant already holds its accounts: a replay.
+	if r.Phase != inactive && r.Phase != active {
+		if err = r.admit(evInitialized, o.now()); err != nil {
+			return "", err
+		}
 		if err = o.initializeAccounts(ctx, r); err != nil {
 			return "", err
 		}
-		r.Phase = inactive
-		if err = o.files.save(r); err != nil {
+		if err = o.commit(&r, evInitialized); err != nil {
 			return "", err
 		}
 	}
@@ -348,11 +423,13 @@ func (o *Owner) Activate(ctx context.Context, launch session.Launch, instance se
 	if err != nil {
 		return err
 	}
-	if err = r.permit(grantActivate); err != nil {
-		return err
+	// An active grant already holds the outcome; the deadline does not refuse
+	// its replay (ADR 0058).
+	if r.Phase == active {
+		return nil
 	}
-	if deadline.At(r.Launch.Deadline).Passed(time.Now()) {
-		return errors.New("docker gateway: allocation cannot activate")
+	if err = r.admit(evActivate, o.now()); err != nil {
+		return err
 	}
 	if err = o.bound(ctx, r, true); err != nil {
 		return err
@@ -362,8 +439,7 @@ func (o *Owner) Activate(ctx context.Context, launch session.Launch, instance se
 			return err
 		}
 	}
-	r.Phase = active
-	return o.files.save(r)
+	return o.commit(&r, evActivate)
 }
 
 // initializeAccounts creates every account of the allocation. Ledger
@@ -389,19 +465,18 @@ func (o *Owner) Revoke(ctx context.Context, launch session.Launch, instance sess
 	if err != nil {
 		return err
 	}
-	if err = r.permit(grantRevoke); err != nil {
+	if r.Phase == revoked {
+		return nil
+	}
+	if err = r.admit(evRevoke, o.now()); err != nil {
 		return err
 	}
-	switch r.Phase {
-	case revoked:
-		return nil
-	case initializing:
+	if r.Phase == initializing {
 		if err = o.initializeAccounts(ctx, r); err != nil {
 			return fmt.Errorf("docker gateway: revoking an initializing allocation: %w", err)
 		}
 	}
-	r.Phase = revoked
-	return o.files.save(r)
+	return o.commit(&r, evRevoke)
 }
 
 func (o *Owner) Seal(ctx context.Context, launch session.Launch, instance session.Incarnation) (map[string]budget.TrustedUsage, error) {
@@ -411,7 +486,7 @@ func (o *Owner) Seal(ctx context.Context, launch session.Launch, instance sessio
 	if err != nil {
 		return nil, err
 	}
-	if err = r.permit(grantSeal); err != nil {
+	if err = r.admit(evSeal, o.now()); err != nil {
 		return nil, fmt.Errorf("%w: revoke before sealing", err)
 	}
 	// A first visit can stop with no bound UUID: cancelled before its
@@ -429,7 +504,7 @@ func (o *Owner) Seal(ctx context.Context, launch session.Launch, instance sessio
 		usage[cap] = u
 	}
 	r.Receipt = usage
-	if err = o.files.save(r); err != nil {
+	if err = o.save(r); err != nil {
 		return nil, err
 	}
 	return maps.Clone(usage), nil
@@ -449,14 +524,14 @@ func (o *Owner) BindNative(_ context.Context, launch session.Launch, instance se
 	if err != nil {
 		return "", err
 	}
-	if !r.initial() || r.permit(grantBind) != nil || r.Receipt != nil {
+	if !r.initial() || r.admit(evBindNative, o.now()) != nil || r.Receipt != nil {
 		return "", errors.New("docker gateway: initial native binding is unavailable")
 	}
 	if r.Thread != "" && r.Thread != actualUUID {
 		return "", errors.New("docker gateway: native UUID cannot change")
 	}
 	r.Thread = actualUUID
-	if err = o.files.save(r); err != nil {
+	if err = o.save(r); err != nil {
 		return "", err
 	}
 	return r.Thread, nil
@@ -518,7 +593,7 @@ func (o *Owner) activeRecord(id string) (record, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	r, err := o.load(id)
-	if err != nil || r.Phase != active || deadline.At(r.Launch.Deadline).Passed(time.Now()) {
+	if err != nil || r.Phase != active || deadline.At(r.Launch.Deadline).Passed(o.now()) {
 		return record{}, gateway.ErrGrantRevoked
 	}
 	return r, nil

@@ -47,6 +47,9 @@ const fixtureMax = int64(8 << 20)
 const fixtureRuntimeName = "native"
 const fixtureTypeKey = "type"
 
+// fixtureWorker is the run's ServiceAccount the controller records.
+const fixtureWorker = "approved-worker"
+
 // fixtureTemplate is the managed template the fixtures register against.
 const fixtureTemplate = "approved"
 const fixturePolicy = "policy"
@@ -128,6 +131,14 @@ type admissionClient struct {
 	client.Client
 	runCreates       int
 	deferTermination bool
+	// queued leaves a created run Queued with no Pod, as a run waiting
+	// under a concurrency cap is.
+	queued bool
+	// reconcile, when set, runs after each patch of a run, as the
+	// controller's next reconcile would.
+	reconcile func(context.Context, *api.AgentRun)
+	// patchErr fails the next patch once, as a crash before it would.
+	patchErr error
 }
 
 func (c *admissionClient) Create(ctx context.Context, obj client.Object, options ...client.CreateOption) error {
@@ -139,8 +150,15 @@ func (c *admissionClient) Create(ctx context.Context, obj client.Object, options
 		return c.Client.Create(ctx, obj, options...)
 	}
 	c.runCreates++
+	if c.queued {
+		if err := c.Client.Create(ctx, run, options...); err != nil {
+			return err
+		}
+		run.Status.Phase = api.AgentRunPhaseQueued
+		return c.Client.Status().Update(ctx, run)
+	}
 	run.Status.Phase = api.AgentRunPhaseRunning
-	run.Status.Identity = api.AgentRunIdentity{SandboxName: runtimekube.RunName(run.UID), ServiceAccountName: "approved-worker"}
+	run.Status.Identity = api.AgentRunIdentity{SandboxName: runtimekube.RunName(run.UID), ServiceAccountName: fixtureWorker}
 	if err := c.Client.Create(ctx, run, options...); err != nil {
 		return err
 	}
@@ -163,7 +181,7 @@ func admittedPod(run *api.AgentRun) *corev1.Pod {
 				runtimekube.RunNamespaceLabel: run.Namespace,
 			},
 		},
-		Spec: corev1.PodSpec{ServiceAccountName: "approved-worker"},
+		Spec: corev1.PodSpec{ServiceAccountName: fixtureWorker},
 		Status: corev1.PodStatus{
 			Phase: corev1.PodRunning,
 			ContainerStatuses: []corev1.ContainerStatus{
@@ -554,14 +572,21 @@ type builtArtifact struct {
 
 // fixtureArtifacts caches each native kind's fixture checkpoint. Its Git
 // capture is slow, so each kind is built once per test binary.
-var fixtureArtifacts sync.Map // harness.NativeKind -> *builtArtifact
+var fixtureArtifacts sync.Map // kind and note -> *builtArtifact
 
 func fixtureArtifactKind(t *testing.T, kind harness.NativeKind) ([]byte, checkpoint.Metadata) {
 	t.Helper()
-	value, _ := fixtureArtifacts.LoadOrStore(kind, &builtArtifact{})
+	return cachedFixtureArtifact(t, kind, "fixture\n")
+}
+
+// cachedFixtureArtifact builds, once per test binary, a kind's checkpoint
+// whose workspace note holds note, so a test can tell two checkpoints apart.
+func cachedFixtureArtifact(t *testing.T, kind harness.NativeKind, note string) ([]byte, checkpoint.Metadata) {
+	t.Helper()
+	value, _ := fixtureArtifacts.LoadOrStore(string(kind)+"/"+note, &builtArtifact{})
 	a := value.(*builtArtifact)
 	a.once.Do(func() {
-		a.data, a.meta = buildFixtureArtifactKind(t, kind)
+		a.data, a.meta = buildFixtureArtifactKind(t, kind, note)
 		a.built = true
 	})
 	if !a.built {
@@ -570,7 +595,7 @@ func fixtureArtifactKind(t *testing.T, kind harness.NativeKind) ([]byte, checkpo
 	return bytes.Clone(a.data), a.meta
 }
 
-func buildFixtureArtifactKind(t *testing.T, kind harness.NativeKind) ([]byte, checkpoint.Metadata) {
+func buildFixtureArtifactKind(t *testing.T, kind harness.NativeKind, note string) ([]byte, checkpoint.Metadata) {
 	t.Helper()
 	repo := t.TempDir()
 	git := func(args ...string) {
@@ -583,7 +608,7 @@ func buildFixtureArtifactKind(t *testing.T, kind harness.NativeKind) ([]byte, ch
 		}
 	}
 	git("init", "--quiet", "--template=", "-b", "main")
-	if err := os.WriteFile(filepath.Join(repo, "note"), []byte("fixture\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, "note"), []byte(note), 0600); err != nil {
 		t.Fatal(err)
 	}
 	git("add", ".")

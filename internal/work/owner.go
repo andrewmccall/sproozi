@@ -83,6 +83,10 @@ type Config struct {
 	// executor refuses interactive sessions.
 	Terminal Terminal
 	Log      io.Writer
+	// Stops tracks the stops the owner's handler carries on after their
+	// requests end, so the executor can drain them at shutdown. Without it
+	// the handler keeps its own.
+	Stops *profile.Stops
 
 	// retry bounds the driver's automatic recovery of an unproven stop or
 	// unsealed usage; zero values take the defaults.
@@ -251,6 +255,12 @@ func Open(c Config) (*Owner, error) {
 	c.Repositories = maps.Clone(c.Repositories)
 	c.Projects = project.Clone(c.Projects)
 	o := &Owner{config: c, lock: f, ctx: ctx, stopAll: cancel, running: map[string]*driver{}}
+	// A removal a crash interrupted is finished before anything starts, so a
+	// record whose journals are gone is never started again.
+	if err = o.finishRemovals(); err != nil {
+		_ = o.Close()
+		return nil, fmt.Errorf("work: finish removing sessions: %w", err)
+	}
 	ids, err := o.ids()
 	if err != nil {
 		_ = o.Close()
@@ -365,8 +375,14 @@ func (o *Owner) SubmitAs(ctx context.Context, caller Caller, q Submit) (View, er
 	}
 	o.retention.Lock()
 	defer o.retention.Unlock()
-	if err = o.admitRetention(); err != nil {
+	if err = o.admitRetention(true); err != nil {
 		return View{}, err
+	}
+	// Removal holds the same lock: the session this one starts from is
+	// still there, and is now kept until this one has started.
+	if q.WorkspaceFrom != nil && (o.wasRemoved(q.WorkspaceFrom.SessionID) ||
+		!o.recorded(q.WorkspaceFrom.SessionID)) {
+		return View{}, &profile.Rejection{Code: profile.CodeInvalid}
 	}
 	if len(upload) > 0 {
 		// Kept until the coordinator retains it as the first visit's input.
@@ -568,7 +584,14 @@ func (o *Owner) cancelExecution(ctx context.Context, id, op, problem string) err
 		}
 		return unlock, nil
 	}
-	_, err = o.config.Coordinator.CancelUnsettled(ctx, r.Current, op, admit)
+	cancel := o.config.Coordinator.CancelUnsettled
+	if rec, inspectErr := o.config.Coordinator.Inspect(r.Current); inspectErr == nil &&
+		r.Intent.Mode != ModeInteractive && startEnded(rec) {
+		// A task whose start the deadline ended is idle with nothing to
+		// keep, so the cancellation it is owed is not refused as a stop.
+		cancel = o.config.Coordinator.Cancel
+	}
+	_, err = cancel(ctx, r.Current, op, admit)
 	switch {
 	case errors.Is(err, errCancelledBeforeStart):
 		return nil

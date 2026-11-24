@@ -34,6 +34,9 @@ type retained struct {
 	// supervisor's exit report or the container's exit code. It is a
 	// workload diagnostic, never a writer fence or accounting fact.
 	Exited *session.Exit `json:"exited,omitempty"`
+	// PreparationAborted records that AbortPreparation fenced this launch:
+	// Prepare refuses it and nothing creates its registration again.
+	PreparationAborted bool `json:"preparationAborted,omitempty"`
 }
 
 func privatePath(path string, dir bool) error {
@@ -60,24 +63,8 @@ func (p *Placement) persistIntent(l session.Launch, data []byte) (retained, erro
 	if !os.IsNotExist(err) {
 		return retained{}, err
 	}
-	// One allocation per principal/session epoch prevents alternative allocation
-	// IDs from replaying the same epoch through another deterministic Run name.
-	epochPath := filepath.Join(p.config.Directory, "epoch-"+l.ExecutionID+"-"+strconv.FormatUint(l.Epoch, 10)+recordSuffix)
-	var previous session.Launch
-	if epochData, readErr := p.read(epochPath, 64<<10); readErr == nil {
-		if decode(epochData, &previous) != nil || !session.SameLaunch(l, previous) {
-			return retained{}, &profile.Rejection{Code: profile.CodeConflict}
-		}
-	} else if !os.IsNotExist(readErr) {
-		return retained{}, readErr
-	} else {
-		encoded, marshalErr := json.Marshal(l)
-		if marshalErr != nil {
-			return retained{}, marshalErr
-		}
-		if err = p.atomic(epochPath, encoded); err != nil {
-			return retained{}, err
-		}
+	if err = p.claimEpoch(l); err != nil {
+		return retained{}, err
 	}
 	if err = p.atomic(p.artifactPath(l.AllocationID, "input"), data); err != nil {
 		return retained{}, err
@@ -85,6 +72,31 @@ func (p *Placement) persistIntent(l session.Launch, data []byte) (retained, erro
 	r := retained{Launch: l}
 	return r, p.save(r)
 }
+
+// claimEpoch records l as its session epoch's one allocation. One allocation
+// per principal/session epoch prevents alternative allocation IDs from
+// replaying the same epoch through another deterministic Run name; another
+// launch for a claimed epoch is a conflict.
+func (p *Placement) claimEpoch(l session.Launch) error {
+	epochPath := filepath.Join(p.config.Directory, "epoch-"+l.ExecutionID+"-"+strconv.FormatUint(l.Epoch, 10)+recordSuffix)
+	epochData, err := p.read(epochPath, 64<<10)
+	if err == nil {
+		var previous session.Launch
+		if decode(epochData, &previous) != nil || !session.SameLaunch(l, previous) {
+			return &profile.Rejection{Code: profile.CodeConflict}
+		}
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return err
+	}
+	encoded, err := json.Marshal(l)
+	if err != nil {
+		return err
+	}
+	return p.atomic(epochPath, encoded)
+}
+
 func (p *Placement) load(l session.Launch) (retained, error) {
 	if !idValid(l.AllocationID) {
 		return retained{}, &profile.Rejection{Code: profile.CodeInvalid}

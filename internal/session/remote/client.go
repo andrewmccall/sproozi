@@ -200,6 +200,16 @@ func (c *Client) Abort(ctx context.Context, l session.Launch, i session.Incarnat
 	return o, c.settle(p, err)
 }
 
+// AbortPreparation fences a pending launch on the executor; against an older
+// executor it degrades as profile.Client.AbortPreparation describes.
+func (c *Client) AbortPreparation(ctx context.Context, l session.Launch) error {
+	p, err := c.client(ctx)
+	if err != nil {
+		return err
+	}
+	return c.settle(p, p.AbortPreparation(ctx, l))
+}
+
 func (c *Client) Attach(ctx context.Context, l session.Launch, i session.Incarnation, input io.Reader, output io.Writer) error {
 	p, err := c.client(ctx)
 	if err != nil {
@@ -221,8 +231,9 @@ func (c *Client) CallOwner(ctx context.Context, action string, input, output any
 }
 
 var (
-	_ session.Placement         = (*Client)(nil)
-	_ session.TerminalPlacement = (*Client)(nil)
+	_ session.Placement          = (*Client)(nil)
+	_ session.TerminalPlacement  = (*Client)(nil)
+	_ session.PreparationAborter = (*Client)(nil)
 )
 
 // OpenOwnerAttachment attaches to an interactive session the executor owns;

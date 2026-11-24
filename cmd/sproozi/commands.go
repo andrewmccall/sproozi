@@ -95,7 +95,7 @@ var commands = []command{
 			"With --remote, start the session in a Kubernetes cluster instead and connect to it. It\n" +
 			"belongs to --repository or --project and starts from that approved repository, or from\n" +
 			"PATH when given, which this command copies as it does here and uploads. Ctrl-] detaches\n" +
-			"and leaves it running; attach, stop, resume, status and cancel with --remote reach it.\n" +
+			"and leaves it running; attach, stop, resume, status, cancel and rm with --remote reach it.\n" +
 			"With --task or --task-file, submit a task the cluster runs to completion instead.",
 		flags: []string{"harness", "login", "detach", "include-ignored", "max-duration", "remote", "context", "namespace",
 			"task", "task-file",
@@ -126,7 +126,7 @@ var commands = []command{
 		flags:   []string{"remote", "context", "namespace", "json", "root"}, hiddenFlags: sessionPlumbing(true)},
 	{name: cmdRemove, operands: "ID", group: groupSessions, session: true,
 		summary: "Delete a stopped or cancelled session and its saved work",
-		flags:   []string{"json", "root"}, hiddenFlags: sessionPlumbing(false)},
+		flags:   []string{"remote", "context", "namespace", "json", "root"}, hiddenFlags: sessionPlumbing(false)},
 	{name: cmdMove, operands: "ID --local|--remote", group: groupRemote, session: true,
 		summary: "Move a running session between this machine and a cluster",
 		about: "Move a running session after the agent's current turn: --local brings it to this machine,\n" +
@@ -263,6 +263,8 @@ var commandFlagHelp = map[string]map[string]string{
 		"context": "resume a session in this cluster: a kubeconfig context or file"},
 	cmdCancel: {"remote": "cancel a session in the cluster (the sproozi context unless --context)",
 		"context": "cancel a session in this cluster: a kubeconfig context or file"},
+	cmdRemove: {"remote": "delete a session in the cluster (the sproozi context unless --context)",
+		"context": "delete a session in this cluster: a kubeconfig context or file"},
 	cmdRecover: {"remote": "recover a session in the cluster (the sproozi context unless --context)",
 		"context": "recover a session in this cluster: a kubeconfig context or file"},
 	cmdPull: {"context": "cluster to pull from, the first time: a kubeconfig context or file"},

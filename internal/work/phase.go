@@ -65,6 +65,9 @@ func (p Phase) stopped() bool {
 //     the tail is written. An interactive session has no tail: idle is
 //     failed when its harness exited with a failure, otherwise retained,
 //     even with no conversation, since resume restarts from its workspace;
+//   - a task's completion wait (see completing) is active while the
+//     coordinator holds it as stopping, and stopping once its writer
+//     stopped and the coordinator is finishing it;
 //   - every other coordinator phase is reported as it is.
 func derivePhase(r record, rec *session.Record) Phase {
 	switch {
@@ -76,6 +79,10 @@ func derivePhase(r record, rec *session.Record) Phase {
 		return phaseCancelled
 	case rec == nil:
 		return phasePreparing
+	case completing(r, *rec) && rec.Phase == session.PhaseStopping:
+		return phaseActive
+	case completing(r, *rec) && rec.Phase == session.PhasePreparing:
+		return phaseStopping
 	case rec.Phase != session.PhaseIdle:
 		return Phase(rec.Phase)
 	case r.Intent.Mode == ModeInteractive && lastExit(*rec).Failed():
@@ -88,4 +95,16 @@ func derivePhase(r record, rec *session.Record) Phase {
 		return PhaseFailed
 	}
 	return PhaseRetained
+}
+
+// completing reports a task execution whose pending operation is the
+// driver's completion wait. The driver asks for the task's stop as soon as
+// it runs, and the supervisor carries it out only after the task's own turn
+// completed, so the coordinator holds the execution as stopping for the
+// whole turn. No caller asked for that stop: a caller cannot stop a task,
+// and a cancellation, or a stop an interactive session's owner asks for, is
+// reported as the coordinator holds it.
+func completing(r record, rec session.Record) bool {
+	return r.Intent.Mode != ModeInteractive && rec.PendingOperation != "" &&
+		rec.PendingOperation == derivedOperation(rec.ID, actionTaskComplete)
 }
