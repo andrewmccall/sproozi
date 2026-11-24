@@ -22,6 +22,75 @@ func writeSized(t *testing.T, path string, n int) {
 	}
 }
 
+// walk is usage with the real check that an entry is gone.
+func walk(root string, listed func(string)) (int64, error) {
+	return usage(root, nil, listed, gone)
+}
+
+// The walk asks whether an entry is really gone before it skips one that
+// failed as not existing, and fails the sum if it is not.
+func TestUsageConsultsGoneBeforeSkipping(t *testing.T) {
+	t.Parallel()
+	setup := func(t *testing.T) (dir, removed string, hook func(string)) {
+		dir = t.TempDir()
+		writeSized(t, filepath.Join(dir, "a.json"), 3)
+		removed = filepath.Join(dir, "removed.json")
+		writeSized(t, removed, 100)
+		return dir, removed, at(removed, func() {
+			if err := os.Remove(removed); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	t.Run("not gone fails the sum", func(t *testing.T) {
+		t.Parallel()
+		dir, _, hook := setup(t)
+		size, err := usage(dir, nil, hook, func(string, string) bool { return false })
+		if !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("usage = %d, %v; want a not exist error", size, err)
+		}
+	})
+	t.Run("gone is skipped", func(t *testing.T) {
+		t.Parallel()
+		dir, removed, hook := setup(t)
+		var asked []string
+		size, err := usage(dir, nil, hook, func(root, path string) bool {
+			if root != dir {
+				t.Errorf("asked with root %s, want %s", root, dir)
+			}
+			asked = append(asked, path)
+			return true
+		})
+		if err != nil || size != 3 {
+			t.Fatalf("usage = %d, %v; want 3, no error", size, err)
+		}
+		if len(asked) != 1 || asked[0] != removed {
+			t.Fatalf("asked about %v, want only %s", asked, removed)
+		}
+	})
+}
+
+// A root removed after it was listed is not a reason to skip what was under
+// it: gone does not climb above the root, so the sum fails rather than
+// returning a partial sum.
+func TestUsageFailsWhenTheRootIsRemovedDuringTheWalk(t *testing.T) {
+	t.Parallel()
+	root := filepath.Join(t.TempDir(), "root")
+	if err := os.Mkdir(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeSized(t, filepath.Join(root, "a.json"), 3)
+	child := filepath.Join(root, "a.json")
+	size, err := walk(root, at(child, func() {
+		if err := os.RemoveAll(root); err != nil {
+			t.Error(err)
+		}
+	}))
+	if err == nil {
+		t.Fatalf("usage = %d, nil; want an error for a root removed during the walk", size)
+	}
+}
+
 // at runs fn once, when usage reaches the entry at path: after its directory
 // was listed and before the entry is examined.
 func at(path string, fn func()) func(string) {
@@ -56,7 +125,7 @@ func TestUsageSkipsAReplacementThatCompletesDuringTheWalk(t *testing.T) {
 			writeSized(t, filepath.Join(dir, "z.json"), 7)
 			temp := filepath.Join(dir, pendingName)
 			writeSized(t, temp, 5)
-			size, err := usage(dir, nil, at(temp, func() {
+			size, err := walk(dir, at(temp, func() {
 				if err := os.Rename(temp, filepath.Join(dir, c.target)); err != nil {
 					t.Error(err)
 				}
@@ -81,7 +150,7 @@ func TestUsageSkipsWhatIsRemovedDuringTheWalk(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeSized(t, filepath.Join(scratch, "file"), 1000)
-	size, err := usage(dir, nil, func(p string) {
+	size, err := walk(dir, func(p string) {
 		if p == removed || p == scratch {
 			if err := os.RemoveAll(p); err != nil {
 				t.Error(err)
@@ -125,7 +194,7 @@ func TestUsageFailsWithoutItsRoot(t *testing.T) {
 	if err := os.Mkdir(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	_, err := usage(root, nil, at(root, func() {
+	_, err := walk(root, at(root, func() {
 		if err := os.Remove(root); err != nil {
 			t.Error(err)
 		}
@@ -157,13 +226,19 @@ func TestUsageFailsWhenADirectoryBecomesAFile(t *testing.T) {
 				t.Fatal(err)
 			}
 			writeSized(t, filepath.Join(sub, "x"), 4)
-			size, err := usage(dir, nil, at(filepath.Join(dir, c.hook), func() {
+			size, err := walk(dir, at(filepath.Join(dir, c.hook), func() {
 				if err := os.RemoveAll(sub); err != nil {
 					t.Error(err)
 				}
 				writeSized(t, sub, 9)
 			}))
-			if err == nil || !errors.Is(err, syscall.ENOTDIR) {
+			if err == nil {
+				t.Fatalf("usage = %d, nil; want a not a directory error", size)
+			}
+			// Whether Windows reports a path below a file as ERROR_PATH_NOT_FOUND
+			// (which is ENOTDIR there) or ERROR_FILE_NOT_FOUND is not known, so
+			// for the parent there it is enough that the sum fails.
+			if (!onWindows || c.hook == "sub") && !errors.Is(err, syscall.ENOTDIR) {
 				t.Fatalf("usage = %d, %v; want a not a directory error", size, err)
 			}
 			if !onWindows && !strings.Contains(err.Error(), "not a directory") {
@@ -195,7 +270,7 @@ func TestGoneTellsAMissingPathFromOneBelowAFile(t *testing.T) {
 		{"below a file", filepath.Join(file, "x"), false},
 		{"deep below a file", filepath.Join(file, "x", "y"), false},
 	} {
-		if got := gone(c.path); got != c.want {
+		if got := gone(dir, c.path); got != c.want {
 			t.Errorf("gone(%s) = %v, want %v", c.name, got, c.want)
 		}
 	}

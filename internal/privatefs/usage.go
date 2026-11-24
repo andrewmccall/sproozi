@@ -29,17 +29,22 @@ import (
 // if it is gone the target, examined later, has its new size. A kept name
 // that sorts before ".pending-" would be examined first under its old size
 // and break the argument. A scratch directory that goes with its
-// contents is skipped the same way. Every other error fails the sum,
-// including a missing root, a root that is not a directory by lstat (a
-// symbolic link or a regular file) and a directory that cannot be listed.
+// contents is skipped the same way. An entry is skipped only if gone says it
+// is itself gone: not when a directory above it was replaced by a file, which
+// Windows reports like a missing path, nor when root is gone. Every other
+// error fails the sum, including a missing root, a root that is not a
+// directory by lstat (a symbolic link or a regular file) and a directory that
+// cannot be listed.
 func Usage(root string, skip func(name string) bool) (int64, error) {
-	return usage(root, skip, nil)
+	return usage(root, skip, nil, gone)
 }
 
-// usage is Usage with listed, when not nil, called with each entry's path
-// after its directory was listed and before the entry is examined, where a
-// concurrent writer may remove or rename it.
-func usage(root string, skip func(name string) bool, listed func(path string)) (int64, error) {
+// usage is Usage with two seams for tests. listed, when not nil, is called
+// with each entry's path after its directory was listed and before the entry
+// is examined, where a concurrent writer may remove or rename it. isGone is
+// asked, of an entry that failed with fs.ErrNotExist, whether the entry itself
+// is gone; Usage passes gone.
+func usage(root string, skip func(name string) bool, listed func(path string), isGone func(root, path string) bool) (int64, error) {
 	// The walk does not follow a symbolic link, so a root that is one would
 	// sum as the link alone: a small sum for a whole tree, which for an
 	// admission decision is the unsafe direction. Refuse it.
@@ -60,11 +65,14 @@ func usage(root string, skip func(name string) bool, listed func(path string)) (
 				return nil
 			}
 			var info fs.FileInfo
-			if info, err = d.Info(); err == nil {
+			// Not d.Info(): on Windows that is the listing's own data and
+			// never fails, so a removed entry would be counted at its old
+			// size. On Unix it is this same lstat.
+			if info, err = os.Lstat(path); err == nil {
 				size += info.Size()
 			}
 		}
-		if path != root && errors.Is(err, fs.ErrNotExist) {
+		if path != root && errors.Is(err, fs.ErrNotExist) && isGone(root, path) {
 			// Listed, then removed or renamed before it was examined.
 			return nil
 		}
@@ -73,31 +81,31 @@ func usage(root string, skip func(name string) bool, listed func(path string)) (
 	return size, err
 }
 
-// gone reports whether path, which an operation just failed on with an error
-// that is fs.ErrNotExist, is itself gone, rather than unreachable because a
-// directory above it became something else. On Unix the second case fails with
+// gone reports whether path, under root, which an operation just failed on
+// with an error that is fs.ErrNotExist, is itself gone, rather than
+// unreachable because a directory above it became something else, or because
+// root itself is gone. On Unix a directory replaced by a file fails with
 // ENOTDIR and never reaches here. On Windows syscall.ENOTDIR is
 // ERROR_PATH_NOT_FOUND, which is also what a path below a file reports, so the
-// error alone cannot tell them apart: a directory replaced by a file, or a
-// parent replaced by one, would look like a removal and be skipped, an
-// undercount. gone looks: path is gone only if it does not exist and the
-// nearest ancestor that does is a directory (following links, as the failed
-// operation did). Anything else, including an error other than not-exist, is
-// not gone and the caller fails the sum.
-func gone(path string) bool {
+// error alone cannot tell them apart: such a path would look like a removal
+// and be skipped, an undercount. gone looks: path is gone only if it does not
+// exist and the nearest ancestor that does, climbing no higher than root, is a
+// directory (following links, as the failed operation did). If the climb
+// reaches root and root does not exist, or an ancestor that exists is not a
+// directory, or an ancestor fails with another error, path is not gone and the
+// caller fails the sum.
+func gone(root, path string) bool {
 	if _, err := os.Lstat(path); err == nil {
 		return false
 	}
+	root = filepath.Clean(root)
 	for p := filepath.Dir(path); ; p = filepath.Dir(p) {
 		info, err := os.Stat(p)
 		if err == nil {
 			return info.IsDir()
 		}
-		if !errors.Is(err, fs.ErrNotExist) {
+		if !errors.Is(err, fs.ErrNotExist) || p == root || filepath.Dir(p) == p {
 			return false
-		}
-		if filepath.Dir(p) == p {
-			return true
 		}
 	}
 }
