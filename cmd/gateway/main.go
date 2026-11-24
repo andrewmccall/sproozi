@@ -363,11 +363,13 @@ func loadStartupConfig() (*startupConfig, error) {
 }
 
 // pruneModelHosts keeps the hosts each provider's credential needs and drops
-// the provider table's other hosts, so a gateway with keys needs no extra
-// certificate names. A credential that forwards the harness's own sign-in,
-// or one for a provider with no API host such as Copilot, needs every model,
-// sign-in and account host; any other needs the API host. It never drops a
-// host in owned, which other capabilities and egress profiles route.
+// every other model host, so a gateway with keys needs no extra certificate
+// names. A credential that forwards the harness's own sign-in, or one for a
+// provider with no API host such as Copilot, needs every model, sign-in and
+// account host; any other needs the API host. A model.inference semantic
+// authority outside the provider table is never served, so its host is
+// dropped too. It never drops a host in owned, which other capabilities and
+// egress profiles route.
 func pruneModelHosts(hosts, owned map[string]bool, credentials map[string]modelauth.Authenticator) {
 	needed := map[string]bool{}
 	for name, auth := range credentials {
@@ -376,14 +378,22 @@ func pruneModelHosts(hosts, owned map[string]bool, credentials map[string]modela
 			needed[host] = true
 		}
 	}
+	var candidates []string
 	for _, name := range modelProviders {
 		provider, _ := modelgateway.ProviderFor(name)
-		for _, host := range provider.Hosts(true) {
-			if needed[host] {
-				hosts[host] = true
-			} else if !owned[host] {
-				delete(hosts, host)
-			}
+		candidates = append(candidates, provider.Hosts(true)...)
+	}
+	for authority, capability := range endpoints.SemanticAuthorities {
+		if capability == sprooziv1alpha1.CapabilityModelInference {
+			host, _, _ := net.SplitHostPort(authority)
+			candidates = append(candidates, host)
+		}
+	}
+	for _, host := range candidates {
+		if needed[host] {
+			hosts[host] = true
+		} else if !owned[host] {
+			delete(hosts, host)
 		}
 	}
 }
@@ -618,31 +628,13 @@ func composeDispatcher(
 	for authority, cap := range endpoints.SemanticAuthorities {
 		// Reserve semantic authorities even when a module is disabled. Generic
 		// egress must never become a weaker fallback for a semantic service.
+		// A model authority stays closed unless a provider route below
+		// serves it, so one outside the provider table is never served.
 		route := gateway.Route{Capability: cap, Tier: audit.TierSemantic}
-		if cfg.enabled[cap] {
+		if cfg.enabled[cap] && cap != sprooziv1alpha1.CapabilityModelInference {
 			route.Handler = handlers[cap]
 		}
 		routes[authority] = route
-	}
-	// The provider table's authorities stay reserved but closed unless a
-	// provider serves them.
-	for _, name := range modelProviders {
-		provider, _ := modelgateway.ProviderFor(name)
-		var closed []string
-		if provider.SignInPrefix == "" {
-			// A sign-in path route shares its host with another owner,
-			// such as Copilot's on github.com, which stays open.
-			closed = append(closed, provider.SignInAuthority)
-		}
-		for _, m := range provider.Models {
-			closed = append(closed, m.Authority)
-		}
-		for _, authority := range closed {
-			if route, reserved := routes[authority]; reserved {
-				route.Handler = nil
-				routes[authority] = route
-			}
-		}
 	}
 	// A provider route serves its reserved authority, or is a path route of
 	// a host another capability owns. A provider that forwards each
@@ -697,13 +689,6 @@ func composeGateway(cfg *startupConfig, deps gatewayDeps) (gateway.Dispatcher, e
 		AuditLogger:      deps.journal})
 	handlers := map[sprooziv1alpha1.CapabilityKind]http.Handler{sprooziv1alpha1.CapabilityKubernetesRead: kube}
 	models := modelRoutes(cfg, deps.journal, deps.model, deps.drain, deps.chatGPT)
-	for _, served := range models {
-		// Known exception (ADR 0070): a model.inference semantic authority
-		// the provider table does not name gets the OpenAI API handler.
-		if served.Authority == modelgateway.OpenAIAuthority {
-			handlers[sprooziv1alpha1.CapabilityModelInference] = served.Route.Handler
-		}
-	}
 	if cfg.enabled[sprooziv1alpha1.CapabilityGitHubPullRequest] {
 		handlers[sprooziv1alpha1.CapabilityGitHubPullRequest] = &githubgateway.Handler{Config: githubgateway.HandlerConfig{
 			TokenProvider: deps.githubTokens,

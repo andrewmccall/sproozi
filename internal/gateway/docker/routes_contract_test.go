@@ -9,6 +9,7 @@ import (
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/diagnose"
+	"github.com/andrewmccall/sproozi/internal/endpoints"
 	githubgateway "github.com/andrewmccall/sproozi/internal/endpoints/github"
 	kubernetesgateway "github.com/andrewmccall/sproozi/internal/endpoints/kubernetes"
 	modelgateway "github.com/andrewmccall/sproozi/internal/endpoints/model"
@@ -65,6 +66,37 @@ func TestEveryComposedRouteKeepsTheRouteContract(t *testing.T) {
 					t.Errorf("model.inference routes outside the provider table: %v", strays)
 				}
 			})
+		}
+	}
+}
+
+// A model.inference authority added to endpoints.SemanticAuthorities without
+// a provider-table entry gets no route, for any harness or credential
+// mechanism (ADR 0070).
+func TestAModelAuthorityOutsideTheProviderTableIsNotServed(t *testing.T) {
+	const stray = "api.newmodel.example:443"
+	endpoints.SemanticAuthorities[stray] = api.CapabilityModelInference
+	t.Cleanup(func() { delete(endpoints.SemanticAuthorities, stray) })
+	for _, kind := range harness.ManagedKinds() {
+		for _, mechanism := range []struct {
+			name string
+			auth modelauth.Authenticator
+		}{
+			{mechanismKey, modelauth.APIKey{Key: "sk-fixture"}},
+			{mechanismToken, modelauth.Token{Value: "fixture-token"}},
+			{modelauth.ChatGPTMode, &modelauth.ChatGPT{}},
+			{mechanismSignIn, modelauth.Workload{}},
+		} {
+			routes, err := recordedRoutes(kind, mechanism.auth)
+			if err != nil {
+				t.Fatalf("%s/%s: %v", kind, mechanism.name, err)
+			}
+			if _, routed := routes[stray]; routed || routes.Allows(stray) {
+				t.Errorf("%s/%s: %s has a route", kind, mechanism.name, stray)
+			}
+			if strays := routetest.ModelAuthorities(routes); len(strays) != 0 {
+				t.Errorf("%s/%s: model.inference routes outside the provider table: %v", kind, mechanism.name, strays)
+			}
 		}
 	}
 }
