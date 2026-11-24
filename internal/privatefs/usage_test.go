@@ -7,8 +7,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 )
+
+var onWindows = runtime.GOOS == "windows"
 
 const pendingName = ".pending-0123456789abcdef0123456789abcdef"
 
@@ -134,7 +137,9 @@ func TestUsageFailsWithoutItsRoot(t *testing.T) {
 
 // A directory replaced by a file between the listing and the descent, and a
 // parent replaced by a file before its child is examined, are not removals:
-// the sum fails with "not a directory" rather than skipping them.
+// the sum fails rather than skipping them. The error is ENOTDIR, which on
+// Windows is ERROR_PATH_NOT_FOUND, the same error as a missing path: there the
+// sum must tell the two apart by looking, not by the error.
 func TestUsageFailsWhenADirectoryBecomesAFile(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -158,10 +163,41 @@ func TestUsageFailsWhenADirectoryBecomesAFile(t *testing.T) {
 				}
 				writeSized(t, sub, 9)
 			}))
-			if err == nil || !strings.Contains(err.Error(), "not a directory") {
+			if err == nil || !errors.Is(err, syscall.ENOTDIR) {
 				t.Fatalf("usage = %d, %v; want a not a directory error", size, err)
 			}
+			if !onWindows && !strings.Contains(err.Error(), "not a directory") {
+				t.Fatalf("usage error %q does not say not a directory", err)
+			}
 		})
+	}
+}
+
+// gone is true for a path that is missing below directories that exist, and
+// false when something above it is not a directory, which on Windows reports
+// the same not-exist error as a missing path.
+func TestGoneTellsAMissingPathFromOneBelowAFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	file := filepath.Join(dir, "file")
+	writeSized(t, file, 1)
+	if err := os.MkdirAll(filepath.Join(dir, "d", "e"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"missing in a directory", filepath.Join(dir, "d", "missing"), true},
+		{"missing below a missing directory", filepath.Join(dir, "d", "no", "deeper", "x"), true},
+		{"present", filepath.Join(dir, "d", "e"), false},
+		{"below a file", filepath.Join(file, "x"), false},
+		{"deep below a file", filepath.Join(file, "x", "y"), false},
+	} {
+		if got := gone(c.path); got != c.want {
+			t.Errorf("gone(%s) = %v, want %v", c.name, got, c.want)
+		}
 	}
 }
 
@@ -178,7 +214,7 @@ func TestUsageRefusesARootThatIsNotADirectory(t *testing.T) {
 	file := filepath.Join(dir, "file")
 	writeSized(t, file, 10)
 	roots := map[string]string{"regular file": file}
-	if runtime.GOOS != "windows" {
+	if !onWindows {
 		link := filepath.Join(dir, "link")
 		if err := os.Symlink(tree, link); err != nil {
 			t.Fatal(err)
@@ -197,7 +233,7 @@ func TestUsageRefusesARootThatIsNotADirectory(t *testing.T) {
 // directory.
 func TestUsageDoesNotFollowSymbolicLinks(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
+	if onWindows {
 		t.Skip("creating symbolic links on Windows needs a privilege the test does not assume")
 	}
 	outside := t.TempDir()
