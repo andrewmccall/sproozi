@@ -279,8 +279,13 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// fixturePrefix begins the template directory's name, followed by the process
+// ID, so a run a timeout killed leaves a directory the next run removes.
+const fixturePrefix = "sproozi-work-fixture-"
+
 func buildTemplate() error {
-	root, err := os.MkdirTemp("", "sproozi-work-fixture-")
+	testutil.RemoveAbandoned(fixturePrefix)
+	root, err := testutil.FixtureDir(fixturePrefix)
 	if err != nil {
 		return err
 	}

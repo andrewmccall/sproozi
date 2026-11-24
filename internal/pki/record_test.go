@@ -1,20 +1,18 @@
 package pki
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/privatefs/privatefstest"
+	"github.com/andrewmccall/sproozi/internal/testutil"
 )
 
 // sharedStates is every state in outcomeStates, built once per test binary
@@ -31,7 +29,7 @@ import (
 // The directory is named after the test binary's process ID, so a binary
 // that a timeout killed before TestMain could remove it leaves a directory
 // the next run of this package recognises: buildStates removes every
-// pki-states directory whose process no longer exists.
+// pki-states directory whose process no longer exists (testutil.RemoveAbandoned).
 //
 // The five tests with the most store operations
 // (TestStoreOutcomesMatchTheRecordedTable,
@@ -63,8 +61,8 @@ func buildStates(t *testing.T) map[string]string {
 	sharedStates.once.Do(func() {
 		// Stays set if a build step stops t, so every later caller fails too.
 		sharedStates.err = fmt.Errorf("building the shared states failed in %s", t.Name())
-		removeAbandonedStates()
-		dir, err := os.MkdirTemp("", fmt.Sprintf("%s%d-", sharedStatesPrefix, os.Getpid()))
+		testutil.RemoveAbandoned(sharedStatesPrefix)
+		dir, err := testutil.FixtureDir(sharedStatesPrefix)
 		must(t, err)
 		sharedStates.dir = dir
 		roots := map[string]string{}
@@ -82,30 +80,6 @@ func buildStates(t *testing.T) map[string]string {
 		t.Fatal(sharedStates.err)
 	}
 	return maps.Clone(sharedStates.roots)
-}
-
-// removeAbandonedStates removes the shared directories of earlier runs
-// whose process has exited, as a run killed by its timeout leaves them. It
-// removes a directory only when signalling its process reports that the
-// process is gone, so a directory of a run still going, in this or another
-// checkout, is kept; where that cannot be told, as on Windows, nothing is
-// removed.
-func removeAbandonedStates() {
-	dirs, _ := filepath.Glob(filepath.Join(os.TempDir(), sharedStatesPrefix+"*-*"))
-	for _, dir := range dirs {
-		pidText, _, ok := strings.Cut(strings.TrimPrefix(filepath.Base(dir), sharedStatesPrefix), "-")
-		pid, err := strconv.Atoi(pidText)
-		if !ok || err != nil || pid <= 0 || pid == os.Getpid() {
-			continue
-		}
-		process, err := os.FindProcess(pid)
-		if err != nil {
-			continue
-		}
-		if errors.Is(process.Signal(syscall.Signal(0)), os.ErrProcessDone) {
-			_ = os.RemoveAll(dir)
-		}
-	}
 }
 
 // treeFiles reads every regular file under dir but the store's lock file,

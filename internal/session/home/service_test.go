@@ -256,6 +256,10 @@ var template struct {
 	digest string
 }
 
+// fixturePrefix begins the template directory's name, followed by the process
+// ID, so a run a timeout killed leaves a directory the next run removes.
+const fixturePrefix = "sproozi-home-fixture-"
+
 func TestMain(m *testing.M) {
 	// The tests write host-private files through privatefs; no test can
 	// observe a sync, and on macOS each one waits on every process's writes.
@@ -272,7 +276,8 @@ func TestMain(m *testing.M) {
 func testWorkspace(t *testing.T) (string, []byte, string) {
 	t.Helper()
 	template.once.Do(func() {
-		root, err := os.MkdirTemp("", "sproozi-home-fixture-")
+		testutil.RemoveAbandoned(fixturePrefix)
+		root, err := testutil.FixtureDir(fixturePrefix)
 		if err != nil {
 			t.Fatal(err)
 		}
