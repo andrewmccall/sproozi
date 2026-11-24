@@ -20,7 +20,7 @@ each row states the finding in full; read the row, not the ID.
 | ENG-20 | The CLI's JSON `next` field is cut from the message text. | Needs a structured field on the error type throughout the CLI. |
 | DOC-03 (part) | The README has no comparison with other sandboxes. | Badges and the licence line are added; a fair comparison needs research. |
 | DOC-08 (part) | `docs/guides/model-provider-auth.md` holds reference material. | Component references are now indexed; splitting the accounting sections is a larger edit. |
-| Registry records | Session registry ConfigMaps are never removed automatically. | A coordinator may retry a stop after its run is gone, and the record answers it. Needs a bound on those retries ([ADR 0045](../adr/0045-budget-ledgers-are-a-custom-resource.md)). |
+| Session registrations | Session registrations are never removed automatically. | A coordinator may retry a stop after its run is gone, and the record answers it. Needs a bound on those retries ([ADR 0045](../adr/0045-budget-ledgers-are-a-custom-resource.md)). |
 
 ## Declined: intended behaviour
 

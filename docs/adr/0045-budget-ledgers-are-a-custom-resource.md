@@ -1,12 +1,17 @@
-# 0045: Budget ledgers are a custom resource, and the gateway and the executor each write only their own state
+# 0045: Budget ledgers are a custom resource, and neither the gateway nor the executor writes ConfigMaps in sproozi-system
 
 Status: accepted
 Date: 2026-10-21
 
-History: this record holds ADR 0041's decisions as well (2026-10-21), which it
-began by replacing in part: the `sproozi-budget` namespace is gone, and the
-rest of ADR 0041 moved here when that record was removed. ADR 0041's Docker
-removal retry moved to [ADR 0020](0020-docker-placement-removes-stopped-visits.md).
+Corrected 2026-11-24: moved here from ADR 0041, which was removed. This record
+replaced ADR 0041's `sproozi-budget` namespace on its own date; the rest of ADR
+0041, its ledger retention, registration Role, executor namespace, startup
+checks, session-end rules and session registrations, is now here, and its Docker
+removal retry is in [ADR 0020](0020-docker-placement-removes-stopped-visits.md).
+Where this record states what the code does beyond ADR 0041 (the UID
+precondition on a prune, the one-hour minimum retention, the unlabelled ledger
+that is kept, registrations with no owner reference, a warning that changes
+nothing), those are additions checked against the code on 2026-11-24.
 
 ## Problem and constraints
 
@@ -25,11 +30,12 @@ purpose. Two reviews on 2026-10-21 found these gaps:
 - **The executor had the same reach.** The remote executor example ran in
   `sproozi-system` with `get`, `create` and `update` on every ConfigMap there,
   so a compromised executor could rewrite the gateway's MCP registry and
-  receive its bearer tokens after the next restart.
+  receive its bearer tokens after the next restart. The CLI's port-forward
+  Role in `sproozi-system` also reached the gateway and controller.
 - **Nothing removed budget ledgers.** One ledger per run and capability
   accumulated for ever, and the sweep paged through all of them every minute.
 - **Nothing expires session registrations.** Each managed session has a
-  registration ConfigMap written by the executor in the run's namespace.
+  session registration, a ConfigMap written by the executor in the run's namespace.
 
 A first answer, ADR 0041, put ledgers in a separate `sproozi-budget`
 namespace. That namespace held nothing else. It added an object to install and
@@ -74,9 +80,14 @@ only release was a test release and has been deleted.
   exists cannot authenticate at the gateway, so its usage is final, and stop
   receipts already copy the finalized usage. A ledger with no run UID label is
   kept. A minute sweep recovers expired leases.
-- **Settling and recovery never recreate a deleted ledger.** An update that
-  settles or recovers an account requires it to exist (`Existing` in
-  `internal/budget/ledger.go`), so pruning cannot be undone by a late call.
+- **A pruned ledger is not recreated at zero.** An initialized placement
+  allocation, which a managed session's account is, reserves with
+  `RequireExisting`, which refuses an absent account, and the
+  gateway's settle and recover updates use `Existing`, which never recreates
+  one (`internal/budget/ledger.go`, `internal/budget/kubernetes/ledger.go`). An
+  ordinary run's account can be recreated by a reserve that does not require
+  one, but only by a request from that run, and a run that no longer exists
+  cannot authenticate.
 
 ### Namespaces and Roles
 
@@ -84,13 +95,18 @@ only release was a test release and has been deleted.
   registration ConfigMap in the run's namespace on every connection. A
   separate `sproozi-shared-gateway-registry` Role grants `get` on ConfigMaps
   only, bound in each namespace where managed runs live. The install binds it
-  nowhere; the executor example binds it in `sproozi-sessions`.
-- **The executor has its own namespace.** The executor, its ServiceAccount and
-  Roles, its managed runs and their registrations live in `sproozi-sessions`,
-  and CLI access defaults to that namespace. The executor's Role there grants
-  ConfigMap `get`, `create` and `update`, which the administrator limits to
-  registrations by creating the executor's profile and the CLI's trust anchor
-  immutable. The executor's startup check refuses the gateway's namespace as
+  nowhere; the executor example binds it in `sproozi-sessions`, and the Claude
+  example (`examples/portable-workflows/kubernetes/claude/owner.yaml`) in
+  `sproozi-claude-sessions`.
+- **The executor has its own namespace.** The executor, its ServiceAccount,
+  its managed runs and their session registrations live in `sproozi-sessions`
+  (`sproozi-claude-sessions` in the Claude example), and CLI access defaults to
+  that namespace. The executor's Role there grants ConfigMap `get`, `create`
+  and `update`. It can write any ConfigMap in that namespace, so the
+  administrator creates the executor's profile and the CLI's trust anchor
+  immutable, which stops it rewriting those two. Its other Roles are in
+  `sproozi-agents` (Pods and their exec and logs) and `sproozi-system`
+  (BudgetLedgers only). The executor's startup check refuses the gateway's namespace as
   its run namespace, where it writes ConfigMaps, but not as its budget
   namespace.
 - **The executor's startup check** verifies its own permissions and the
@@ -103,13 +119,15 @@ only release was a test release and has been deleted.
 - **Manifest tests** resolve every RoleBinding and ClusterRoleBinding and fail
   if the gateway, the executor or the CLI can write ConfigMaps or port-forward
   in `sproozi-system`, and check each API call on a managed session's path.
+  The Kind e2e, which CI runs through `make test-e2e`, drives one managed
+  session through the shipped executor example under the installed identities
+  (`hack/verify/orchestration-kind/managed.py`), unless
+  `SPROOZI_E2E_ORCHESTRATION=0`.
 
 ### Managed session ends
 
-Separating the namespaces left two controller rules to settle, so a managed
-session ends cleanly. `hack/verify/orchestration-kind/managed.py` drives a
-managed session through the shipped executor example under the installed
-identities.
+Separating the namespaces left two controller rules to settle, so that a
+managed session ends cleanly.
 
 - **A completed session stop is a normal end.** The run ends `Succeeded` with
   reason `SessionStopped` once its sandbox has finished, not as a binding
@@ -146,7 +164,8 @@ identities.
   not need.
 - **Owner references from ledgers to AgentRuns.** Garbage collection would
   delete a ledger the moment its run is deleted, without checking for pending
-  reservations.
+  reservations, and owner references across namespaces are not allowed: ledgers
+  in `sproozi-system` sit apart from the managed runs in `sproozi-sessions`.
 - **Delete ledgers in the controller when it deletes a run.** The controller
   would need write access to the gateway's state, and it cannot see in-flight
   reservations.
@@ -171,14 +190,14 @@ identities.
   ones: it can use a sandbox's gateway token from inside the Pod, or reset a
   ledger. Keep the executor to clusters where all runs share one trust domain
   until managed sandboxes and ledgers have their own namespaces.
-- Registration records still grow with managed runs.
+- Session registrations still grow with managed runs.
 
 ## Revisit when
 
 - Charge rates make one API write per settlement a measurable load on the API
   server, or an hourly full list of AgentRuns becomes expensive.
 - A ledger needs fields other components must read without decoding `state`.
-- The coordinator bounds how long it retries a stop, so registration records
+- The coordinator bounds how long it retries a stop, so session registrations
   can be expired after that bound.
 - More than one gateway replica writes ledgers (ADR 0026 keeps one).
 - Runs from different trust domains share a cluster with a remote executor:

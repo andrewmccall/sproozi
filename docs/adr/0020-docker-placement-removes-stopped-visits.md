@@ -3,7 +3,7 @@
 Status: accepted
 Date: 2026-10-18
 
-Corrected 2026-11-24: failed removals have an owner. The local service retries them at start and every five minutes (see "A failed removal has an owner" below), so the consequence below that they stay until removed by hand no longer holds, and the revisit condition about a startup sweep is met. This was recorded in ADR 0041 on 2026-10-21 and moved here when that record was removed.
+Corrected 2026-11-24: failed removals have an owner. The local service retries them at start and every five minutes (see "A failed removal has an owner" below), so the consequence below that they stay until removed by hand no longer holds. A start-up sweep now exists, driven by the placement's records, not by labelled containers. This was recorded in ADR 0041 on 2026-10-21 and moved here when that record was removed.
 
 ## Problem and constraints
 

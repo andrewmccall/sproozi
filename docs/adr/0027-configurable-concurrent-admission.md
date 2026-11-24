@@ -3,10 +3,9 @@
 Status: accepted
 Date: 2026-10-19
 
-History: this record also holds the runtime check at admission and the live
-reads that admission and sandbox lookups rely on, which ADR 0017 recorded on
-2026-10-17. ADR 0017 was removed in the change that added this paragraph; its
-replay-record decisions went with the event webhook (ADR 0043).
+Corrected 2026-11-24: the runtime check at admission and the live reads under
+it moved here from ADR 0017, which was removed. Its replay-record decisions
+went with the event webhook (ADR 0043).
 
 ## Problem and constraints
 
@@ -117,8 +116,10 @@ so every concurrent run's traffic shares its CPU, memory and connection pool.
   ConfigMap read, are retried and do not fail the run. `Ensure` and
   `EnsureManaged` do not repeat the check: their only caller, `ensureSandbox`,
   runs in the same reconcile after `resolveAdmission`.
-- **Reads that decide the run's end are live.** The cap decision lists AgentRuns
-  through the manager's API reader (next bullet). Likewise
+- **Reads that decide admission and a run's end are live.** The cap decision
+  lists AgentRuns through the manager's API reader (see the serialized
+  reconciles bullet below). A cached list can lag the reconciler's own
+  admission write, and under load that let a second run be admitted. Likewise
   `PodSandboxClient.GetStatus` reads a Pod from the cache but confirms a cached
   NotFound with one uncached Get before it reports the sandbox absent, because
   an absent sandbox ends the run and the cache can lag a Pod the reconciler has
