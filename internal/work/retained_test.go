@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -14,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 
@@ -172,21 +170,10 @@ func differing(a, b map[string]string) []string {
 	return names
 }
 
-// submitAs is o.SubmitAs, repeated while its retention check fails because the
-// driver of another session replaced a journal file in the directory the check
-// was walking. Such a file vanishes between the walk reading the directory and
-// examining it, which Retained and admitRetention report as an error. A
-// submission that failed so saved nothing, so repeating it is the same
-// submission. Without the shortcut, a driver reaches its first journal write
-// only after capturing the repository, and the walk almost never meets it.
+// submitAs is o.SubmitAs with the test's context.
 func submitAs(t *testing.T, o *Owner, caller Caller, q Submit) (View, error) {
 	t.Helper()
-	for attempt := 1; ; attempt++ {
-		v, err := o.SubmitAs(t.Context(), caller, q)
-		if err == nil || attempt == 20 || !errors.Is(err, fs.ErrNotExist) || !strings.Contains(err.Error(), ".pending-") {
-			return v, err
-		}
-	}
+	return o.SubmitAs(t.Context(), caller, q)
 }
 
 // A session whose first execution submitRetained retained starts from what
