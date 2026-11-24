@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -261,6 +262,9 @@ type caseRun struct {
 	tracker  *budget.Tracker
 	clock    *manualClock
 	drain    *model.Drain
+	// blockerDrain stops the blocker apart from the case's own call, so a
+	// case decides which of the two stops first.
+	blockerDrain *model.Drain
 	cancel   context.CancelFunc
 	writer   *outcomeWriter
 	config   model.HandlerConfig
@@ -270,11 +274,18 @@ type caseRun struct {
 
 // blocker starts another call on the same account, through its own handler
 // and audit writer, that holds all remaining capacity until the case ends.
+// Under a drain the blocker has its own, which shutdownBlocker stops: were
+// both calls in one drain, the blocker could release its reservation before
+// the case's call saw the stop, and the case would be admitted instead.
 func (run *caseRun) blocker(anthropic bool) {
 	started := make(chan struct{})
 	var once sync.Once
 	config := run.config
 	config.AuditLogger = audit.NewLogger(io.Discard)
+	if run.drain != nil {
+		run.blockerDrain = model.NewDrain()
+		config.Drain = run.blockerDrain
+	}
 	config.HTTPClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		once.Do(func() { close(started) })
 		<-r.Context().Done()
@@ -350,6 +361,9 @@ type modelCase struct {
 	useDrain   bool
 	failWrite  bool
 	failFlush  bool
+	// bubble runs the case in a synctest bubble: its timers run on the
+	// bubble's clock and drive can wait until every goroutine is blocked.
+	bubble bool
 	// client answers the provider call; nil answers 200 with okBody.
 	client  func(run *caseRun) *http.Client
 	config  func(run *caseRun, c *model.HandlerConfig)
@@ -418,11 +432,28 @@ func respondFailing(status int, text string) func(*caseRun) *http.Client {
 }
 
 // blockingServer reads the whole request, signals, then answers nothing
-// until the call ends, so the request is written.
+// until the call ends, so the request is written. It signals only once the
+// handler has also seen the write: the transport reports it after the bytes
+// are sent, so the server can read them first, and a case that moved the
+// clock or ended the call then would see the write timed later or missed.
+// The handler's first reading of the clock is that report.
 func blockingServer(received chan<- struct{}, timeout time.Duration) func(*caseRun) *http.Client {
 	return func(run *caseRun) *http.Client {
+		wrote := make(chan struct{})
+		var once sync.Once
+		now := run.config.Now
+		run.config.Now = func() time.Time {
+			at := now()
+			once.Do(func() { close(wrote) })
+			return at
+		}
 		server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 			_, _ = io.ReadAll(r.Body)
+			select {
+			case <-wrote:
+			case <-r.Context().Done():
+				return
+			}
 			if received != nil {
 				received <- struct{}{}
 			}
@@ -436,11 +467,16 @@ func blockingServer(received chan<- struct{}, timeout time.Duration) func(*caseR
 	}
 }
 
-func shutdown(run *caseRun) {
+func shutdown(run *caseRun) { stopDrain(run.t, run.drain) }
+
+// shutdownBlocker stops the blocker and waits until it has settled.
+func shutdownBlocker(run *caseRun) { stopDrain(run.t, run.blockerDrain) }
+
+func stopDrain(t *testing.T, drain *model.Drain) {
 	ctx, stop := context.WithTimeout(context.Background(), 10*time.Second)
 	defer stop()
-	if err := run.drain.Shutdown(ctx); err != nil {
-		run.t.Fatal(err)
+	if err := drain.Shutdown(ctx); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -471,6 +507,15 @@ const (
 
 func runModelCase(t *testing.T, tc modelCase) string {
 	t.Helper()
+	if tc.bubble {
+		var line string
+		synctest.Test(t, func(t *testing.T) {
+			bubbled := tc
+			bubbled.bubble = false
+			line = runModelCase(t, bubbled)
+		})
+		return line
+	}
 	run := &caseRun{t: t, clock: newManualClock()}
 	defer func() {
 		for _, v := range slices.Backward(run.cleanups) {
@@ -640,8 +685,10 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 		{name: "row 1/anthropic deadline while waiting for the budget", anthropic: true, body: messagesBody, grant: oneSecondCall,
 			prepare: func(run *caseRun) { run.blocker(true) }},
 		{name: "row 2/anthropic gateway stopping while waiting for the budget", anthropic: true, body: messagesBody, useDrain: true,
+			bubble:  true,
 			prepare: func(run *caseRun) { run.blocker(true) },
-			drive:   func(run *caseRun) { time.Sleep(200 * time.Millisecond); shutdown(run) }},
+			// Stop the call once it waits for the blocker, then the blocker.
+			drive: func(run *caseRun) { synctest.Wait(); shutdown(run); shutdownBlocker(run) }},
 		{name: "row 3/openai too many pending calls", path: testResponsesPath, body: `{"model":"test","max_output_tokens":10,"input":[]}`,
 			limits: budgetOf(1_000_000, 0),
 			prepare: func(run *caseRun) {
