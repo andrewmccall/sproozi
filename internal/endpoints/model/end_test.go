@@ -52,7 +52,12 @@ type endTestCall struct {
 
 func newEndTestCall(t *testing.T, phase callPhase, ended string) *endTestCall {
 	t.Helper()
-	tracker := budget.NewTracker()
+	return newEndTestCallOn(t, phase, ended, budget.NewMemoryLedger())
+}
+
+func newEndTestCallOn(t *testing.T, phase callPhase, ended string, ledger budget.Ledger) *endTestCall {
+	t.Helper()
+	tracker := budget.NewTrackerWithLedger(ledger)
 	limits := api.EndpointBudget{MaxUnits: 1000}
 	meter := tracker.Meter(endTestAccount, limits)
 	events := &endEvents{}
@@ -358,5 +363,35 @@ func checkRefusedEnding(t *testing.T, phase callPhase, kind endingKind, headersS
 	}
 	if status != want.status {
 		t.Errorf("reply status %d (%q), want %d", status, c.writer.Body.String(), want.status)
+	}
+}
+
+// leavingLedger cancels the call when it releases, as a workload that leaves
+// while the ledger releases does.
+type leavingLedger struct {
+	budget.Ledger
+	leave func()
+}
+
+func (l leavingLedger) Release(ctx context.Context, r *budget.LedgerReservation) error {
+	l.leave()
+	return l.Ledger.Release(ctx, r)
+}
+
+// A request the provider never had is released before end asks why it
+// failed, so a workload that leaves during the release is recorded as
+// having left, with no reply, rather than as a provider failure.
+func TestUnsentReasonIsReadAfterTheRelease(t *testing.T) {
+	ledger := &leavingLedger{Ledger: budget.NewMemoryLedger()}
+	c := newEndTestCallOn(t, callAdmitted, callLive, ledger)
+	ctx, cancel := context.WithCancel(c.call.ctx)
+	c.call.ctx, ledger.leave = ctx, cancel
+	c.call.end(ending{kind: endingNoResponse})
+	if len(c.events.events) != 1 {
+		t.Fatalf("recorded %d events", len(c.events.events))
+	}
+	if e := c.events.events[0]; e.EndReason != endClientCancelled || e.Outcome != audit.Cancelled || c.writer.Body.Len() != 0 {
+		t.Fatalf("endReason=%q outcome=%q reply=%q, want the workload's leaving recorded and no reply",
+			e.EndReason, e.Outcome, c.writer.Body.String())
 	}
 }

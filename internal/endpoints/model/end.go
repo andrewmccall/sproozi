@@ -303,8 +303,9 @@ func (c *modelCall) endOnce(x ending) error {
 	}
 	if x.kind == endingNoResponse && from == callAdmitted {
 		// A request the provider never had is released first and only then
-		// asked why it failed: the workload may leave, or the gateway stop,
-		// while the ledger releases.
+		// asked why it failed: a workload that leaves, or a gateway that
+		// stops, while the ledger releases is recorded as such
+		// (TestUnsentReasonIsReadAfterTheRelease).
 		x.reason = c.unsentReason()
 	}
 	if err := c.move(eventEnded); err != nil {
@@ -340,24 +341,28 @@ func (c *modelCall) charge(rule chargeRule, x ending) {
 // record writes the call's audit event and, where the workload is still
 // owed one, its reply.
 //
-// Three rules here keep outcomes that look inconsistent. Each is pinned by a
-// row of testdata/outcomes.txt and changes only in its own commit:
+// These rules keep outcomes that look inconsistent. Each is pinned by a row
+// of testdata/outcomes.txt and changes only in its own commit:
 //
 //   - Q1. Until the provider answers 2xx, a refusal written to the workload
 //     records the event as it was before the charge, so a failed release's
 //     usageSource is not recorded: an unsent request, a provider rejection,
 //     and a request the provider never had that failed for any reason but
 //     the workload leaving or the gateway stopping.
-//   - Q2. A request the provider never had that failed at its deadline or
-//     could not reach the provider records no endReason: unsentReason gives
-//     it none, and Q1's event has none.
-//   - Q3. allowed is false exactly when the gateway writes an error reply,
-//     with two exceptions in relayWhole: a provider's non-2xx answer is
-//     relayed with allowed true and its upstreamStatus on OpenAI, and
-//     replaced with allowed false and no upstreamStatus on Anthropic. So a
-//     call ended by a stopping gateway records allowed false here, before
-//     its response headers, while refuseReservation records allowed true for
-//     one stopped while it waited for its budget.
+//   - Q2 is not a rule of its own but a consequence of Q1. A request the
+//     provider never had that failed at its deadline or could not reach the
+//     provider records no endReason only because Q1 records the event as it
+//     was before the charge, which has none. What unsentReason returns for
+//     those causes is not recorded; it only routes them to that branch.
+//   - Q3. allowed is false exactly when the gateway writes an error reply of
+//     its own, and true when the workload gets the provider's answer or
+//     nothing. relayWhole follows it: OpenAI relays a provider's non-2xx
+//     answer (allowed true, with its upstreamStatus), Anthropic replaces it
+//     with the gateway's own error (allowed false, no upstreamStatus). The
+//     exception is outside end: refuseReservation writes the gateway's own
+//     503 to a call stopped while it waited for its budget, yet records
+//     allowed true, where a call stopped before its response headers
+//     records allowed false here.
 func (c *modelCall) record(from callPhase, x ending, before audit.Event) {
 	ctx := c.r.Context()
 	if x.fallback {
@@ -386,7 +391,7 @@ func (c *modelCall) record(from callPhase, x ending, before audit.Event) {
 		default:
 			event := c.e
 			if from == callAdmitted {
-				event = before // Q1, Q2
+				event = before // Q1, and so Q2
 			}
 			c.h.denyReply(ctx, c.w, event, upstreamFailedReply)
 		}
@@ -407,9 +412,10 @@ func (c *modelCall) failureReason() string {
 }
 
 // unsentReason is why a call failed before the provider had its request:
-// the workload left, the gateway stopped, or, for anything else including
-// the call's deadline, no reason (Q2). It reads the cause before asking
-// whether the call ended, in that order.
+// the workload left, the gateway stopped, or anything else, including the
+// call's deadline, for which it returns "" and record uses Q1's event. It
+// reads the cause before asking whether the call ended, as the code it
+// replaced did.
 func (c *modelCall) unsentReason() string {
 	switch {
 	case c.cancelReason() == endClientCancelled && c.ctx.Err() != nil:
