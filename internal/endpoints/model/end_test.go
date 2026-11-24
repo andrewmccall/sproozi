@@ -427,7 +427,7 @@ func TestRefusalsAreLogged(t *testing.T) {
 		t.Fatal(err)
 	}
 	logs = logged(c)
-	c.call.responses = &responsesStream{terminal: responseFailedEvent}
+	c.call.events = &responsesStream{terminal: responseFailedEvent}
 	c.call.settleCompleted()
 	if !strings.Contains(logs.String(), `level=ERROR msg="Refused model call settlement"`) ||
 		!strings.Contains(logs.String(), `error="model call cannot settle ending interrupted from settled"`) {

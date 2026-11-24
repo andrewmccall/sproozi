@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"mime"
 	"net/http"
 	"slices"
 	"strconv"
@@ -294,8 +293,8 @@ type modelCall struct {
 	written   atomic.Pointer[time.Time]
 	visible   int64
 	relayed   int
-	anthropic *anthropicStream
-	responses *responsesStream
+	// events reads a streamed response; nil when the call does not stream.
+	events eventStream
 	// phase is read and written only by the goroutine that owns the call
 	// (end.go), so it has no lock.
 	phase       callPhase
@@ -323,16 +322,7 @@ func (c *modelCall) relay(resp *http.Response) {
 	contentType := resp.Header.Get("Content-Type")
 	if c.stream {
 		var typeErr error
-		if c.h.protocol == anthropicProtocol {
-			mediaType, _, err := mime.ParseMediaType(contentType)
-			if strings.TrimSpace(contentType) != "" && (err != nil || mediaType != eventStreamMediaType) {
-				typeErr = errors.New("unsupported Anthropic streaming response")
-			}
-			c.anthropic = &anthropicStream{}
-		} else {
-			typeErr = checkStreamType(c.r.URL.Path, contentType)
-			c.responses = &responsesStream{}
-		}
+		c.events, typeErr = c.h.protocol.newStream(c.r.URL.Path, contentType)
 		if typeErr != nil {
 			c.observeFailure(typeErr.Error())
 			c.end(ending{kind: endingUnsupported})
@@ -600,8 +590,8 @@ func (c *modelCall) relayEvent(raw []byte) bool {
 	if c.diagnostic != nil {
 		c.diagnostic.observeFrame(frame, c.credential)
 	}
-	err := c.events().next(frame)
-	c.visible = c.events().visibleBytes()
+	err := c.events.next(frame)
+	c.visible = c.events.visibleBytes()
 	if err != nil {
 		// The provider's own error event still reaches the workload.
 		c.write(raw)
@@ -609,7 +599,7 @@ func (c *modelCall) relayEvent(raw []byte) bool {
 		c.end(ending{kind: endingInterrupted, reason: endUpstreamError})
 		return false
 	}
-	if c.events().ended() {
+	if c.events.ended() {
 		// The terminal event is relayed, then settles the call.
 		ok := c.write(raw)
 		c.settleCompleted()
@@ -641,7 +631,7 @@ func (c *modelCall) settleCompleted() {
 // completion is how a stream that reached its terminal event ends: with its
 // usage, or interrupted when the usage is missing or invalid.
 func (c *modelCall) completion() ending {
-	usage, reason, err := c.events().completion(c.limits)
+	usage, reason, err := c.events.completion(c.limits)
 	if err != nil {
 		c.observeFailure(err.Error())
 		return ending{kind: endingInterrupted, reason: endUpstreamError}
@@ -649,22 +639,11 @@ func (c *modelCall) completion() ending {
 	return ending{kind: endingUsage, reason: reason, usage: usage}
 }
 
-// events is the call's stream reader, or nil when it does not stream.
-func (c *modelCall) events() eventStream {
-	if c.anthropic != nil {
-		return c.anthropic
-	}
-	if c.responses != nil {
-		return c.responses
-	}
-	return nil
-}
-
 // reported is the exact usage the stream has reported so far; a response
 // that does not stream reports none before it ends.
 func (c *modelCall) reported() (anthropicUsage, bool, bool) {
-	if events := c.events(); events != nil {
-		return events.reported()
+	if c.events != nil {
+		return c.events.reported()
 	}
 	return anthropicUsage{}, false, false
 }
@@ -679,7 +658,7 @@ func anthropicResponseUsage(usage anthropicUsage) responseUsage {
 // cancelled and the reservation is charged.
 func (c *modelCall) cut() {
 	c.cancelUpstream()
-	c.write([]byte(c.events().cutEvent()))
+	c.write([]byte(c.events.cutEvent()))
 	c.observeFailure(reasonBudgetCut)
 	c.end(ending{kind: endingCut})
 }

@@ -2,6 +2,8 @@ package model
 
 import (
 	"errors"
+	"mime"
+	"strings"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 )
@@ -15,6 +17,24 @@ const (
 	openAIProtocol providerProtocol = iota
 	anthropicProtocol
 )
+
+// newStream starts reading a streamed response the provider sent with
+// contentType, or reports that the protocol does not stream it. It is the
+// only place a stream reader is chosen.
+func (p providerProtocol) newStream(path, contentType string) (eventStream, error) {
+	switch p {
+	case anthropicProtocol:
+		var err error
+		mediaType, _, parseErr := mime.ParseMediaType(contentType)
+		if strings.TrimSpace(contentType) != "" && (parseErr != nil || mediaType != eventStreamMediaType) {
+			err = errors.New("unsupported Anthropic streaming response")
+		}
+		return &anthropicStream{}, err
+	case openAIProtocol:
+		return &responsesStream{}, checkStreamType(path, contentType)
+	}
+	return nil, errors.New("unsupported streaming response")
+}
 
 // eventStream reads one protocol's streamed response a frame at a time, so
 // the gateway can relay each frame as it arrives. It is all of a streamed
