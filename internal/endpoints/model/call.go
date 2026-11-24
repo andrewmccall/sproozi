@@ -305,6 +305,7 @@ func (c *modelCall) now() time.Time {
 // arrives. A streamed response is relayed one whole event at a time, so the
 // gateway can end it with an error event; a JSON response is relayed as read.
 func (c *modelCall) relay(resp *http.Response) {
+	c.mark(eventAnswered)
 	c.startedAt = c.now()
 	if at := c.written.Load(); at != nil {
 		c.startedAt = *at
@@ -614,29 +615,37 @@ func (c *modelCall) relayEvent(raw []byte) bool {
 	return true
 }
 
-// settleCompleted settles a stream that reached its terminal event.
+// settleCompleted settles a stream that reached its terminal event. The
+// rest of the response is relayed unparsed and charges nothing more.
 func (c *modelCall) settleCompleted() {
+	if err := c.settle(c.completion()); err != nil {
+		c.h.logger().Error("Refused model call settlement", "runID", c.e.RunID, "runUID", c.e.RunUID,
+			"error", err.Error())
+	}
+}
+
+// completion is how a stream that reached its terminal event ends: with its
+// usage, or interrupted when the usage is missing or invalid.
+func (c *modelCall) completion() ending {
 	if c.anthropic != nil {
 		usage, err := c.anthropic.finish()
 		if err != nil {
 			c.observeFailure(err.Error())
-			c.settleInterrupted(endUpstreamError)
-			return
+			return ending{kind: endingInterrupted, reason: endUpstreamError}
 		}
-		c.settleProvider(anthropicResponseUsage(usage), usage, endCompleted)
-		return
+		return ending{kind: endingUsage, reason: endCompleted,
+			usage: providerUsage{usage: anthropicResponseUsage(usage), anthropic: usage}}
 	}
 	usage, err := c.responses.finish()
 	if err != nil || invalidTokenUsage(usage, nil, c.limits) {
 		c.observeFailure("terminal event omitted required token usage")
-		c.settleInterrupted(endUpstreamError)
-		return
+		return ending{kind: endingInterrupted, reason: endUpstreamError}
 	}
 	reason := endCompleted
 	if c.responses.terminal == responseFailedEvent {
 		reason = endUpstreamError
 	}
-	c.settleProvider(usage, anthropicUsage{}, reason)
+	return ending{kind: endingUsage, reason: reason, usage: providerUsage{usage: usage}}
 }
 
 func anthropicResponseUsage(usage anthropicUsage) responseUsage {

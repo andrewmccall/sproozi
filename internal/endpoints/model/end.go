@@ -184,6 +184,19 @@ var callEndings = map[callPhase]map[endingKind]chargeRule{
 	callSettled: {endingInterrupted: chargeNone, endingRelayed: chargeNone},
 }
 
+// settle charges the reservation for x and moves the call to callSettled
+// without recording it, as a terminal event does before the rest of the
+// response is relayed. It refuses an ending its phase does not declare or
+// one already charged.
+func (c *modelCall) settle(x ending) error {
+	rule, declared := callEndings[c.phase][x.kind]
+	if !declared || rule == chargeNone {
+		return fmt.Errorf("model call cannot settle ending %s from %s", x.kind, c.phase)
+	}
+	c.charge(rule, x)
+	return c.move(eventSettled)
+}
+
 // end charges, records and answers a call once, deriving its charge, end
 // reason and audit fields from the phase it reached and how it ended. It
 // refuses, logs and leaves the call unchanged for an ending its phase does
@@ -231,7 +244,7 @@ func (c *modelCall) endOnce(x ending) error {
 }
 
 // charge releases, settles or forfeits the reservation. It is reached only
-// through end, whose phase check admits one charge per call.
+// through settle and end, whose phase checks admit one charge per call.
 func (c *modelCall) charge(rule chargeRule, x ending) {
 	switch rule {
 	case chargeRelease:
