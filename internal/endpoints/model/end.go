@@ -239,6 +239,10 @@ func (c *modelCall) endOnce(x ending) error {
 	if err := c.move(eventEnded); err != nil {
 		return err
 	}
+	if c.stopRelay != nil {
+		// The relay stops between the charge and the record.
+		c.stopRelay()
+	}
 	c.record(from, x, before)
 	return nil
 }

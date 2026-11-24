@@ -275,6 +275,9 @@ type modelCall struct {
 	stream      bool
 
 	cancelUpstream context.CancelFunc
+	// stopRelay, while copy relays the body, ends the relay before end
+	// records the call.
+	stopRelay func()
 	diagnostic     *ResponseDiagnostic
 	credential     string
 
@@ -364,8 +367,6 @@ type readResult struct {
 func (c *modelCall) copy(body io.Reader) {
 	reads := make(chan readResult)
 	stopped := make(chan struct{})
-	defer close(stopped)
-	defer c.cancelUpstream()
 	go func() {
 		for {
 			buffer := make([]byte, readChunkBytes)
@@ -387,9 +388,23 @@ func (c *modelCall) copy(body io.Reader) {
 		idleTimeout = DefaultIdleTimeout
 	}
 	idle := time.NewTimer(idleTimeout)
-	defer idle.Stop()
 	tick := time.NewTicker(time.Second)
-	defer tick.Stop()
+	// stopRelay stops the timers, cancels the provider request and stops the
+	// reader, in that order. end runs it after the charge and before the
+	// record, so every exit records once the provider request is cancelled;
+	// the deferred call does nothing then.
+	var relayStopped bool
+	c.stopRelay = func() {
+		if relayStopped {
+			return
+		}
+		relayStopped = true
+		tick.Stop()
+		idle.Stop()
+		c.cancelUpstream()
+		close(stopped)
+	}
+	defer func() { c.stopRelay(); c.stopRelay = nil }()
 	var scanner eventScanner
 	var buffered []byte
 	for {
