@@ -189,6 +189,12 @@ reason changes, and once when syncing resumes.
   still copy the store into the harness's login file: neither the
   supervisor's `writeLogin` nor the helper's `write_native` checks the bound.
   By then the harness has stopped, so nothing reads that file.
+  Corrected 2026-11-24: the supervisor's save checks the bound only before
+  its store write begins (`writeStore`). A write already begun when the
+  bound passes runs to its end after the stop has returned, and the store
+  then holds the new whole login; the stop has already logged the save as
+  skipped. A reader in that window finds a store that is not a whole login
+  and leaves it alone, as after any interrupted write.
 - A kill from outside the supervisor, such as the kernel's out-of-memory
   killer, is recorded only once the harness is reaped. A periodic sync in
   between still trusts the file. With the rules above, it shares neither an
