@@ -28,7 +28,16 @@ const (
 	tokenFixture    = "fixture-token"
 	githubAPIOrigin = "https://api.github.com"
 	githubGitOrigin = "https://github.com"
+	// anthropicKeyFixture is a gateway-held Anthropic key.
+	anthropicKeyFixture = "sk-ant-fixture"
 )
+
+// credentialSources name each fixture credential of the record.
+var credentialSources = routetest.Sources{
+	keyFixture:          "gateway key",
+	anthropicKeyFixture: "gateway Anthropic key",
+	tokenFixture:        "gateway token",
+}
 
 // TestDockerModelRoutesAreRecorded records what the Docker composition serves
 // on each model.inference authority, with what each handler was built with,
@@ -65,7 +74,7 @@ func TestDockerModelRoutesAreRecorded(t *testing.T) {
 			record.Add(name, []string{"refused: " + err.Error()})
 			return
 		}
-		record.Add(name, routetest.ModelRouteLines(routes))
+		record.Add(name, routetest.ModelRouteLines(routes, credentialSources))
 	}
 	upstreams := []string{openAIOrigin, "https://api.anthropic.com", "https://api.individual.githubcopilot.com",
 		"https://models.fixture"}
@@ -77,7 +86,7 @@ func TestDockerModelRoutesAreRecorded(t *testing.T) {
 			auth modelauth.Authenticator
 		}{
 			{mechanismKey, modelauth.APIKey{Key: keyFixture}},
-			{"anthropic-key", modelauth.AnthropicAPIKey{Key: "sk-ant-fixture"}},
+			{"anthropic-key", modelauth.AnthropicAPIKey{Key: anthropicKeyFixture}},
 			{mechanismToken, modelauth.Token{Value: tokenFixture, Headers: provider.TokenHeaders}},
 			{"chatgpt", &modelauth.ChatGPT{}},
 			{mechanismSignIn, modelauth.Workload{}},

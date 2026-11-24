@@ -27,6 +27,16 @@ const strayModelAuthority = "api.newmodel.example:443"
 // sweepCopilot selects a gateway-held Copilot token in a record's sweep.
 const sweepCopilot = "copilot"
 
+// credentialSources name the environment variable each fixture credential
+// of the record is set in.
+var credentialSources = routetest.Sources{
+	"sk-openai-fixture":       openAIKeyEnv,
+	anthropicFixtureKey:       anthropicKeyEnv,
+	"openai-token-fixture":    "OPENAI_SIGN_IN_TOKEN",
+	"anthropic-token-fixture": "ANTHROPIC_SIGN_IN_TOKEN",
+	copilotFixtureToken:       copilotTokenEnv,
+}
+
 // certifiedModelHosts are the names among every provider's hosts and every
 // model.inference semantic authority's host that cfg's certificate must
 // cover.
@@ -85,7 +95,8 @@ func TestModelRoutesAreRecorded(t *testing.T) {
 			record.Add(name, []string{"refused: " + err.Error()})
 			return
 		}
-		record.Add(name, append([]string{certifiedModelHosts(cfg)}, routetest.ModelRouteLines(routes)...))
+		record.Add(name, append([]string{certifiedModelHosts(cfg)},
+			routetest.ModelRouteLines(routes, credentialSources)...))
 	}
 	nothing := func() {}
 	for _, mode := range []string{modelauth.APIKeyMode, modelauth.ChatGPTMode, modelauth.WorkloadMode} {

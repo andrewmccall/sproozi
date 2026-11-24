@@ -12,14 +12,20 @@ import (
 	"github.com/andrewmccall/sproozi/internal/gateway"
 )
 
+// Sources name where each fixture credential came from, by its value, such
+// as "ANTHROPIC_API_KEY" for the fixture key a test set there. A record
+// prints the name, never the value, so a credential handed to the wrong
+// provider shows.
+type Sources map[string]string
+
 // HandlerDetail describes what a model handler was built with, read from its
-// fields: each model handler's protocol, upstream origin, credential type and
-// token headers, and whether it has pricing, a drain, diagnostics, a path map
-// and the client's headers; and each relay's service, upstream, credential
-// and route count. A route record carries it, so a change to the credential
-// or upstream a route gets shows in the record. It never reads a credential's
-// value.
-func HandlerDetail(h http.Handler) string {
+// fields: each model handler's protocol, upstream origin, credential type,
+// source and token headers, and whether it has pricing, a drain,
+// diagnostics, a path map and the client's headers; and each relay's
+// service, upstream, credential and allowed requests. A route record carries
+// it, so a change to the credential, upstream or relay requests a route gets
+// shows in the record. It never prints a credential's value.
+func HandlerDetail(h http.Handler, sources Sources) string {
 	if h == nil {
 		return "-"
 	}
@@ -41,12 +47,12 @@ func HandlerDetail(h http.Handler) string {
 		switch v.Type().Name() {
 		case "Handler":
 			parts = append(parts, fmt.Sprintf("handler{protocol=%d %s}", v.FieldByName("protocol").Uint(),
-				handlerConfig(v.FieldByName("Config"))))
+				handlerConfig(v.FieldByName("Config"), sources)))
 			return
 		case "Relay":
-			parts = append(parts, fmt.Sprintf("relay{service=%s upstream=%s auth=%s routes=%d}",
+			parts = append(parts, fmt.Sprintf("relay{service=%s upstream=%s auth=%s routes=[%s]}",
 				v.FieldByName("Service").String(), v.FieldByName("UpstreamURL").String(),
-				credential(v.FieldByName("Auth")), v.FieldByName("Routes").Len()))
+				credential(v.FieldByName("Auth"), sources), relayRoutes(v.FieldByName("Routes"))))
 			return
 		}
 		for _, field := range v.Fields() {
@@ -57,16 +63,34 @@ func HandlerDetail(h http.Handler) string {
 	return strings.Join(parts, " ")
 }
 
-func handlerConfig(c reflect.Value) string {
+func handlerConfig(c reflect.Value, sources Sources) string {
 	return fmt.Sprintf("upstream=%s auth=%s pricing=%t drain=%t diagnostics=%t path=%t keepHeaders=%t",
-		c.FieldByName("UpstreamURL").String(), credential(c.FieldByName("ProviderAuth")),
+		c.FieldByName("UpstreamURL").String(), credential(c.FieldByName("ProviderAuth"), sources),
 		!c.FieldByName("Pricing").IsNil(), !c.FieldByName("Drain").IsNil(), !c.FieldByName("Diagnostics").IsNil(),
 		!c.FieldByName("UpstreamPath").IsNil(), c.FieldByName("KeepClientHeaders").Bool())
 }
 
-// credential names an authenticator's type and, for a token, the headers it
-// sets, never its value.
-func credential(auth reflect.Value) string {
+// relayRoutes lists each request a relay allows: its method and path, "*"
+// for a path prefix and "?" when a query is allowed.
+func relayRoutes(routes reflect.Value) string {
+	var allowed []string
+	for i := range routes.Len() {
+		r := routes.Index(i)
+		route := r.FieldByName("Method").String() + " " + r.FieldByName("Path").String()
+		if r.FieldByName("Prefix").Bool() {
+			route += "*"
+		}
+		if r.FieldByName("Query").Bool() {
+			route += "?"
+		}
+		allowed = append(allowed, route)
+	}
+	return strings.Join(allowed, ", ")
+}
+
+// credential names an authenticator's type, the source of its key or token
+// and, for a token, the headers it sets, never its value.
+func credential(auth reflect.Value, sources Sources) string {
 	if auth.IsNil() {
 		return "none"
 	}
@@ -75,23 +99,33 @@ func credential(auth reflect.Value) string {
 	for concrete.Kind() == reflect.Pointer {
 		concrete = concrete.Elem()
 	}
-	if concrete.Kind() == reflect.Struct {
-		if headers := concrete.FieldByName("Headers"); headers.IsValid() && headers.Kind() == reflect.Map {
-			var pairs []string
-			for _, k := range headers.MapKeys() {
-				pairs = append(pairs, k.String()+":"+headers.MapIndex(k).String())
+	if concrete.Kind() != reflect.Struct {
+		return name
+	}
+	for _, field := range []string{"Key", "Value"} {
+		if secret := concrete.FieldByName(field); secret.IsValid() && secret.Kind() == reflect.String {
+			source, known := sources[secret.String()]
+			if !known {
+				source = "unknown source"
 			}
-			slices.Sort(pairs)
-			name += "[" + strings.Join(pairs, ",") + "]"
+			name += "(" + source + ")"
 		}
+	}
+	if headers := concrete.FieldByName("Headers"); headers.IsValid() && headers.Kind() == reflect.Map {
+		var pairs []string
+		for _, k := range headers.MapKeys() {
+			pairs = append(pairs, k.String()+":"+headers.MapIndex(k).String())
+		}
+		slices.Sort(pairs)
+		name += "[" + strings.Join(pairs, ",") + "]"
 	}
 	return name
 }
 
 // ModelRouteLines describes every model.inference route and path route, and
 // the route of an authority that carries a model.inference path route, with
-// what each handler was built with.
-func ModelRouteLines(routes gateway.Dispatcher) []string {
+// what each handler was built with and where each credential came from.
+func ModelRouteLines(routes gateway.Dispatcher, sources Sources) []string {
 	var lines []string
 	describe := func(name string, r gateway.Route) {
 		handler := "none"
@@ -105,7 +139,7 @@ func ModelRouteLines(routes gateway.Dispatcher) []string {
 		lines = append(lines, strings.Join([]string{name, capability, string(r.Tier), handler,
 			fmt.Sprintf("providerCredential=%t", r.ProviderCredential),
 			fmt.Sprintf("budgets=%t", r.Budgets != nil), fmt.Sprintf("audit=%t", r.AuditLogger != nil),
-			HandlerDetail(r.Handler)}, " | "))
+			HandlerDetail(r.Handler, sources)}, " | "))
 	}
 	for _, authority := range slices.Sorted(maps.Keys(routes)) {
 		route := routes[authority]
