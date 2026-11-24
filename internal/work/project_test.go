@@ -54,13 +54,13 @@ func TestProjectsGroupSessionsAndNarrowActualAdmission(t *testing.T) {
 	}
 	defer func() { _ = o.Close() }()
 	q := projectRequest("sproozi-dev")
-	engineering, err := o.Submit(t.Context(), q)
+	engineering, err := submitRetained(t, o, CallerHome, q)
 	if err != nil {
 		t.Fatal(err)
 	}
 	waitPhase(t, o, engineering.ID, phaseRetained)
 	q.Project = "home-ops"
-	if _, err = o.Submit(t.Context(), q); err == nil {
+	if _, err = submitRetained(t, o, CallerHome, q); err == nil {
 		t.Fatal("Project change replayed an existing operation")
 	}
 	ops, err := o.Submit(t.Context(), projectRequest("home-ops"))
@@ -100,11 +100,11 @@ func TestProjectAccessGatesSubmitAndEveryRetainedRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = o.Submit(t.Context(), projectRequest("private")); err == nil {
+	if _, err = submitRetained(t, o, CallerHome, projectRequest("private")); err == nil {
 		t.Fatal("A nonmember submitted work")
 	}
 	q := projectRequest("sproozi-dev")
-	v, err := o.Submit(t.Context(), q)
+	v, err := submitRetained(t, o, CallerHome, q)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestProjectAccessGatesSubmitAndEveryRetainedRead(t *testing.T) {
 	if leaked, infoErr := o.Info(t.Context(), v.ID); OutcomeCode(infoErr) != profile.CodeDenied || leaked.ID != "" {
 		t.Fatalf("Revoked membership revealed retained work: %#v %v", leaked, infoErr)
 	}
-	if _, err = o.Submit(t.Context(), q); OutcomeCode(err) != profile.CodeDenied {
+	if _, err = submitRetained(t, o, CallerHome, q); OutcomeCode(err) != profile.CodeDenied {
 		t.Fatal("Submission replay bypassed membership")
 	}
 	if _, err = o.BeginExport(t.Context(), v.ID, uuid.NewString()); OutcomeCode(err) != profile.CodeDenied {
@@ -153,7 +153,7 @@ func TestRevokedProjectStillFencesUnfinishedWriterAfterRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, err := o.Submit(t.Context(), projectRequest("sproozi-dev"))
+	v, err := submitRetained(t, o, CallerHome, projectRequest("sproozi-dev"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestConfiguredTemplateCannotRebindRetainedAssociation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, err := o.Submit(t.Context(), projectRequest("sproozi-dev"))
+	v, err := submitRetained(t, o, CallerHome, projectRequest("sproozi-dev"))
 	if err != nil {
 		t.Fatal(err)
 	}

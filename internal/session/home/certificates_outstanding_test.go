@@ -111,7 +111,7 @@ func TestAnUnusedUnreadableKeyDoesNotStopTheServiceOrItsRotation(t *testing.T) {
 		if err = store.PrepareRotation(); err != nil {
 			t.Fatal(err)
 		}
-		if err = os.Chmod(filepath.Join(c.Gateway.PKIDirectory, "ca-2.key"), 0o644); err != nil {
+		if err = makeKeyUnacceptable(filepath.Join(c.Gateway.PKIDirectory, "ca-2.key")); err != nil {
 			t.Fatal(err)
 		}
 		log.Reset()
@@ -144,7 +144,7 @@ func TestAnUnusedUnreadableKeyDoesNotStopTheServiceOrItsRotation(t *testing.T) {
 		if err := store.SwitchRotation(true); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Chmod(filepath.Join(c.Gateway.PKIDirectory, "ca-1.key"), 0o644); err != nil {
+		if err := makeKeyUnacceptable(filepath.Join(c.Gateway.PKIDirectory, "ca-1.key")); err != nil {
 			t.Fatal(err)
 		}
 		var log bytes.Buffer
@@ -325,4 +325,23 @@ func TestAFailedRenewalStillFails(t *testing.T) {
 		t.Errorf("maintain: %v", err)
 	}
 	_ = store
+}
+
+// makeKeyUnacceptable keeps the key's content but makes the file one that
+// private state refuses to read. On Unix that is group and world readable.
+// Chmod does nothing to a Windows ACL, but a file created there by plain
+// os.WriteFile does not carry the owner-only ACL private state requires, so
+// the key is written again that way.
+func makeKeyUnacceptable(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if err = os.Remove(path); err != nil {
+		return err
+	}
+	if err = os.WriteFile(path, data, 0o644); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o644)
 }

@@ -37,7 +37,8 @@ func TestAnUnreachablePlacementDelaysNoOtherExitCheck(t *testing.T) {
 	local.exited = &session.Exit{Code: 2}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	s.sweepExits(ctx)
+	checks := s.sweepExits(ctx)
+	goFor(s, func() { <-checks })
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		status, err := s.Status(exited)
@@ -54,7 +55,8 @@ func TestAnUnreachablePlacementDelaysNoOtherExitCheck(t *testing.T) {
 	if _, running := s.exitChecks.Load(held); !running {
 		t.Fatal("the unreachable placement's check ended before its bound")
 	}
-	s.sweepExits(ctx)
+	again := s.sweepExits(ctx)
+	goFor(s, func() { <-again })
 	cancel()
 }
 

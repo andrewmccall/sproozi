@@ -49,7 +49,10 @@ func ReadFile(path string, max int64) ([]byte, error) {
 // in the same directory. Successful return includes the platform durability
 // operation. It does not establish hardware power-loss guarantees. In a test
 // binary that called privatefstest.SkipSync it skips the file and directory
-// syncs and nothing else.
+// syncs and nothing else. The temporary file sits in dir, is named .pending-
+// followed by 32 lowercase hexadecimal digits, so it never ends in a record's
+// suffix, and is private from creation; Replace removes it unless it was
+// renamed over the target, but a crash can leave it behind.
 func Replace(dir, leaf string, data []byte) error {
 	if !validLeaf(leaf) {
 		return errors.New("privatefs: ordinary filename required")

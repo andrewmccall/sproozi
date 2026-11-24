@@ -25,6 +25,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/home"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
+	"github.com/andrewmccall/sproozi/internal/testutil"
 	"github.com/andrewmccall/sproozi/internal/work"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 	"github.com/google/uuid"
@@ -733,8 +734,9 @@ func TestRemoteRemoveOfAPulledSessionNeedsThePullFinishedHere(t *testing.T) {
 	conflict := answerStatus(http.StatusConflict, `{"error":"conflict"}`)
 
 	f.reply("remove", conflict)
-	code, _, errOut := runCLI("rm", remoteTestID, "--remote", "--socket",
-		"/sproozi-missing-"+uuid.NewString()+".sock")
+	// A control address nothing listens on: a socket path on Unix, a pipe name
+	// on Windows.
+	code, _, errOut := runCLI("rm", remoteTestID, "--remote", "--socket", home.SocketPath(testutil.PrivateDir(t)))
 	if code != 1 || !strings.Contains(errOut, "the Sproozi service on this machine is not running") ||
 		!strings.Contains(errOut, "sproozi service start") {
 		t.Fatalf("pulled, no service: %d %s", code, errOut)

@@ -1,0 +1,11 @@
+# Keep every text file byte-exact on every platform. Tests compare recorded
+# outcomes (testdata, golden files) and scripts run in Linux containers, so a
+# Windows checkout must not convert line endings to CRLF.
+* text=auto eol=lf
+
+# Archives and other fixtures are bytes, not text.
+*.tar binary
+*.gz binary
+*.tgz binary
+*.zip binary
+*.png binary

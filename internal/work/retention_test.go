@@ -62,7 +62,7 @@ func TestFullExecutorReportsWhatIsFull(t *testing.T) {
 	defer close(release)
 	submit(t, o)
 
-	_, err := o.Submit(t.Context(), taskRequest())
+	_, err := submitRetained(t, o, CallerHome, taskRequest())
 	if code(err) != wireRetentionFull {
 		t.Fatalf("submission beyond retainedBytes: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestFullExecutorReportsWhatIsFull(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	_, err = o.Submit(t.Context(), taskRequest())
+	_, err = submitRetained(t, o, CallerHome, taskRequest())
 	if code(err) != wireSessionsFull {
 		t.Fatalf("submission beyond the session count: %v", err)
 	}
@@ -165,11 +165,11 @@ func TestSubmissionReservesItsInputAndItsCheckpoint(t *testing.T) {
 	kept := keptBytes(t, c)
 
 	o.config.RetainedBytes = kept + c.MaxCheckpointBytes + c.MaxCheckpointBytes/2
-	if _, err := o.Submit(t.Context(), taskRequest()); code(err) != wireRetentionFull {
+	if _, err := submitRetained(t, o, CallerHome, taskRequest()); code(err) != wireRetentionFull {
 		t.Fatalf("submission with room for its checkpoint but not its input: %v", err)
 	}
 	o.config.RetainedBytes = kept + 2*c.MaxCheckpointBytes
-	if _, err := o.Submit(t.Context(), taskRequest()); err != nil {
+	if _, err := submitRetained(t, o, CallerHome, taskRequest()); err != nil {
 		t.Fatalf("submission with room for its input and checkpoint: %v", err)
 	}
 }
@@ -218,7 +218,7 @@ func TestStopsCommitOnAFullExecutor(t *testing.T) {
 	<-started
 
 	o.config.RetainedBytes = 1
-	if _, err := o.Submit(t.Context(), taskRequest()); code(err) != wireRetentionFull {
+	if _, err := submitRetained(t, o, CallerHome, taskRequest()); code(err) != wireRetentionFull {
 		t.Fatalf("submission to a full executor: %v", err)
 	}
 	close(release)

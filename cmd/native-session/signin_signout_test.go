@@ -15,10 +15,12 @@ var signOuts = map[string]func(*testing.T, string){
 // Codex and Claude Code rewrite their login by truncating it first, so one
 // sync can catch it empty while the harness runs normally. A single empty
 // read shares nothing; a sign-out still there at the next sync is shared.
+// The test's own syncs are the only ones: a periodic sync between them would
+// be a second that saw it.
 func TestSignOutIsSharedOnlyWhenTwoSyncsSeeIt(t *testing.T) {
 	for name, signOut := range signOuts {
 		t.Run(name, func(t *testing.T) {
-			l := signedIn(t)
+			l := signedInEvery(t, quietInterval)
 			signOut(t, l.native)
 			syncAll(t, l)
 			if content(t, l.stored) != refreshedR3 {
@@ -41,11 +43,11 @@ func TestSignOutIsSharedOnlyWhenTwoSyncsSeeIt(t *testing.T) {
 
 // The store side has the same rule: a store read empty once, as one another
 // writer is rewriting, does not sign the harness out; one still empty at the
-// next sync does.
+// next sync does. Again the test's syncs are the only ones.
 func TestEmptyStoreSignsTheHarnessOutOnlyWhenTwoSyncsSeeIt(t *testing.T) {
 	for name, signOut := range signOuts {
 		t.Run(name, func(t *testing.T) {
-			l := signedIn(t)
+			l := signedInEvery(t, quietInterval)
 			signOut(t, l.stored)
 			syncAll(t, l)
 			if content(t, l.native) != refreshedR3 {

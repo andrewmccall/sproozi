@@ -84,7 +84,7 @@ func TestClaudeExecutorRunsATaskToItsFinalReply(t *testing.T) {
 	o, p := claudeExecutor(t)
 	q := Submit{RequestID: uuid.NewString(), Repository: repositorySproozi, Harness: harness.NativeClaude,
 		Executor: executorKubernetes, Task: fixtureTask}
-	v, err := o.Submit(t.Context(), q)
+	v, err := submitRetained(t, o, CallerHome, q)
 	if err != nil {
 		t.Fatalf("Claude task refused: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestClaudeExecutorRunsATaskToItsFinalReply(t *testing.T) {
 	if p.stops != 3 || p.turnPending != 0 {
 		t.Fatalf("stopped before the task's turn completed: stops=%d pending=%d", p.stops, p.turnPending)
 	}
-	if _, err = o.Submit(t.Context(), interactiveRequest()); code(err) != profile.CodeUnsupported {
+	if _, err = submitRetained(t, o, CallerHome, interactiveRequest()); code(err) != profile.CodeUnsupported {
 		t.Fatalf("Codex session accepted by a Claude executor: %v", err)
 	}
 }
@@ -117,12 +117,12 @@ func TestWorkTokenSubmitsAClaudeTaskWithinItsCap(t *testing.T) {
 	o, _ := claudeExecutor(t)
 	q := Submit{RequestID: uuid.NewString(), Repository: repositorySproozi, Harness: harness.NativeClaude,
 		Executor: executorKubernetes, Task: fixtureTask, MaxDuration: "2m"}
-	if _, err := o.SubmitAs(t.Context(), CallerWorkToken, q); code(err) != profile.CodeDenied {
+	if _, err := submitRetained(t, o, CallerWorkToken, q); code(err) != profile.CodeDenied {
 		t.Fatalf("Claude task beyond the work token's cap: %v", err)
 	}
 	q.RequestID, q.MaxDuration = uuid.NewString(), ""
 	before := time.Now()
-	v, err := o.SubmitAs(t.Context(), CallerWorkToken, q)
+	v, err := submitRetained(t, o, CallerWorkToken, q)
 	if err != nil {
 		t.Fatalf("work token Claude task: %v", err)
 	}

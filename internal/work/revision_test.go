@@ -20,7 +20,7 @@ func TestFreshNativeWorkStartsAtRecordedCommitAndKeepsSourceReceipt(t *testing.T
 		t.Fatal(err)
 	}
 	defer func() { _ = o.Close() }()
-	v, err := o.Submit(t.Context(), projectRequest("sproozi-dev"))
+	v, err := submitRetained(t, o, CallerHome, projectRequest("sproozi-dev"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,12 +59,12 @@ func TestFreshNativeWorkStartsAtRecordedCommitAndKeepsSourceReceipt(t *testing.T
 	}
 	q.RequestID = uuid.NewString()
 	q.WorkspaceFrom.Digest = "wrong-digest"
-	if _, err = o.Submit(t.Context(), q); err == nil || OutcomeCode(err) != profile.CodeInvalid {
+	if _, err = submitRetained(t, o, CallerHome, q); err == nil || OutcomeCode(err) != profile.CodeInvalid {
 		t.Fatal("Unbound checkpoint selected a fresh execution")
 	}
 	q.WorkspaceFrom.Digest = source.CheckpointDigest
 	q.WorkspaceFrom.Revision = "main"
-	if _, err = o.Submit(t.Context(), q); err == nil || OutcomeCode(err) != profile.CodeInvalid {
+	if _, err = submitRetained(t, o, CallerHome, q); err == nil || OutcomeCode(err) != profile.CodeInvalid {
 		t.Fatal("A moving ref selected an exact recorded revision")
 	}
 	p.mu.Lock()

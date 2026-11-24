@@ -2,13 +2,15 @@ package home
 
 import (
 	"errors"
-	"os"
+	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/session"
+	"github.com/andrewmccall/sproozi/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -98,16 +100,18 @@ func TestCancelOfAnUnrecordedExecutionHoldsItsSessionsLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	done := make(chan error, 1)
+	done, goroutine := make(chan error, 1), make(chan string, 1)
 	go func() {
+		goroutine <- goroutineID()
 		_, err := s.Cancel(t.Context(), orphan, uuid.NewString())
 		done <- err
 	}()
-	select {
-	case err = <-done:
+	// Record only once the cancel waits for the lock: a cancel that starts
+	// after the record finds the session's current execution, which it may
+	// cancel.
+	if err = waitForLock(<-goroutine, done, "home.(*Service).lockUnrecordedCancel"); err != nil {
 		unlock()
-		t.Fatalf("cancel did not wait for the session's lock: %v", err)
-	case <-time.After(300 * time.Millisecond):
+		t.Fatal(err)
 	}
 	// As a resume does under the lock: record the execution as current.
 	c, err := s.readCatalog(id)
@@ -144,7 +148,7 @@ func TestAnUnreadableJournalIsLoggedOnce(t *testing.T) {
 	}
 	unreadable := uuid.NewString()
 	bad := filepath.Join(s.config.Directory, "journal", unreadable+".json")
-	if err := os.WriteFile(bad, []byte(`{"version":99,"futureField":true}`), 0600); err != nil {
+	if err := testutil.WriteFile(bad, []byte(`{"version":99,"futureField":true}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if r := exchange(t, s, Request{Action: ActionRemove, ID: ids[0]}); r.Error != "" {
@@ -162,4 +166,39 @@ func TestAnUnreadableJournalIsLoggedOnce(t *testing.T) {
 	if got := log.String(); strings.Count(got, line) != 1 {
 		t.Fatalf("log: %q", got)
 	}
+}
+
+// goroutineID returns the calling goroutine's ID.
+func goroutineID() string {
+	buf := make([]byte, 64)
+	header, _, _ := strings.Cut(string(buf[:runtime.Stack(buf, false)]), " [")
+	return strings.TrimPrefix(header, "goroutine ")
+}
+
+// waitForLock waits until goroutine id is blocked taking a session's lock
+// from within function. It fails if done receives first: the goroutine
+// returned without waiting for the lock.
+func waitForLock(id string, done <-chan error, function string) error {
+	prefix := "goroutine " + id + " ["
+	buf := make([]byte, 1<<20)
+	for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		select {
+		case err := <-done:
+			return fmt.Errorf("the goroutine did not wait for the session's lock: %v", err)
+		default:
+		}
+		for buf = buf[:cap(buf)]; ; buf = make([]byte, 2*len(buf)) {
+			if n := runtime.Stack(buf, true); n < len(buf) {
+				buf = buf[:n]
+				break
+			}
+		}
+		for stack := range strings.SplitSeq(string(buf), "\n\n") {
+			if strings.HasPrefix(stack, prefix) && strings.Contains(stack, function) &&
+				strings.Contains(stack, "session.(*JournalLocks).Lock") {
+				return nil
+			}
+		}
+	}
+	return errors.New("the goroutine never waited for the session's lock")
 }

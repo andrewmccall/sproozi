@@ -302,7 +302,7 @@ func exchange(t *testing.T, s *Service, q Request) Response {
 	t.Helper()
 	client, server := net.Pipe()
 	defer func() { _ = client.Close() }()
-	go s.handle(t.Context(), server)
+	goFor(s, func() { s.handle(t.Context(), server) })
 	if err := json.NewEncoder(client).Encode(q); err != nil {
 		t.Fatal(err)
 	}

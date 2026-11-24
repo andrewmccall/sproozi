@@ -167,7 +167,9 @@ func TestSignOutOvertakenByAStopIsNotShared(t *testing.T) {
 // After a kill, a sync whose file did not change does not open the store at
 // all: a stop whose harness was killed never waits for a locked store.
 func TestUnchangedLoginAfterAKillLeavesTheStoreAlone(t *testing.T) {
-	l := signedIn(t)
+	l := signedInEvery(t, quietInterval)
+	// A save that did open the store would give up at this bound and say so.
+	l.wait = testSaveWait
 	l.forced()
 	lockedByPeer(t, l.stored)
 	stopWithin(t, l)

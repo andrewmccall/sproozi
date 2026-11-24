@@ -516,19 +516,12 @@ func (o *Owner) admitRetention(newSession bool) error {
 	if err != nil {
 		return err
 	}
-	var own int64
-	err = filepath.WalkDir(o.config.Directory, func(_ string, d fs.DirEntry, walkErr error) error {
-		// A removed session's mark is not counted: otherwise an executor at
-		// its smallest bound, room for one session, could never admit
-		// another after its first removal.
-		if walkErr != nil || d.IsDir() || strings.HasSuffix(d.Name(), removedSuffix) {
-			return walkErr
-		}
-		info, err := d.Info()
-		if err == nil {
-			own += info.Size()
-		}
-		return err
+	// A removed session's mark is not counted: otherwise an executor at its
+	// smallest bound, room for one session, could never admit another after
+	// its first removal. Drivers of other sessions write while this sums;
+	// privatefs.Usage says what their replacements and scratch contribute.
+	own, err := privatefs.Usage(o.config.Directory, func(name string) bool {
+		return strings.HasSuffix(name, removedSuffix)
 	})
 	if err != nil {
 		return err

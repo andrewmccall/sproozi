@@ -206,7 +206,7 @@ func TestCommandsOnASessionRemovedWhileTheyRun(t *testing.T) {
 				}
 			} else {
 				s.request = taskRequest()
-				v, err := o.Submit(t.Context(), s.request)
+				v, err := submitRetained(t, o, CallerHome, s.request)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -492,7 +492,7 @@ func TestAnUncheckableRemovalMarkIsReported(t *testing.T) {
 	} else {
 		reported("list command", err)
 	}
-	_, err = o.Submit(t.Context(), taskRequest())
+	_, err = submitRetained(t, o, CallerHome, taskRequest())
 	reported("a new submission", err)
 }
 

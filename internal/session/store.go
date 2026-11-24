@@ -405,20 +405,13 @@ func (c *Coordinator) List() ([]string, error) {
 
 // Retained reports the executions and total bytes kept in the coordinator
 // directory, including inputs and checkpoints, so an owner can bound storage.
+// Operations on other executions may write while it sums; privatefs.Usage
+// says what a concurrent replacement or removal contributes.
 func (c *Coordinator) Retained() (executions int, size int64, err error) {
 	ids, err := c.List()
 	if err != nil {
 		return 0, 0, err
 	}
-	err = filepath.WalkDir(c.dir, func(_ string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil || entry.IsDir() {
-			return walkErr
-		}
-		info, err := entry.Info()
-		if err == nil {
-			size += info.Size()
-		}
-		return err
-	})
+	size, err = privatefs.Usage(c.dir, nil)
 	return len(ids), size, err
 }
