@@ -1,7 +1,6 @@
 # 0047: Every credential mechanism for every harness
 
-Status: accepted; its login storage is replaced by
-[ADR 0049](0049-named-logins-share-a-live-store.md), a live store per named login
+Status: accepted
 Date: 2026-10-22
 
 ## Problem and constraints
@@ -85,42 +84,33 @@ the placeholder the harness's client sends, which the controller sets in the
 Pod only for some harnesses; see
 [ADR 0071](0071-a-pod-gets-a-key-placeholder-only-for-a-client-that-reads-it.md).
 
+Corrected 2026-11-24: the harness's own sign-in is kept per named login, a
+volume per installation, placement and login locally, and a claim per harness
+and login on Kubernetes, beside the Secret; see
+[ADR 0049](0049-named-logins-share-a-live-store.md#decision)
+(`LoginVolume` in `internal/runtime/docker/placement.go`, `LoginClaim` in
+`internal/runtime/kubernetes/sandbox.go`).
+
 A Kubernetes gateway chooses per provider: a key, then a token, then, in
 workload mode, forwarding. One gateway can hold an OpenAI key while Claude Code
 signs in itself.
 
 ### Where a harness's own sign-in lives
 
-Locally, the agent container mounts one file of a persistent Docker volume,
-`sproozi-<installation>-<placement>-login`, at
-`/workspace/session/<native directory>/<SignInFile>` (`volume-subpath`, Docker
-Engine 26 or later). The helper image's `checkpoint init-login`, run as root
-with only `CAP_CHOWN` and no network, creates an empty mode-0600 file owned by
-uid 1000 and leaves the volume's directory with root, so later runs can
-inspect it. The harness writes and refreshes the file itself; Sproozi never
-reads it. Checkpoints select only each harness's conversation, so a sign-in
-never moves with a session.
-
-On Kubernetes, `clientConfig.signIn` names a Secret or a PersistentVolumeClaim
-in `sproozi-agents`. A Secret holds a credential the person obtained through
-the provider's own flow, such as `claude setup-token`; the controller mounts it
-read-only at `/etc/sproozi/sign-in/<key>` and, with `env`, sets it as that
-variable. A claim is mounted read-write there. For a managed session the
-supervisor copies the harness's `SignInFile` from that directory into its
-native home before launch, and writes the refreshed file back after the
-harness exits when the directory is writable. A Kubernetes pod can't mount the
-file into the session folder directly, as Docker does: the folder is restored
-after the pod starts, so a mount there would break the restore's ownership
-checks.
+Removed 2026-11-24: where a login is stored, how it reaches a session and how
+it is saved back is decided in ADR 0049, under
+[Decision](0049-named-logins-share-a-live-store.md#decision) (a live store per
+named login, replacing the single volume file and the copy at launch and back
+at exit) and
+[How a login store is prepared and delivered](0049-named-logins-share-a-live-store.md#how-a-login-store-is-prepared-and-delivered)
+(the Docker helper and the Secret, moved there unchanged).
 
 ## Evidence
 
 All with deterministic providers unless stated:
 
-- Claude Code 2.1.302: a linked `.credentials.json` is replaced by a regular
-  file on refresh, so a link into a volume loses every refresh; a mounted
-  file is written in place; an empty file reads as "Not logged in"; and every
-  refresh returns a new refresh token.
+- Claude Code 2.1.302's login-file behaviour: moved 2026-11-24 to
+  [ADR 0049](0049-named-logins-share-a-live-store.md#evidence).
 - Codex 0.163.0, with a real ChatGPT sign-in through a recording proxy on the
   user's machine (method, path and status only; two account routing fields
   read once): model calls go to `chatgpt.com/backend-api/codex/responses`;
@@ -149,11 +139,9 @@ All with deterministic providers unless stated:
 - **The gateway runs each provider's sign-in.** The person can store a
   provider-issued token instead; a gateway-run OAuth flow per provider would
   be provider code the gateway doesn't need.
-- **Persist the whole harness home.** Simpler mounts, but it carries hooks,
-  settings and instructions from one session into the next.
-- **The first Kubernetes run writes its login into a ConfigMap.** Sandboxes
-  have no Kubernetes credentials, by design, and ConfigMaps aren't for
-  secrets.
+- Persisting the whole harness home, and writing the first Kubernetes login
+  into a ConfigMap: moved 2026-11-24 to
+  [ADR 0049](0049-named-logins-share-a-live-store.md#alternatives).
 - **Stop inspecting forwarded traffic.** It would lose refusal of hidden
   work, usage records and `diagnose`.
 
@@ -169,16 +157,16 @@ All with deterministic providers unless stated:
   acceptance rules "Provider credentials stay in the gateway" and "Workload
   headers cannot select another account" still hold for gateway-held
   credentials and for MCP, GitHub and destination routes.
-- Two sessions sharing one refreshing sign-in may race, because refresh
-  tokens rotate; a long-lived token avoids it.
+- Removed 2026-11-24: two sessions of one login sharing a refreshing sign-in,
+  and a refreshed login saved only when the harness exits, are decided in
+  [ADR 0049](0049-named-logins-share-a-live-store.md#decision) (a live store)
+  and its open revisit condition, whether a stock client re-reads a login
+  another session refreshed.
 - Codex tries WebSockets first and falls back after the gateway refuses each
   upgrade; see [WebSocket model traffic](../explanations/future-architecture/websocket-model-traffic.md).
 - Copilot's `/chat/completions` models and unverified Business and Enterprise
   hosts: moved 2026-11-24 to
   [ADR 0048](0048-github-copilot-cli-is-a-managed-harness.md#consequences-and-limits).
-- On Kubernetes, a managed session's refreshed login is saved only when the
-  harness exits; a supervisor killed without that loses the refresh, and the
-  person signs in again.
 - Extends ADR 0002 and leaves ADR 0026 in place.
 
 Revisit if a provider offers scoped, short-lived tokens a harness can request
@@ -192,6 +180,6 @@ gains streaming chat completions.
 [sign-in relay](../../internal/endpoints/model/signin.go),
 [leak guard](../../internal/gateway/leak.go),
 [credential modes](../../internal/modelauth/auth.go),
-[local routes](../../internal/gateway/docker/gateway.go),
-[login volume](../../internal/runtime/docker/managed_engine.go),
-[Kubernetes sign-in delivery](../../internal/runtime/kubernetes/sandbox.go).
+[local routes](../../internal/gateway/docker/gateway.go).
+Login storage: moved 2026-11-24 to the Implementation of
+[ADR 0049](0049-named-logins-share-a-live-store.md#implementation).

@@ -6,6 +6,12 @@ Date: 2026-10-24
 Extends [ADR 0047](0047-harnesses-sign-in-to-their-own-model-providers.md),
 replacing how a harness's own sign-in is stored and reaches each session.
 
+Updated 2026-11-24: this record is the one place that decides how a login is
+named, stored, shared, refreshed and saved. ADR 0047's section on where a
+sign-in lives was removed, and the parts of it that still held moved here, each
+with a dated line; ADR 0047 keeps whose credentials reach the provider and how
+the gateway forwards them.
+
 ## Problem and constraints
 
 ADR 0047 kept a harness's own sign-in outside its sessions: locally in one
@@ -67,6 +73,26 @@ whether a provider's terms allow a mechanism stays the person's choice.
 - **Gateway-held keys and tokens stay one per harness.** Naming them would
   need a credential and a gateway listener per name.
 
+### How a login store is prepared and delivered
+
+Moved 2026-11-24 from ADR 0047's "Where a harness's own sign-in lives",
+unchanged but for its heading, one connecting sentence and the dated
+corrections below.
+
+- The helper image's `checkpoint init-login`, run as root
+  with only `CAP_CHOWN` and no network, creates an empty mode-0600 file owned by
+  uid 1000 and leaves the volume's directory with root, so later runs can
+  inspect it.
+
+  Corrected 2026-11-24: the directory stays with root at mode 0711 and the
+  agent mounts it as the login store, not one file of it
+  (`initLogin` in `cmd/checkpoint/login.go`, `EnsureLoginVolume` in
+  `internal/runtime/docker/managed_engine.go`).
+- A Secret holds a credential the person obtained through
+  the provider's own flow, such as `claude setup-token`; the controller mounts it
+  read-only at `/etc/sproozi/sign-in/<key>` and, with `env`, sets it as that
+  variable.
+
 ## Evidence
 
 - `cmd/native-session/signin_test.go`: two sessions sharing one store each
@@ -78,6 +104,11 @@ whether a provider's terms allow a mechanism stays the person's choice.
   `internal/session/coordinator_test.go`, `internal/localsetup` and
   `internal/runtime/kubernetes` tests: per-login volumes and claims, a move
   keeping its login, refusals naming existing logins, claim creation once.
+- Claude Code 2.1.302: a linked `.credentials.json` is replaced by a regular
+  file on refresh, so a link into a volume loses every refresh; a mounted
+  file is written in place; an empty file reads as "Not logged in"; and every
+  refresh returns a new refresh token. (Moved 2026-11-24 from ADR 0047's
+  Evidence, unchanged.)
 - Not yet verified: that stock Codex, Claude Code and Copilot re-read their
   login file when another process changes it, rather than keeping the token
   they loaded. A client that keeps its own copy can still fail a refresh after
@@ -91,13 +122,19 @@ whether a provider's terms allow a mechanism stays the person's choice.
   on Kubernetes the session folder is restored after the Pod starts, so a
   mount there would break the restore's ownership checks.
 - **Link the login file into the store.** Claude Code replaces the link with a
-  regular file on refresh (ADR 0047), and Copilot replaces its file too, so
+  regular file on refresh (see Evidence), and Copilot replaces its file too, so
   the store would miss every refresh.
 - **Import the person's existing logins.** Rejected: Sproozi never copies a
   sign-in from the person's machine, and each placement signs in fresh.
 - **The remote executor creates claims.** The controller already writes the
   sandbox objects in `sproozi-agents` (ADR 0023) and creates the Pod that
   needs the claim; the executor would need new rights there.
+- **Persist the whole harness home.** Simpler mounts, but it carries hooks,
+  settings and instructions from one session into the next. (Moved
+  2026-11-24 from ADR 0047's alternatives, unchanged.)
+- **The first Kubernetes run writes its login into a ConfigMap.** Sandboxes
+  have no Kubernetes credentials, by design, and ConfigMaps aren't for
+  secrets. (Moved 2026-11-24 from ADR 0047's alternatives, unchanged.)
 - **Name gateway-held keys too.** Not needed for several accounts of a harness
   that signs in itself; revisit if people need several keys per harness.
 
@@ -121,6 +158,8 @@ several gateway-held keys per harness.
 [sync](../../cmd/native-session/signin.go),
 [login names](../../internal/harness/login.go),
 [Docker volume](../../internal/runtime/docker/placement.go),
+[Docker login volume and helper](../../internal/runtime/docker/managed_engine.go),
+[login file preparation](../../cmd/checkpoint/login.go),
 [Kubernetes claims](../../internal/runtime/kubernetes/sandbox.go),
 [service](../../internal/session/home/service.go),
 [local setup](../../internal/localsetup/install.go),

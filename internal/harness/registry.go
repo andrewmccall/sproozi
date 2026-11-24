@@ -48,9 +48,9 @@ type Harness struct {
 	// Protocol is the model API the managed kind speaks through the gateway.
 	Protocol ModelProtocol
 	// SignInFile is where the stock client keeps its own sign-in, relative to
-	// NativeDirectory (ADR 0047). The placement persists only this file when
-	// the harness signs in itself; the provider's routes are shared by every
-	// harness that uses it.
+	// NativeDirectory (ADR 0047). The placement persists only this file, in the
+	// harness's login store (ADR 0049), when the harness signs in itself;
+	// the provider's routes are shared by every harness that uses it.
 	SignInFile string
 	// SignInProvider is the model provider a gateway-held sign-in token or
 	// the harness's own sign-in reaches, when it isn't Protocol's: Copilot

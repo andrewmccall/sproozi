@@ -75,7 +75,8 @@ type PlacementConfig struct {
 	AgentLimits, HelperLimits, AnchorLimits        ResourceLimits
 	VolumeBytes, MaxCheckpointBytes, RetainedBytes int64
 	// SignIn mounts the harness's own persistent sign-in file into every
-	// agent, because the gateway forwards that credential (ADR 0047).
+	// agent, because the gateway forwards that credential (ADR 0047). The
+	// login store is ADR 0049's.
 	SignIn bool
 	// ProfileDirectory is the user's profile folder, set by the home from the
 	// configuration file's location, never from its contents. Each launch

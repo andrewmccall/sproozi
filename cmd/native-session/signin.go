@@ -23,7 +23,7 @@ import (
 const maxSignInBytes = 1 << 20
 
 // signInPaths are the harness's login file in the runtime's sign-in
-// directory, its login store, and in its native home (ADR 0047).
+// directory, its login store, and in its native home (ADR 0049).
 func signInPaths(c config) (stored, native string, ok bool) {
 	h, err := harness.Managed(c.Harness)
 	if c.SignInDirectory == "" || err != nil || h.SignInFile == "" {
