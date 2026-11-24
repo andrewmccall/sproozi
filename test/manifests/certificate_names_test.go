@@ -17,8 +17,9 @@ import (
 // They must not drift.
 func TestGatewayAndCertificateControllerAgreeOnNames(t *testing.T) {
 	controller := renderKustomization(t, "config/certificates")
-	var secrets []string
-	for _, secret := range objectsOfKind(controller, "Secret") {
+	shipped := objectsOfKind(controller, "Secret")
+	secrets := make([]string, 0, len(shipped))
+	for _, secret := range shipped {
 		secrets = append(secrets, metadataName(secret))
 	}
 	slices.Sort(secrets)

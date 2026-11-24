@@ -343,7 +343,7 @@ func loadStartupConfig() (*startupConfig, error) {
 			return nil, err
 		}
 	}
-	certificates := map[string]tls.Certificate{}
+	perHost := map[string]tls.Certificate{}
 	leaf, err := x509.ParseCertificate(certificate.Certificate[0])
 	if err != nil {
 		return nil, err
@@ -364,11 +364,11 @@ func loadStartupConfig() (*startupConfig, error) {
 			return nil, fmt.Errorf("gateway certificate in %s does not cover configured host %q: "+
 				"reissue the certificate with %q in its subjectAltName", gatewayTLSSource, name, name)
 		}
-		certificates[name] = certificate
+		perHost[name] = certificate
 	}
 	return &startupConfig{
 		enabled: enabled,
-		host:    host, listenerCert: certificate, certificates: certificates, certFile: certFile, keyFile: keyFile,
+		host:    host, listenerCert: certificate, certificates: perHost, certFile: certFile, keyFile: keyFile,
 		profiles: profiles, pricing: pricing, openAIKey: openAIKey, anthropicKey: anthropicKey, modelAuthMode: modelAuthMode,
 		openAIToken: openAIToken, anthropicToken: anthropicToken, copilotToken: copilotToken,
 		openAIUpstreamURL: openAIUpstreamURL, anthropicUpstreamURL: anthropicUpstreamURL,
@@ -1217,7 +1217,8 @@ func validateModelUpstream(name, value string) error {
 // changes nothing; an administrator removes the binding.
 func warnSystemConfigWrites(ctx context.Context, clients authentication.Interface, out io.Writer) {
 	for _, verb := range []string{"create", "update", "patch", "delete"} {
-		attributes := &authorizationv1.ResourceAttributes{Namespace: "sproozi-system", Resource: "configmaps", Verb: verb}
+		attributes := &authorizationv1.ResourceAttributes{
+			Namespace: defaultSystemNamespace, Resource: "configmaps", Verb: verb}
 		review, err := clients.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx,
 			&authorizationv1.SelfSubjectAccessReview{
 				Spec: authorizationv1.SelfSubjectAccessReviewSpec{ResourceAttributes: attributes},

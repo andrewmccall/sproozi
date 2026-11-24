@@ -423,7 +423,7 @@ func TestChatGPTStartupDoesNotRequireAPIKeyAndPinsPublicUpstream(t *testing.T) {
 func TestDisabledModulesDoNotRequireProviderCredentials(t *testing.T) {
 	validGatewayEnvironment(t)
 	t.Setenv("SPROOZI_ENABLED_CAPABILITIES", "kubernetes.read")
-	for _, key := range []string{"OPENAI_API_KEY",
+	for _, key := range []string{openAIKeyEnv,
 		"GITHUB_APP_ID",
 		"GITHUB_APP_INSTALLATION_ID",
 		"GITHUB_APP_PRIVATE_KEY_PATH",

@@ -8,6 +8,23 @@ import (
 	"github.com/andrewmccall/sproozi/internal/gateway/routetest"
 )
 
+// The settings' variables, and the values the tests below compare against.
+// They repeat the defaults on purpose: a changed default must change a test.
+const (
+	agentNamespaceEnv      = "AGENT_NAMESPACE"
+	credentialNamespaceEnv = "CREDENTIAL_NAMESPACE"
+	budgetNamespaceEnv     = "BUDGET_NAMESPACE"
+	gitBaseURLEnv          = "GIT_BASE_URL"
+	apiBaseURLEnv          = "API_BASE_URL"
+	modelDiagnosticsEnv    = "MODEL_DIAGNOSTICS"
+
+	systemNamespaceValue = "sproozi-system"
+	publicGitOrigin      = "https://github.com"
+	publicAPIOrigin      = "https://api.github.com"
+	customGitOrigin      = "https://git.example"
+	customAPIOrigin      = "https://api.example"
+)
+
 // The namespaces, GitHub origins and diagnostics switch are read once by the
 // loader. An empty value counts as unset, and none is validated.
 func TestLoaderReadsNamespacesOriginsAndDiagnostics(t *testing.T) {
@@ -15,29 +32,29 @@ func TestLoaderReadsNamespacesOriginsAndDiagnostics(t *testing.T) {
 		agent, credential, budget, git, api string
 		diagnostics                         bool
 	}
-	defaults := settings{"sproozi-agents", "sproozi-system", "sproozi-system",
-		"https://github.com", "https://api.github.com", false}
+	defaults := settings{"sproozi-agents", systemNamespaceValue, systemNamespaceValue,
+		publicGitOrigin, publicAPIOrigin, false}
+	names := []string{agentNamespaceEnv, credentialNamespaceEnv, budgetNamespaceEnv,
+		gitBaseURLEnv, apiBaseURLEnv, modelDiagnosticsEnv}
 	for _, tc := range []struct {
 		name string
 		env  map[string]string
 		want settings
 	}{
-		{"unset", nil, defaults},
-		{"empty", map[string]string{"AGENT_NAMESPACE": "", "CREDENTIAL_NAMESPACE": "", "BUDGET_NAMESPACE": "",
-			"GIT_BASE_URL": "", "API_BASE_URL": "", "MODEL_DIAGNOSTICS": ""}, defaults},
-		{"set", map[string]string{"AGENT_NAMESPACE": "a", "CREDENTIAL_NAMESPACE": "c", "BUDGET_NAMESPACE": "b",
-			"GIT_BASE_URL": "https://git.example", "API_BASE_URL": "https://api.example", "MODEL_DIAGNOSTICS": "true"},
-			settings{"a", "c", "b", "https://git.example", "https://api.example", true}},
-		{"not a namespace or origin is kept as written", map[string]string{"AGENT_NAMESPACE": "Not A Namespace",
-			"GIT_BASE_URL": "::"}, settings{"Not A Namespace", "sproozi-system", "sproozi-system", "::",
-			"https://api.github.com", false}},
-		{"diagnostics only for true", map[string]string{"MODEL_DIAGNOSTICS": "1"}, defaults},
-		{"diagnostics is case-sensitive", map[string]string{"MODEL_DIAGNOSTICS": "True"}, defaults},
+		{"no variable set", nil, defaults},
+		{"all empty", map[string]string{agentNamespaceEnv: "", credentialNamespaceEnv: "", budgetNamespaceEnv: "",
+			gitBaseURLEnv: "", apiBaseURLEnv: "", modelDiagnosticsEnv: ""}, defaults},
+		{"all set", map[string]string{agentNamespaceEnv: "a", credentialNamespaceEnv: "c", budgetNamespaceEnv: "b",
+			gitBaseURLEnv: customGitOrigin, apiBaseURLEnv: customAPIOrigin, modelDiagnosticsEnv: "true"},
+			settings{"a", "c", "b", customGitOrigin, customAPIOrigin, true}},
+		{"values are kept as written", map[string]string{agentNamespaceEnv: "Not A Namespace", gitBaseURLEnv: "::"},
+			settings{"Not A Namespace", systemNamespaceValue, systemNamespaceValue, "::", publicAPIOrigin, false}},
+		{"diagnostics only for true", map[string]string{modelDiagnosticsEnv: "1"}, defaults},
+		{"diagnostics is case-sensitive", map[string]string{modelDiagnosticsEnv: "True"}, defaults},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			validGatewayEnvironment(t)
-			for _, name := range []string{"AGENT_NAMESPACE", "CREDENTIAL_NAMESPACE", "BUDGET_NAMESPACE",
-				"GIT_BASE_URL", "API_BASE_URL", "MODEL_DIAGNOSTICS"} {
+			for _, name := range names {
 				t.Setenv(name, "")
 			}
 			for name, value := range tc.env {
@@ -62,16 +79,16 @@ func TestGitHubUpstreamOriginsComeFromTheEnvironment(t *testing.T) {
 	for _, tc := range []struct {
 		name, git, api, wantGit, wantAPI string
 	}{
-		{"unset", "", "", "https://github.com", "https://api.github.com"},
-		{"set", "https://git.example", "https://api.example", "https://git.example", "https://api.example"},
-		{"only git set", "https://git.example", "", "https://git.example", "https://api.github.com"},
+		{"neither set", "", "", publicGitOrigin, publicAPIOrigin},
+		{"both set", customGitOrigin, customAPIOrigin, customGitOrigin, customAPIOrigin},
+		{"only git set", customGitOrigin, "", customGitOrigin, publicAPIOrigin},
 		{"set to anything", "not a url", "x", "not a url", "x"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			validGatewayEnvironment(t)
 			t.Setenv("SPROOZI_ENABLED_CAPABILITIES", "github.pull_request")
-			t.Setenv("GIT_BASE_URL", tc.git)
-			t.Setenv("API_BASE_URL", tc.api)
+			t.Setenv(gitBaseURLEnv, tc.git)
+			t.Setenv(apiBaseURLEnv, tc.api)
 			cfg, err := loadStartupConfig()
 			if err != nil {
 				t.Fatal(err)
