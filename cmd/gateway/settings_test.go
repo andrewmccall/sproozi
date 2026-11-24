@@ -8,16 +8,9 @@ import (
 	"github.com/andrewmccall/sproozi/internal/gateway/routetest"
 )
 
-// The settings' variables, and the values the tests below compare against.
+// The values the tests below compare against.
 // They repeat the defaults on purpose: a changed default must change a test.
 const (
-	agentNamespaceEnv      = "AGENT_NAMESPACE"
-	credentialNamespaceEnv = "CREDENTIAL_NAMESPACE"
-	budgetNamespaceEnv     = "BUDGET_NAMESPACE"
-	gitBaseURLEnv          = "GIT_BASE_URL"
-	apiBaseURLEnv          = "API_BASE_URL"
-	modelDiagnosticsEnv    = "MODEL_DIAGNOSTICS"
-
 	systemNamespaceValue = "sproozi-system"
 	publicGitOrigin      = "https://github.com"
 	publicAPIOrigin      = "https://api.github.com"

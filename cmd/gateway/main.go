@@ -212,7 +212,7 @@ func goMemoryLimit() (memoryLimit, error) {
 				"check limits.memory on the gateway Deployment", memoryLimitEnv, raw, minContainerMemoryLimit)
 		}
 	}
-	if explicit := os.Getenv("GOMEMLIMIT"); explicit != "" {
+	if explicit := os.Getenv(goMemLimitEnv); explicit != "" {
 		return memoryLimit{source: "GOMEMLIMIT=" + explicit}, nil
 	}
 	if raw == "" {
@@ -237,15 +237,15 @@ func boundedInteger(key string, fallback, upper int) (int, error) {
 // loadGitHubApp reads and checks the GitHub App identity the pull request
 // module signs in with.
 func loadGitHubApp() (appID, installationID int64, privateKey []byte, err error) {
-	appID, err = githubAppInteger("GITHUB_APP_ID", "app-id")
+	appID, err = githubAppInteger(githubAppIDEnv, "app-id")
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	installationID, err = githubAppInteger("GITHUB_APP_INSTALLATION_ID", "installation-id")
+	installationID, err = githubAppInteger(githubAppInstallationIDEnv, "installation-id")
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	privateKey, err = os.ReadFile(os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH"))
+	privateKey, err = os.ReadFile(os.Getenv(githubAppPrivateKeyPathEnv))
 	if errors.Is(err, os.ErrNotExist) {
 		return 0, 0, nil, fmt.Errorf("GitHub App private key is missing: create key private-key.pem in %s",
 			githubAppSource)
@@ -274,8 +274,8 @@ func loadStartupConfig() (*startupConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	host := strings.ToLower(envOrDefault("SPROOZI_GATEWAY_HOST", defaultHost))
-	certFile, keyFile := os.Getenv("SPROOZI_GATEWAY_CERT_FILE"), os.Getenv("SPROOZI_GATEWAY_KEY_FILE")
+	host := strings.ToLower(envOrDefault(gatewayHostEnv, defaultHost))
+	certFile, keyFile := os.Getenv(gatewayCertFileEnv), os.Getenv(gatewayKeyFileEnv)
 	if certFile == "" || keyFile == "" {
 		return nil, errors.New("gateway TLS certificate and key are required: " +
 			"set SPROOZI_GATEWAY_CERT_FILE and SPROOZI_GATEWAY_KEY_FILE to tls.crt and tls.key " +
@@ -287,7 +287,7 @@ func loadStartupConfig() (*startupConfig, error) {
 	}
 	profileData := []byte("{}")
 	if enabled[sprooziv1alpha1.CapabilityNetworkEgress] {
-		profileData, err = os.ReadFile(envOrDefault("EGRESS_PROFILES_PATH", "/etc/sproozi/egress/profiles.json"))
+		profileData, err = os.ReadFile(envOrDefault(egressProfilesPathEnv, "/etc/sproozi/egress/profiles.json"))
 		if err != nil {
 			return nil, fmt.Errorf("read egress profiles (key profiles.json in %s): %w", egressProfilesSource, err)
 		}
@@ -303,10 +303,10 @@ func loadStartupConfig() (*startupConfig, error) {
 	var pricing *modelgateway.PricingTable
 	openAIKey, anthropicKey, modelAuthMode := "", "", ""
 	openAIToken, anthropicToken, copilotToken := "", "", ""
-	openAIUpstreamURL := envOrDefault("OPENAI_UPSTREAM_URL", modelgateway.OpenAIUpstreamURL)
-	anthropicUpstreamURL := envOrDefault("ANTHROPIC_UPSTREAM_URL", modelgateway.AnthropicUpstreamURL)
+	openAIUpstreamURL := envOrDefault(openAIUpstreamURLEnv, modelgateway.OpenAIUpstreamURL)
+	anthropicUpstreamURL := envOrDefault(anthropicUpstreamURLEnv, modelgateway.AnthropicUpstreamURL)
 	if enabled[sprooziv1alpha1.CapabilityModelInference] {
-		pricingFile, err := os.Open(envOrDefault("MODEL_PRICING_PATH", "/etc/sproozi/model/pricing.json"))
+		pricingFile, err := os.Open(envOrDefault(modelPricingPathEnv, "/etc/sproozi/model/pricing.json"))
 		if err != nil {
 			return nil, fmt.Errorf("read model pricing (key pricing.json in %s): %w", modelPricingSource, err)
 		}
@@ -375,12 +375,12 @@ func loadStartupConfig() (*startupConfig, error) {
 		appID: appID, installationID: installationID, privateKey: privateKey,
 		mcpRegistry: mcpRegistry, admission: admission, maxModelCall: maxModelCall,
 		ledgerRetention:     ledgerRetention,
-		agentNamespace:      envOrDefault("AGENT_NAMESPACE", defaultAgentNamespace),
-		credentialNamespace: envOrDefault("CREDENTIAL_NAMESPACE", defaultSystemNamespace),
-		budgetNamespace:     envOrDefault("BUDGET_NAMESPACE", defaultSystemNamespace),
-		gitBaseURL:          envOrDefault("GIT_BASE_URL", defaultGitBaseURL),
-		apiBaseURL:          envOrDefault("API_BASE_URL", defaultGitHubAPIBaseURL),
-		modelDiagnostics:    os.Getenv("MODEL_DIAGNOSTICS") == "true",
+		agentNamespace:      envOrDefault(agentNamespaceEnv, defaultAgentNamespace),
+		credentialNamespace: envOrDefault(credentialNamespaceEnv, defaultSystemNamespace),
+		budgetNamespace:     envOrDefault(budgetNamespaceEnv, defaultSystemNamespace),
+		gitBaseURL:          envOrDefault(gitBaseURLEnv, defaultGitBaseURL),
+		apiBaseURL:          envOrDefault(apiBaseURLEnv, defaultGitHubAPIBaseURL),
+		modelDiagnostics:    os.Getenv(modelDiagnosticsEnv) == "true",
 	}, nil
 }
 
@@ -504,7 +504,7 @@ func inspectionHosts(host string, enabled map[sprooziv1alpha1.CapabilityKind]boo
 
 func loadMCPRegistry(gatewayHost string) (*mcpgateway.Registry, error) {
 	data := []byte(`{"servers":{}}`)
-	if registryPath := os.Getenv("MCP_SERVERS_PATH"); registryPath != "" {
+	if registryPath := os.Getenv(mcpServersPathEnv); registryPath != "" {
 		var err error
 		data, err = os.ReadFile(registryPath)
 		if err != nil {
@@ -533,7 +533,7 @@ func enabledCapabilities() (map[sprooziv1alpha1.CapabilityKind]bool, error) {
 		sprooziv1alpha1.CapabilityNetworkEgress,
 	}
 	enabled := map[sprooziv1alpha1.CapabilityKind]bool{}
-	for item := range strings.SplitSeq(envOrDefault("SPROOZI_ENABLED_CAPABILITIES", "kubernetes.read"), ",") {
+	for item := range strings.SplitSeq(envOrDefault(enabledCapabilitiesEnv, "kubernetes.read"), ",") {
 		cap := sprooziv1alpha1.CapabilityKind(strings.TrimSpace(item))
 		if !slices.Contains(supported, cap) {
 			return nil, fmt.Errorf("SPROOZI_ENABLED_CAPABILITIES lists unknown capability %q", cap)
@@ -1008,7 +1008,7 @@ func pruneLedgers(ctx context.Context, c client.Client, namespace string, now ti
 // A period under an hour could delete a ledger before a run that was just
 // deleted is gone from every component's view.
 func loadLedgerRetention() (time.Duration, error) {
-	retention, err := durationEnv("BUDGET_LEDGER_RETENTION", budgetkubernetes.DefaultRetention)
+	retention, err := durationEnv(budgetLedgerRetentionEnv, budgetkubernetes.DefaultRetention)
 	if err != nil {
 		return 0, err
 	}
