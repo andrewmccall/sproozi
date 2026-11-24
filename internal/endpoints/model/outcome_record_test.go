@@ -261,18 +261,18 @@ func (w *outcomeWriter) waitFor(t *testing.T, want string) {
 
 // caseRun is one recorded model request and what its case drives around it.
 type caseRun struct {
-	t        *testing.T
-	tracker  *budget.Tracker
-	clock    *manualClock
-	drain    *model.Drain
+	t       *testing.T
+	tracker *budget.Tracker
+	clock   *manualClock
+	drain   *model.Drain
 	// blockerDrain stops the blocker apart from the case's own call, so a
 	// case decides which of the two stops first.
 	blockerDrain *model.Drain
-	cancel   context.CancelFunc
-	writer   *outcomeWriter
-	config   model.HandlerConfig
-	identity *gateway.ExecutionGrant
-	cleanups []func()
+	cancel       context.CancelFunc
+	writer       *outcomeWriter
+	config       model.HandlerConfig
+	identity     *gateway.ExecutionGrant
+	cleanups     []func()
 }
 
 // blocker starts another call on the same account, through its own handler
