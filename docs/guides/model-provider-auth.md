@@ -262,7 +262,7 @@ GitHub-backed Copilot can read `api.github.com/copilot/` and
 parameters. GitHub applies the account's permissions and MCP policy; the
 response, including a refusal, reaches Copilot unchanged. These routes accept
 GET only and do not open unrelated GitHub API paths. Copilot in OpenAI-key
-mode does not enable them. See [ADR 0053](../adr/0053-copilot-account-namespaces-and-policy-verification.md).
+mode does not enable them. See [ADR 0048](../adr/0048-github-copilot-cli-is-a-managed-harness.md#account-namespaces-and-policy-verification).
 
 ## Current limits
 

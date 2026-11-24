@@ -4,7 +4,7 @@ Status: accepted
 Date: 2026-11-24
 
 Extends [ADR 0047](0047-harnesses-sign-in-to-their-own-model-providers.md)
-and [ADR 0053](0053-copilot-account-namespaces-and-policy-verification.md).
+and [ADR 0048](0048-github-copilot-cli-is-a-managed-harness.md#account-namespaces-and-policy-verification).
 
 ## Problem and constraints
 
@@ -12,7 +12,7 @@ A provider-table entry can name account requests (`AccountAuthority`,
 `AccountPrefixes`, `AccountRoutes`): the account and policy requests a
 signed-in client makes on a host another capability owns, served as path
 routes there. Copilot's, on `api.github.com`, are the only ones today
-([ADR 0053](0053-copilot-account-namespaces-and-policy-verification.md)).
+([ADR 0048](0048-github-copilot-cli-is-a-managed-harness.md#account-namespaces-and-policy-verification)).
 The relay attaches the provider's credential to each request it forwards to
 that host.
 
@@ -105,7 +105,7 @@ does.
   `internal/gateway/docker/testdata/model_routes.txt`
 - Related: [ADR 0047](0047-harnesses-sign-in-to-their-own-model-providers.md)
   (provider facts are data the gateways build routes from),
-  [ADR 0053](0053-copilot-account-namespaces-and-policy-verification.md)
+  [ADR 0048](0048-github-copilot-cli-is-a-managed-harness.md#account-namespaces-and-policy-verification)
   (Copilot's account namespaces),
   [ADR 0070](0070-gateway-routes-declare-admission-and-requests-record-one-decision.md)
   (model routes built from the provider table)
