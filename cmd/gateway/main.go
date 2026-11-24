@@ -303,11 +303,12 @@ func loadStartupConfig() (*startupConfig, error) {
 		if closeErr != nil {
 			return nil, fmt.Errorf("close model pricing: %w", closeErr)
 		}
-		openAIKey, anthropicKey, modelAuthMode, err = loadModelCredentials(openAIUpstreamURL)
+		openAIToken, anthropicToken, copilotToken = readSignInTokens()
+		openAIKey, anthropicKey, modelAuthMode, err = loadModelCredentials(openAIUpstreamURL, openAIToken, anthropicToken)
 		if err != nil {
 			return nil, err
 		}
-		openAIToken, anthropicToken, copilotToken, err = loadSignInTokens(modelAuthMode, openAIKey, anthropicKey)
+		err = checkSignInTokens(modelAuthMode, openAIKey, anthropicKey, openAIToken, anthropicToken, copilotToken)
 		if err != nil {
 			return nil, err
 		}
@@ -397,33 +398,41 @@ func pruneModelHosts(hosts, owned map[string]bool, modes map[string]string) {
 	}
 }
 
-// loadSignInTokens reads gateway-held sign-in tokens, such as one from claude
-// setup-token, which a provider without an API key attaches (ADR 0047).
-func loadSignInTokens(mode, openAIKey, anthropicKey string) (string, string, string, error) {
-	openAI := strings.TrimSpace(os.Getenv("OPENAI_SIGN_IN_TOKEN"))
-	anthropic := strings.TrimSpace(os.Getenv("ANTHROPIC_SIGN_IN_TOKEN"))
-	copilot := strings.TrimSpace(os.Getenv(copilotTokenEnv))
+// readSignInTokens reads gateway-held sign-in tokens, such as one from claude
+// setup-token, which a provider without an API key attaches (ADR 0047). Each
+// is read once and trimmed, so a blank value is no token wherever it is used.
+func readSignInTokens() (openAI, anthropic, copilot string) {
+	return strings.TrimSpace(os.Getenv(openAITokenEnv)), strings.TrimSpace(os.Getenv(anthropicTokenEnv)),
+		strings.TrimSpace(os.Getenv(copilotTokenEnv))
+}
+
+// checkSignInTokens rejects a token that is not one line or that competes with
+// the provider's API key or with chatgpt mode.
+func checkSignInTokens(mode, openAIKey, anthropicKey, openAI, anthropic, copilot string) error {
 	for _, token := range []struct{ env, key, value, apiKey string }{
 		{openAITokenEnv, "openai-sign-in-token", openAI, openAIKey},
 		{anthropicTokenEnv, "anthropic-sign-in-token", anthropic, anthropicKey},
 		{copilotTokenEnv, "copilot-sign-in-token", copilot, ""},
 	} {
 		if strings.ContainsAny(token.value, "\r\n") {
-			return "", "", "", errors.New(token.env + " is invalid: key " + token.key + " in " +
+			return errors.New(token.env + " is invalid: key " + token.key + " in " +
 				modelCredentialsSource + " must be a single line")
 		}
 		if token.value != "" && token.apiKey != "" {
-			return "", "", "", errors.New(token.env + " and the provider's API key are both set in " + modelCredentialsSource +
+			return errors.New(token.env + " and the provider's API key are both set in " + modelCredentialsSource +
 				": keep one")
 		}
 	}
 	if openAI != "" && mode == modelauth.ChatGPTMode {
-		return "", "", "", errors.New("OPENAI_SIGN_IN_TOKEN can't be used in chatgpt mode, which holds its own sign-in")
+		return errors.New("OPENAI_SIGN_IN_TOKEN can't be used in chatgpt mode, which holds its own sign-in")
 	}
-	return openAI, anthropic, copilot, nil
+	return nil
 }
 
-func loadModelCredentials(openAIUpstreamURL string) (string, string, string, error) {
+// loadModelCredentials reads the API keys and the authentication mode. A
+// sign-in token from readSignInTokens satisfies api_key mode's need for a
+// credential.
+func loadModelCredentials(openAIUpstreamURL, openAIToken, anthropicToken string) (string, string, string, error) {
 	openAIKey := strings.TrimSpace(os.Getenv(openAIKeyEnv))
 	anthropicKey := strings.TrimSpace(os.Getenv(anthropicKeyEnv))
 	for _, credential := range []struct{ env, key, value string }{
@@ -444,7 +453,7 @@ func loadModelCredentials(openAIUpstreamURL string) (string, string, string, err
 		return "", "", "", errors.New("ChatGPT plan usage requires the public OpenAI API upstream")
 	}
 	if mode == modelauth.APIKeyMode && openAIKey == "" && anthropicKey == "" &&
-		os.Getenv("OPENAI_SIGN_IN_TOKEN") == "" && os.Getenv("ANTHROPIC_SIGN_IN_TOKEN") == "" {
+		openAIToken == "" && anthropicToken == "" {
 		return "", "", "", errors.New("OPENAI_API_KEY or ANTHROPIC_API_KEY is required in api_key mode: " +
 			"set key openai-api-key or anthropic-api-key in " + modelCredentialsSource +
 			", or set key mode to chatgpt in " + modelAuthSource)
