@@ -2,7 +2,9 @@ package privatefs
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 )
 
@@ -27,7 +29,8 @@ import (
 // that sorts before ".pending-" would be examined first under its old size
 // and break the argument. A scratch directory that goes with its
 // contents is skipped the same way. Every other error fails the sum,
-// including a missing root and a directory that cannot be listed.
+// including a missing root, a root that is not a directory by lstat (a
+// symbolic link or a regular file) and a directory that cannot be listed.
 func Usage(root string, skip func(name string) bool) (int64, error) {
 	return usage(root, skip, nil)
 }
@@ -36,8 +39,18 @@ func Usage(root string, skip func(name string) bool) (int64, error) {
 // after its directory was listed and before the entry is examined, where a
 // concurrent writer may remove or rename it.
 func usage(root string, skip func(name string) bool, listed func(path string)) (int64, error) {
+	// The walk does not follow a symbolic link, so a root that is one would
+	// sum as the link alone: a small sum for a whole tree, which for an
+	// admission decision is the unsafe direction. Refuse it.
+	info, err := os.Lstat(root)
+	if err != nil {
+		return 0, err
+	}
+	if !info.IsDir() {
+		return 0, fmt.Errorf("privatefs: usage root %s is not a directory", root)
+	}
 	var size int64
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err == nil {
 			if listed != nil {
 				listed(path)

@@ -165,6 +165,33 @@ func TestUsageFailsWhenADirectoryBecomesAFile(t *testing.T) {
 	}
 }
 
+// A root that is a symbolic link or a regular file is refused rather than
+// summed as the one entry it is, which would be a tiny sum for a tree.
+func TestUsageRefusesARootThatIsNotADirectory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	tree := filepath.Join(dir, "tree")
+	if err := os.Mkdir(tree, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeSized(t, filepath.Join(tree, "a"), 1000)
+	file := filepath.Join(dir, "file")
+	writeSized(t, file, 10)
+	roots := map[string]string{"regular file": file}
+	if runtime.GOOS != "windows" {
+		link := filepath.Join(dir, "link")
+		if err := os.Symlink(tree, link); err != nil {
+			t.Fatal(err)
+		}
+		roots["symbolic link to a directory"] = link
+	}
+	for name, root := range roots {
+		if size, err := Usage(root, nil); err == nil || !strings.Contains(err.Error(), "is not a directory") {
+			t.Errorf("Usage of a %s = %d, %v; want an is not a directory error", name, size, err)
+		}
+	}
+}
+
 // Sizes are the entry's own, as lstat reports them: a symbolic link is
 // counted at its own length and is never followed, to a file or to a
 // directory.
