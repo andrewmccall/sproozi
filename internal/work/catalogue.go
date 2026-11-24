@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -166,11 +167,16 @@ func (o *Owner) entry(id string) (entry, error) {
 	if err != nil {
 		return entry{}, err
 	}
+	return o.decodeEntry(id, b)
+}
+
+// decodeEntry decodes the bytes of id's record, in either format.
+func (o *Owner) decodeEntry(id string, b []byte) (entry, error) {
 	defer o.interleaveAt(stepEntry, id)
 	var probe struct {
 		Version int `json:"version"`
 	}
-	if err = json.Unmarshal(b, &probe); err != nil {
+	if err := json.Unmarshal(b, &probe); err != nil {
 		return entry{}, err
 	}
 	if probe.Version == legacyVersion {
@@ -510,7 +516,11 @@ func (o *Owner) admitRetention(newSession bool) error {
 		reserved = 2
 	}
 	for _, id := range ids {
-		reserved += o.reserved(id)
+		n, err := o.reserved(id)
+		if err != nil {
+			return err
+		}
+		reserved += n
 	}
 	_, coordinated, err := o.config.Coordinator.Retained()
 	if err != nil {
@@ -534,21 +544,54 @@ func (o *Owner) admitRetention(newSession bool) error {
 
 // reserved is how many checkpoint-sized reservations session id holds: one
 // for the checkpoint an unsettled session may still commit, and one more for
-// the input the coordinator has not retained yet. A settled session, a
-// version 1 record and a record that cannot be read hold none.
-func (o *Owner) reserved(id string) int64 {
-	e, err := o.entry(id)
+// the input the coordinator has not retained yet. A settled session and a
+// version 1 record hold none.
+//
+// A record that is gone holds none, and so does one that is present and read
+// but is not a valid record: nothing drives it, so it will never commit a
+// checkpoint. A record is gone if it was listed and removed before it was
+// read, or removed during the read (a removal mark, or a missing record or
+// journal), as privatefs.Usage skips an entry removed after its directory was
+// listed. A catalogue directory that went too fails admission in Usage, which
+// admitRetention calls next, and Usage counts the files that remain.
+//
+// A record or journal that is present but cannot be looked at (permission,
+// I/O, too many open files, not a regular file, a mark that cannot be
+// checked) fails closed: the error is returned, and admission refuses with
+// it, as it does when the coordinator's or the catalogue's size cannot be
+// summed. Treating "could not look" as "nothing reserved" would admit work
+// the limit refuses. An error from the coordinator's journal is not told
+// apart from a corrupt journal, so a corrupt journal fails closed too.
+func (o *Owner) reserved(id string) (int64, error) {
+	if !CanonicalID(id) {
+		return 0, nil // a stray file, not a session's record
+	}
+	b, err := o.readRecord(id)
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("work: could not determine reserved storage: %w", err)
+	}
+	e, err := o.decodeEntry(id, b)
 	if err != nil || e.legacy != nil {
-		return 0
+		return 0, nil // content that is not a valid record
 	}
 	rec, err := o.execution(*e.current)
-	if err != nil || derivePhase(*e.current, rec).Settled() {
-		return 0
+	if err != nil {
+		var rejection *profile.Rejection
+		if errors.As(err, &rejection) && rejection.Code == profile.CodeInvalid {
+			return 0, nil // removed since the record was read
+		}
+		return 0, fmt.Errorf("work: could not determine reserved storage: %w", err)
 	}
-	if rec == nil {
-		return 2
+	switch {
+	case derivePhase(*e.current, rec).Settled():
+		return 0, nil
+	case rec == nil:
+		return 2, nil
 	}
-	return 1
+	return 1, nil
 }
 
 // lastExit is the exit of the execution's last stopped visit, if its harness

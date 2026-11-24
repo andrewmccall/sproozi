@@ -325,6 +325,13 @@ checkpoint until it stops. A stop, a cancellation and a task's completion are
 never refused for space: what they keep was reserved, and refusing them would
 lose work.
 
+Admission fails closed when it cannot check the bound. A session whose
+record or journal is there but cannot be read (permission, I/O, too many open
+files, not a regular file) is not taken to reserve nothing: the submission or
+resume is refused as `unavailable`, and nothing changed. A session removed
+while admission counts reserves nothing, and so does a record that reads but
+is not a valid record, which nothing drives.
+
 Outside the bound: removal marks (below), and scratch space. Validating an
 upload before admission, and capturing a revision or an empty workspace for
 a task after it, each write up to `maxCheckpointBytes` under
