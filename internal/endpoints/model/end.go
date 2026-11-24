@@ -434,7 +434,7 @@ var (
 	internalFailureReply = errorReply{http.StatusInternalServerError, "failed to build upstream request", serverError, upstreamErrorCode}
 	// unexpectedEndReply is the reply to a call that end refused an ending
 	// for, so a reader of its audit event does not look for a URL problem.
-	unexpectedEndReply = errorReply{http.StatusInternalServerError, "model call ended unexpectedly", serverError, upstreamErrorCode}
+	unexpectedEndReply   = errorReply{http.StatusInternalServerError, "model call ended unexpectedly", serverError, upstreamErrorCode}
 	gatewayStoppingReply = errorReply{http.StatusServiceUnavailable, gatewayStoppingMessage, serverError, gatewayStoppingCode}
 	upstreamFailedReply  = errorReply{http.StatusBadGateway, "upstream request failed", serverError, upstreamErrorCode}
 )
