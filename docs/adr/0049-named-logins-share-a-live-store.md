@@ -43,6 +43,10 @@ whether a provider's terms allow a mechanism stays the person's choice.
   signed in". A store the supervisor can't write, such as a Secret, only flows
   in. A link may resolve only inside the sign-in directory, as a Secret's keys
   do, and the file is bounded at 1 MiB.
+  Corrected 2026-11-16: the lock's wait and the final sync are bounded, and
+  only a whole login, or a sign-out two syncs see while the harness runs,
+  is copied either way; nothing from a killed harness
+  ([ADR 0061](0061-a-stop-survives-an-interrupted-write.md)).
 - **Logins have names.** `--login NAME` names one of a harness's logins;
   `default` is used when none is named. Names are per harness, at most 24
   lowercase letters, digits and hyphens, since they become volume and claim
@@ -100,6 +104,8 @@ whether a provider's terms allow a mechanism stays the person's choice.
 ## Consequences and limits
 
 - A sign-in reaches the other sessions of its login within about a second.
+  Corrected 2026-11-16: within about two seconds, and a sign-out within
+  about four ([ADR 0061](0061-a-stop-survives-an-interrupted-write.md)).
 - Sessions of one login on different Kubernetes nodes need a storage class
   that supports `ReadWriteMany`; the default `ReadWriteOnce` shares a claim
   only on one node.

@@ -7,9 +7,7 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
-	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
-	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/andrewmccall/sproozi/internal/workspace"
@@ -19,6 +17,8 @@ import (
 const (
 	problemExpired = "the deadline passed before it started"
 	problemRevoked = "its project no longer admits this installation"
+	// problemUndecided: the driver has no rule for the session's state.
+	problemUndecided = "the executor has no rule for this session's state; it keeps retrying, and the executor's log names the state"
 )
 
 // actionTaskComplete derives the operation of a task's completion wait: the
@@ -96,6 +96,18 @@ func (o *Owner) wake(id string) {
 	}
 }
 
+// completionPace is the least time between two rounds of one task's
+// completion wait. A placement holds each round until the turn completes
+// or its quiesce wait passes, so a round is normally far longer; the pace
+// only keeps a placement that answers at once from making the driver spin.
+const completionPace = time.Second
+
+// completionPause is how long the driver waits after a completion-wait
+// round that took took before it starts the next: the rest of the pace.
+func completionPause(took time.Duration) time.Duration {
+	return max(0, completionPace-took)
+}
+
 // next is what the driver does after a step.
 type next int
 
@@ -106,6 +118,10 @@ const (
 	nextAgain
 	// nextWait: retry after the backoff, or sooner when woken.
 	nextWait
+	// nextPaced: a completion-wait round found the task's turn still
+	// running; take the next step once completionPace has passed since
+	// this one began, or sooner when woken.
+	nextPaced
 )
 
 // drive carries the session's task until it settles, or until a step fails
@@ -114,28 +130,40 @@ func (o *Owner) drive(ctx context.Context, id string, wake <-chan struct{}) {
 	retry := o.config.retry.orDefault()
 	wait := retry.first
 	for ctx.Err() == nil {
+		began := time.Now()
 		switch o.step(ctx, id) {
 		case nextDone:
 			return
 		case nextAgain:
 			wait = retry.first
+		case nextPaced:
+			wait = retry.first
+			pause(ctx, wake, completionPause(time.Since(began)))
 		case nextWait:
-			timer := time.NewTimer(wait)
-			select {
-			case <-ctx.Done():
-			case <-wake:
-			case <-timer.C:
-			}
-			timer.Stop()
+			pause(ctx, wake, wait)
 			wait = min(2*wait, retry.limit)
 		}
 	}
 }
 
-// step takes the session's next step through the coordinator. A task is
-// driven to its completion, retrying an unsettled stop with a backoff. An
-// interactive session is only started: its owner stops it, and an unsettled
-// stop or cancellation waits for "recover".
+// pause waits for d, until ctx ends, or until the driver is woken.
+func pause(ctx context.Context, wake <-chan struct{}, d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-wake:
+	case <-timer.C:
+	}
+}
+
+// step takes the session's next step through the coordinator: the one
+// action decisions maps its situation to. A session whose catalogue records
+// a transfer, or a cancellation before the coordinator received it, is no
+// longer the driver's, and is left before its execution is read.
 func (o *Owner) step(ctx context.Context, id string) next {
 	r, err := o.read(id)
 	if err != nil {
@@ -150,80 +178,85 @@ func (o *Owner) step(ctx context.Context, id string) next {
 		o.logf("Could not inspect work session %s: %v", id, err)
 		return nextWait
 	}
+	act, err := decide(o.situationOf(r, rec))
+	if err != nil {
+		// A situation no row decides is a programming error. Say so where
+		// the owner sees it, and keep retrying: an executor that does
+		// decide it may be running by the next attempt.
+		o.logf("Could not decide the next step of work session %s: %v", id, err)
+		o.note(id, problemUndecided)
+		return nextWait
+	}
+	return o.carryOut(ctx, r, rec, act)
+}
+
+// carryOut takes action act for the session. rec is the coordinator's
+// record of its current execution; decisions maps only a session the
+// coordinator has not received to an action that does not read it.
+func (o *Owner) carryOut(ctx context.Context, r record, rec *session.Record, act action) next {
 	coordinator := o.config.Coordinator
-	revoked := !project.Member(o.config.Projects, r.Association.Project, o.config.Principal)
-	interactive := r.Intent.Mode == ModeInteractive
-	switch {
-	case rec != nil && rec.Phase == session.PhaseCancelled:
-		return nextDone
-	case rec != nil && rec.Phase == session.PhaseIdle:
-		return o.stepIdle(ctx, r, *rec, interactive)
-	case interactive && rec != nil && (rec.CancelOperation != "" || !rec.Phase.Starting() && rec.Phase != session.PhaseActive):
-		// Only "recover" retries an interactive session's unsettled stop
-		// or cancellation.
-		return nextDone
-	case rec != nil && rec.CancelOperation != "":
-		// Recovery carries out the retained cancellation.
-		_, err = coordinator.Recover(ctx, rec.ID)
-		return o.after(ctx, r, err, nextWait)
-	case revoked:
-		return o.end(ctx, r, "project-revoked", problemRevoked)
-	case rec == nil:
+	switch act {
+	case actStart:
 		return o.start(ctx, r)
-	case rec.Phase.Starting():
-		return o.stepStarting(ctx, r, *rec, interactive)
-	case interactive:
-		// Running: its owner attaches to it and stops it.
-		return nextDone
-	case rec.Phase == session.PhaseActive || rec.Phase == session.PhaseStopping:
+	case actRecoverStart:
+		// Past its deadline, an interactive session's start ends instead
+		// of starting: it stays stopped with what its earlier execution
+		// committed, and resume continues it (ADR 0060).
+		_, err := coordinator.Recover(ctx, rec.ID)
+		if errors.Is(err, session.ErrDeadlinePassed) {
+			o.note(r.ID, problemExpired)
+			return nextAgain
+		}
+		return o.after(ctx, r, err, nextDone)
+	case actComplete:
 		// The task's stop is its completion wait: the supervisor stops the
 		// writer only after the task's own turn completed. Until then the
 		// stop stays pending and is repeated. The task is running, not
 		// stopping (see completing), and nothing is wrong with it, so the
 		// wait clears any earlier problem rather than recording one.
-		_, err = coordinator.Finalize(ctx, rec.ID, derivedOperation(rec.ID, actionTaskComplete))
-		if errors.Is(err, harness.ErrNativeTurnPending) {
+		_, err := coordinator.Finalize(ctx, rec.ID, derivedOperation(rec.ID, actionTaskComplete))
+		if turnPendingAlone(err) {
 			o.note(r.ID, "")
-			return nextAgain
+			return nextPaced
 		}
 		return o.after(ctx, r, err, nextWait)
-	default:
-		// An unproven stop or unsealed usage: recovery never makes up a
-		// stop or a refund, so retrying it is safe.
-		_, err = coordinator.Recover(ctx, rec.ID)
+	case actRecover:
+		// Recovery carries out a retained cancellation, or an unproven stop
+		// or unsealed usage: it never makes up a stop or a refund, so
+		// retrying it is safe. A retried stop can find the writer reachable
+		// after all and still waiting for the task's turn: the coordinator
+		// then holds it as stopping again, and the next step is the
+		// completion wait. A held cancellation is carried out by aborting,
+		// which never waits for a turn.
+		_, err := coordinator.Recover(ctx, rec.ID)
+		if turnPendingAlone(err) {
+			o.note(r.ID, "")
+			return nextPaced
+		}
 		return o.after(ctx, r, err, nextWait)
+	case actFinish:
+		return o.finish(r)
+	case actEndExpired:
+		// A task whose start the deadline ended, even inside a recovery,
+		// has no result to finish: nothing ran.
+		return o.end(ctx, r, "deadline-expired", problemExpired)
+	case actEndRevoked:
+		return o.end(ctx, r, "project-revoked", problemRevoked)
+	case actNothing:
 	}
+	return nextDone
 }
 
-// stepIdle takes the next step of a session whose execution is idle. An
-// interactive session waits for its owner. A task whose start the deadline
-// overtook inside a recovery follows the rule for a task whose deadline
-// passed before it started: nothing ran, so there is no result to finish.
-// Any other task writes its tail.
-func (o *Owner) stepIdle(ctx context.Context, r record, rec session.Record, interactive bool) next {
-	switch {
-	case interactive:
-		return nextDone
-	case startEnded(rec):
-		return o.end(ctx, r, "deadline-expired", problemExpired)
+// turnPendingAlone reports that err says only that the task's turn is still
+// running. A stop that found the turn pending but could not record that in
+// the journal, which joins the save's error to it, is a failure: the
+// journal still holds what it held before.
+func turnPendingAlone(err error) bool {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		errs := joined.Unwrap()
+		return len(errs) == 1 && turnPendingAlone(errs[0])
 	}
-	return o.finish(r)
-}
-
-// stepStarting continues a session whose execution is starting. A task past
-// its deadline is cancelled. Past its deadline, an interactive session's
-// start ends instead of starting: it stays stopped with what its earlier
-// execution committed, and resume continues it (ADR 0060).
-func (o *Owner) stepStarting(ctx context.Context, r record, rec session.Record, interactive bool) next {
-	if !interactive && deadline.At(rec.Deadline).Passed(time.Now()) {
-		return o.end(ctx, r, "deadline-expired", problemExpired)
-	}
-	_, err := o.config.Coordinator.Recover(ctx, rec.ID)
-	if errors.Is(err, session.ErrDeadlinePassed) {
-		o.note(r.ID, problemExpired)
-		return nextAgain
-	}
-	return o.after(ctx, r, err, nextDone)
+	return errors.Is(err, harness.ErrNativeTurnPending)
 }
 
 // startEnded reports an execution whose deadline ended its first visit
@@ -255,9 +288,27 @@ func (o *Owner) after(ctx context.Context, r record, err error, onError next) ne
 	}
 	o.logf("Could not continue work session %s: %v", r.ID, err)
 	if onError == nextDone {
-		o.note(r.ID, outcomeMessage(err)+"; inspect status and recover this session")
+		o.note(r.ID, failureProblem(r, err))
 	}
 	return onError
+}
+
+// failureProblem is the problem a failed step of session r records. A
+// placement's contradicted record of the visit is permanent: recovering meets
+// it again, and only ending the session ends the visit, so the problem
+// states the contradiction alone, without the errors around it, which the
+// executor's log keeps, and says how to end it: cancel a task, which cannot
+// be stopped, and stop or cancel an interactive session.
+func failureProblem(r record, err error) string {
+	var contradiction session.RecordContradiction
+	if errors.Is(err, session.ErrRecordContradicted) && errors.As(err, &contradiction) {
+		end := "cancel this session"
+		if r.Intent.Mode == ModeInteractive {
+			end = "stop or cancel this session"
+		}
+		return fmt.Sprintf("%s: %s; %s", profile.CodeConflict, contradiction.Contradiction(), end)
+	}
+	return outcomeMessage(err) + "; inspect status and recover this session"
 }
 
 // note records the driver's latest problem with the session, or clears it.
@@ -291,11 +342,8 @@ func (o *Owner) end(ctx context.Context, r record, action, problem string) next 
 }
 
 // start captures the session's input and gives its first execution to the
-// coordinator.
+// coordinator. decisions ends a session whose deadline passed first.
 func (o *Owner) start(ctx context.Context, r record) next {
-	if deadline.At(r.First.Deadline).Passed(time.Now()) {
-		return o.end(ctx, r, "deadline-expired", problemExpired)
-	}
 	input, err := o.capture(ctx, r)
 	if err != nil {
 		return o.after(ctx, r, err, nextDone)
@@ -313,7 +361,7 @@ func (o *Owner) start(ctx context.Context, r record) next {
 		o.removeUpload(r.ID)
 	}
 	if err != nil {
-		if deadline.At(r.First.Deadline).Passed(time.Now()) {
+		if o.pastFirstDeadline(r) {
 			// Create refuses a launch whose deadline passed; the next step
 			// cancels it.
 			return nextAgain

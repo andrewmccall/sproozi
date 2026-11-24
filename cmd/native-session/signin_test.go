@@ -33,6 +33,8 @@ const (
 	missing = "<missing>"
 	// refreshedR3 is a login after its third refresh.
 	refreshedR3 = `{"refresh":"r3"}`
+	// refreshedR4 is the login after its fourth refresh.
+	refreshedR4 = `{"refresh":"r4"}`
 )
 
 // session is one supervisor's view: its harness's login file and the shared
@@ -107,7 +109,8 @@ func TestTwoSessionsOfOneLoginBothSurviveARefreshByEither(t *testing.T) {
 	if err := os.Remove(b.native); err != nil { // B signs out.
 		t.Fatal(err)
 	}
-	syncAll(t, b, a)
+	// A sign-out is shared once two syncs on each side have seen it.
+	syncAll(t, b, a, b, a, a)
 	if content(t, a.native) != missing {
 		t.Fatal("B's sign-out didn't reach A")
 	}
@@ -185,7 +188,7 @@ func TestStopSavesTheLastChange(t *testing.T) {
 	if err = l.sync(); err != nil {
 		t.Fatal(err)
 	}
-	go l.run()
+	l.settled()
 	write(t, l.native, `{"refresh":"last"}`)
 	l.stop()
 	l.stop()

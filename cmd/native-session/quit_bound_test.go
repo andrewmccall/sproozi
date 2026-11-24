@@ -38,7 +38,7 @@ func neverConfirmed(t *testing.T) {
 // deadline and its diagnostics kept.
 func stopping(t *testing.T, kind harness.NativeKind, script string, until time.Time) (*server, *bytes.Buffer) {
 	t.Helper()
-	s := watched(startNative(t, script, until))
+	s := watched(startNative(t, script, time.Time{}))
 	s.config.Harness, s.config.Deadline, s.deadline = kind, until, until
 	diagnostics := &bytes.Buffer{}
 	s.diagnostics = diagnostics
@@ -85,6 +85,29 @@ func TestChangedTurnAfterTheKillFailsTheStop(t *testing.T) {
 	failedOnce(t, r, reports, harness.NativeExitFailed)
 	if calls.Load() != 2 {
 		t.Fatalf("turn observed %d times, want 2", calls.Load())
+	}
+}
+
+// A kill that cut short a row Codex was appending is not a changed turn: the
+// stop fails with its own message, which says that repeating it completes it
+// (capture leaves the unfinished row out).
+func TestUnfinishedRowAfterTheKillFailsTheStopWithItsOwnMessage(t *testing.T) {
+	var calls atomic.Int32
+	withAdapter(t, harness.NativeCodex, func(a *nativeAdapter) {
+		a.observe = func(*server) (string, string, error) {
+			if calls.Add(1) == 1 {
+				return selected, completedTurnID, nil
+			}
+			return "", "", fmt.Errorf("observe: %w", errJournalRowIncomplete)
+		}
+	})
+	setQuitWait(t, 300*time.Millisecond)
+	s, _ := stopping(t, harness.NativeCodex, ignoresQuit, time.Time{})
+	r, reports := stopOnce(t, s)
+	failedOnce(t, r, reports, harness.NativeExitFailed)
+	if strings.Contains(r.Error, "changed") || !strings.Contains(r.Error, "unfinished") ||
+		!strings.Contains(r.Error, "repeat") {
+		t.Fatalf("reply error: %q", r.Error)
 	}
 }
 
@@ -154,8 +177,8 @@ func TestKillingHarnessesFinishWithinTheBound(t *testing.T) {
 					t.Fatal("the finish had no bound")
 				}
 				if r.Error != "" || r.State != harness.NativeStopped || r.Exit == nil ||
-					r.Exit.Reason != string(nativepty.ForcedStop) || len(reports) != 0 || s.exitCode != 0 {
-					t.Fatalf("stop: %+v exit %+v reports %+v code %d", r, r.Exit, reports, s.exitCode)
+					r.Exit.Reason != string(nativepty.ForcedStop) || len(reports) != 0 || s.life.exitCode != 0 {
+					t.Fatalf("stop: %+v exit %+v reports %+v code %d", r, r.Exit, reports, s.life.exitCode)
 				}
 				said := diagnostics.String()
 				if strings.Contains(said, "quit") || late != strings.Contains(said, "Confirmed the harness stopped") {
@@ -183,8 +206,8 @@ func TestExitAtTheBoundKeepsTheHarnessCode(t *testing.T) {
 	if r.Exit == nil || r.Exit.Code != 3 || r.Exit.Reason != string(nativepty.NativeExit) || r.Error == "" {
 		t.Fatalf("reply: %+v exit %+v", r, r.Exit)
 	}
-	if s.exitCode != 3 || strings.Contains(diagnostics.String(), "Forced") {
-		t.Fatalf("settled with code %d, diagnostics %q", s.exitCode, diagnostics.String())
+	if s.life.exitCode != 3 || strings.Contains(diagnostics.String(), "Forced") {
+		t.Fatalf("settled with code %d, diagnostics %q", s.life.exitCode, diagnostics.String())
 	}
 }
 
@@ -200,8 +223,8 @@ func TestFullInputBufferTakesTheForcedPath(t *testing.T) {
 	s, diagnostics := stopping(t, harness.NativeCodex, ignoresQuit, time.Time{})
 	r, reports := stopOnce(t, s)
 	if r.Error != "" || r.State != harness.NativeStopped || r.Exit == nil ||
-		r.Exit.Reason != string(nativepty.ForcedStop) || len(reports) != 0 || s.exitCode != 0 {
-		t.Fatalf("stop: %+v exit %+v reports %+v code %d", r, r.Exit, reports, s.exitCode)
+		r.Exit.Reason != string(nativepty.ForcedStop) || len(reports) != 0 || s.life.exitCode != 0 {
+		t.Fatalf("stop: %+v exit %+v reports %+v code %d", r, r.Exit, reports, s.life.exitCode)
 	}
 	if !strings.Contains(diagnostics.String(), "Forced the harness to stop") {
 		t.Fatalf("diagnostics: %q", diagnostics.String())

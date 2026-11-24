@@ -174,11 +174,26 @@ Failures:
   and the driver retries `Recover` with a capped backoff (one second doubling
   to a minute) while the executor runs. Recovery never makes up a stop or a
   refund, so this is safe, and Hermes is unattended. `recover` retries at once.
-  Interactive sessions wait for `recover`, also after a restart (section 8).
+  Interactive sessions wait for `recover`, also after a restart (section 8),
+  unless their project is revoked ([ADR 0065](0065-a-revoked-project-settles-interactive-sessions.md)).
 - **A failed preparation or activation** records the outcome as the problem
   and waits for `recover`, as before.
 - **A revoked project** is cancelled through the coordinator with a
   name-based operation, whether found at startup or while driving.
+
+Corrected 2026-11-17: the driver's decision is declared as a table,
+`decisions` in `internal/work/decision.go`. It maps the execution's phase,
+the session's mode and the requests pending on it (a cancellation the
+coordinator holds, a revoked project, a deadline that passed before the
+first visit started) to one action, and every situation that can occur
+matches exactly one row, which `internal/work/decision_test.go` checks. A
+situation no row decides is reported as the session's problem and retried
+after the backoff. The table replaced an order-dependent switch without
+changing any outcome: the driver's steps from 900 starting combinations,
+recorded through the coordinator before the change in
+`internal/work/testdata/driver-outcomes.txt`, were reproduced byte for
+byte. Later changes to that file are deliberate and named in their
+commits.
 
 **Cancel goes through the coordinator** as
 `CancelUnsettled(ctx, execution, op, admit)`. The coordinator first
@@ -272,6 +287,10 @@ Added after this record was accepted; it follows its direction.
   creates and activates the first visit, and stops: there is no completion
   driver, and an unsettled stop or cancellation waits for `recover`, which
   retries it once. The task's backoff applies to tasks only.
+
+  Partly superseded by [ADR 0065](0065-a-revoked-project-settles-interactive-sessions.md):
+  once the session's project is revoked, the driver settles its unsettled
+  stop or cancellation as section 2 settles a task's.
 - **Owner actions bind operations.** The record gains `operations`, a map
   from operation UUID to its action (`stop` or `resume`) and execution, as
   home's catalogue has; `read` checks that each names one of the session's
@@ -442,6 +461,12 @@ session's stops added checkpoints unchecked.
   only, so the executor answers `conflict` and the CLI explains it from the
   session's phase in local `rm`'s words, which `session.RemovalRefusal` holds
   for both; a running task is told to wait or cancel, since it takes no stop.
+  Corrected 2026-11-16: only the remote path uses `session.RemovalRefusal`
+  now. Home's `rm` refuses with its next-steps table
+  (`internal/session/home/phase.go`, recorded in ADR 0058's correction of
+  that date), whose replies depend on whether a pending stop is a stop or a
+  move's, which a remote session's view does not carry. The two sets of
+  words differ, for example for a session that is starting.
 - **Removal leaves a mark**, `work/<id>.removed`. The mark makes `remove`
   replay-safe without an operation UUID, since a session has only one
   removal: repeating it answers removed. It also keeps the ID from starting
@@ -829,12 +854,16 @@ would use.
 - Applies [ADR 0056](0056-whoever-starts-work-sets-its-deadline.md) to work
   the executor runs for Hermes.
 - Keeps [ADR 0036](0036-remote-executors-through-kubeconfig-contexts.md) unchanged.
-- Code: `internal/work/` (`catalogue.go`, `driver.go`, `interactive.go`, `export.go`,
+- Code: `internal/work/` (`catalogue.go`, `driver.go`, `decision.go`, `interactive.go`, `export.go`,
   `legacy.go`, `phase.go`, `remove.go`), `internal/session/cancel.go`, `internal/session/remove.go`,
   `internal/session/phase.go`, `cmd/session-profile/main.go`,
   `internal/runtime/kubernetes/placement/placement.go` and `lifecycle.go`,
   `cmd/sproozi/output.go` and `session.go`; the Claude Code executor
   example in `examples/portable-workflows/kubernetes/claude/`.
+- Driver tests (corrected 2026-11-17): `internal/work/decision_test.go`,
+  `internal/work/driver_outcomes_test.go` and its
+  `testdata/driver-outcomes.txt`, `internal/work/revoked_test.go`,
+  `internal/work/recover_test.go`, `internal/work/clock_test.go`.
 - Docs: [session commands](../reference/session-commands.md),
   [remote executors](../reference/remote-executors.md),
   [portable workflows](../guides/portable-workflows.md),

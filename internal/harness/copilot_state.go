@@ -31,15 +31,16 @@ func CopilotEventsPath(threadID string) (string, error) {
 }
 
 // CaptureCopilotState reads the session's journal after the caller has
-// stopped every native writer, and checks that its last turn completed.
+// stopped every native writer, and checks that its last turn completed. A
+// final row the stopped writer did not finish is left out (stoppedJournal).
 func CaptureCopilotState(home, threadID string, maxBytes int64) (CopilotState, error) {
 	data, err := readCopilotEvents(home, threadID, maxBytes)
 	if err != nil {
 		return CopilotState{}, err
 	}
-	state := CopilotState{ThreadID: threadID, Events: data}
+	state := CopilotState{ThreadID: threadID, Events: stoppedJournal(data)}
 	if _, err = CompletedCopilotTurn(state, maxBytes); err != nil {
-		return CopilotState{}, err
+		return CopilotState{}, refusedState(err)
 	}
 	return state, nil
 }
@@ -62,22 +63,22 @@ func readCopilotEvents(home, threadID string, maxBytes int64) ([]byte, error) {
 	name := filepath.Join(home, filepath.FromSlash(relative))
 	info, err := os.Lstat(name)
 	if err != nil {
-		return nil, err
+		return nil, stateFileError(err)
 	}
 	if !info.Mode().IsRegular() || info.Size() > maxBytes {
-		return nil, errors.New("unsafe or oversized Copilot session journal")
+		return nil, refusedState(errors.New("unsafe or oversized Copilot session journal"))
 	}
 	f, err := os.Open(name)
 	if err != nil {
-		return nil, err
+		return nil, stateFileError(err)
 	}
 	data, readErr := io.ReadAll(io.LimitReader(f, maxBytes+1))
 	closeErr := f.Close()
 	if readErr != nil || closeErr != nil {
-		return nil, errors.Join(readErr, closeErr)
+		return nil, stateFileError(errors.Join(readErr, closeErr))
 	}
 	if int64(len(data)) > maxBytes {
-		return nil, errors.New("unsafe or oversized Copilot session journal")
+		return nil, refusedState(errors.New("unsafe or oversized Copilot session journal"))
 	}
 	return data, nil
 }
@@ -127,10 +128,10 @@ func copilotDirectories(home, relative string, create bool) error {
 		}
 		info, err := os.Lstat(dir)
 		if err != nil {
-			return err
+			return stateFileError(err)
 		}
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return errors.New("unsafe Copilot native directory")
+			return refusedState(errors.New("unsafe Copilot native directory"))
 		}
 	}
 	return nil

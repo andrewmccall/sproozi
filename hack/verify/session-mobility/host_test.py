@@ -38,6 +38,26 @@ def events(writer):
     return [json.loads(line[6:]) for line in writer.getvalue().decode().splitlines() if line.startswith("data: ")]
 
 
+class GatewayPortTest(unittest.TestCase):
+    def test_default_choice_is_free(self):
+        port = HOST.choose_gateway_port(None)
+        self.assertGreater(port, 0)
+        self.assertFalse(HOST.port_in_use(port))
+
+    def test_forced_port_in_use_fails_with_clear_message(self):
+        import socket
+        with socket.socket() as held:
+            held.bind(("127.0.0.1", 0))
+            held.listen(1)
+            port = held.getsockname()[1]
+            with self.assertRaisesRegex(RuntimeError, "already in use"):
+                HOST.choose_gateway_port(port)
+
+    def test_forced_free_port_is_kept(self):
+        port = HOST.choose_gateway_port(None)
+        self.assertEqual(HOST.choose_gateway_port(port), port)
+
+
 class FixtureTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

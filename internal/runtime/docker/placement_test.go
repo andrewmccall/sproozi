@@ -74,10 +74,18 @@ type fakeDocker struct {
 	next                                     int
 	capture                                  []byte
 	failStop, failCapture, failActivationAck bool
-	failRemove                               bool
-	rejectNativeActivation                   bool
-	quiesceAcknowledgesOnly                  bool
-	lostQuiesceAck                           bool
+	// captureExit makes the capture helper end with that code;
+	// captureFrom runs the helper's capture on a fixture state instead.
+	captureExit int
+	// cliFails makes the docker CLI itself fail the capture with code 1.
+	cliFails bool
+	// failLogs makes reading a container\'s output fail.
+	failLogs                bool
+	captureFrom             func(context.Context) ([]byte, error)
+	failRemove              bool
+	rejectNativeActivation  bool
+	quiesceAcknowledgesOnly bool
+	lostQuiesceAck          bool
 	// turnless makes the supervisor report a first visit with no native
 	// conversation and stop it without one.
 	turnless       bool
@@ -251,6 +259,9 @@ func (f *fakeDocker) containerCommand(args []string) ([]byte, error) {
 	case "inspect":
 		return json.Marshal([]any{c})
 	case "logs":
+		if f.failLogs {
+			return nil, errors.New("docker logs unavailable")
+		}
 		return c.logs, nil
 	case "start":
 		c.State.Running = true
@@ -260,6 +271,11 @@ func (f *fakeDocker) containerCommand(args []string) ([]byte, error) {
 	case "stop":
 		if f.failStop {
 			return nil, errors.New("engine stop failed")
+		}
+		if c.State.Running {
+			// A supervisor stopped from outside reports why, as the real
+			// one does on SIGTERM.
+			c.logs = append(c.logs, []byte(harness.NativeExitReportPrefix+`{"code":-1,"cause":"terminated"}`+"\n")...)
 		}
 		c.State.Running = false
 		c.State.Status = exitedStatus
@@ -293,6 +309,19 @@ func (f *fakeDocker) execCommand(ctx context.Context, args []string, input []byt
 		case "capture-stopped":
 			if f.failCapture {
 				return nil, errors.New("capture failed")
+			}
+			if f.cliFails {
+				return nil, cliFailure{}
+			}
+			if f.captureExit != 0 {
+				return nil, exitCoded(f.captureExit)
+			}
+			if f.captureFrom != nil {
+				data, err := f.captureFrom(ctx)
+				if err != nil {
+					return nil, exitCoded(checkpoint.CaptureExitCode(err))
+				}
+				return data, nil
 			}
 			return f.capture, nil
 		case "finish":

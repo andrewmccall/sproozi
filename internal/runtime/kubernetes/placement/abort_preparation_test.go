@@ -18,6 +18,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/budget"
 	runtimekube "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/sandboxpod"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/google/uuid"
@@ -141,7 +142,8 @@ func queuedPreparation(t *testing.T) (*Placement, *admissionClient, session.Laun
 func registration(t *testing.T, p *Placement, l session.Launch) registry.Record {
 	t.Helper()
 	local, err := p.load(l)
-	if err != nil {
+	var contradicted *contradiction
+	if err != nil && !errors.As(err, &contradicted) {
 		t.Fatal(err)
 	}
 	r, err := p.registry.Get(t.Context(), local.Reference)
@@ -321,7 +323,7 @@ func TestAbortPreparationNeverTrustsUnknownTerminationOfLatePod(t *testing.T) {
 	}
 	current.Status.ContainerStatuses[0].State = corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
 		ExitCode: 137, Reason: containerStatusUnknown,
-		Message: "The container could not be located when the pod was terminated",
+		Message: unknownTerminationMessage,
 	}}
 	if err = kube.Client.Status().Update(t.Context(), current); err != nil {
 		t.Fatal(err)
@@ -373,7 +375,7 @@ func TestNeverScheduledNeedsDeletionNoNodeAndNoContainer(t *testing.T) {
 			t.Parallel()
 			pod := unscheduled()
 			test.mutate(pod)
-			if got := neverScheduled(pod); got != test.want {
+			if got := sandboxpod.Observe(pod).NeverScheduled; got != test.want {
 				t.Fatalf("neverScheduled = %v, want %v", got, test.want)
 			}
 		})
@@ -551,7 +553,7 @@ func TestTombstonedPreparationCannotActivate(t *testing.T) {
 		t.Fatal(err)
 	}
 	local.PreparationAborted = true
-	if err = p.save(local); err != nil {
+	if err = p.save(local, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err = p.Activate(t.Context(), l, i); !isConflict(err) {
@@ -599,7 +601,7 @@ func TestAbortPreparationOfDeletedRegistrationIsUnproven(t *testing.T) {
 			}
 			if !keepReference {
 				local.Reference = registry.Reference{}
-				if err = p.save(local); err != nil {
+				if err = p.save(local, nil); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -688,7 +690,7 @@ func TestAbortPreparationFindsRegistrationWhoseReferenceWasLost(t *testing.T) {
 	}
 	ref := local.Reference
 	local.Reference = registry.Reference{}
-	if err = p.save(local); err != nil {
+	if err = p.save(local, nil); err != nil {
 		t.Fatal(err)
 	}
 	kube.reconcile = cancelReconcile(t, kube)
@@ -748,7 +750,7 @@ func TestAbortPreparationOfRunNeverBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	local.Reference = r.Reference
-	if err = p.save(local); err != nil {
+	if err = p.save(local, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = p.ensureRun(ctx, r); err != nil {

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -28,6 +29,7 @@ import (
 	policyengine "github.com/andrewmccall/sproozi/internal/policy/kubernetes"
 	runtimekube "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/sandboxpod"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/andrewmccall/sproozi/internal/workspace"
@@ -41,7 +43,7 @@ import (
 )
 
 const fixedTask = "Continue the admitted native session"
-const nativeContainer = "agent"
+const nativeContainer = sandboxpod.AgentContainer
 const helperPath = "/usr/local/bin/checkpoint"
 const nativePath = "/usr/local/bin/native-session"
 const helperCapture = "capture-stopped"
@@ -68,6 +70,16 @@ type Config struct {
 	Allowances         map[string]session.Allowance
 	MaxDuration        time.Duration
 	MaxCheckpointBytes int64
+	// Log, when set, receives a line for each stop that discards what its
+	// visit's harness did (ADR 0062).
+	Log io.Writer
+}
+
+// logf writes one line to the configured log.
+func (p *Placement) logf(format string, args ...any) {
+	if p.config.Log != nil {
+		_, _ = fmt.Fprintf(p.config.Log, format+"\n", args...)
+	}
 }
 
 type Placement struct {
@@ -77,7 +89,9 @@ type Placement struct {
 	exec     commandExecutor
 	mu       sync.RWMutex
 	journals session.JournalLocks
-	lock     *os.File
+	// contradictions holds each contradicted retained record already logged.
+	contradictions sync.Map
+	lock           *os.File
 	// abortWait bounds one AbortPreparation (abortPreparationWait).
 	abortWait time.Duration
 }
@@ -164,6 +178,33 @@ func (p *Placement) lockOperation(l session.Launch) (func(), error) {
 	}
 	return unlock, nil
 }
+
+// tryLockOperation is lockOperation that reports busy instead of waiting
+// while another operation holds the launch's session or allocation.
+func (p *Placement) tryLockOperation(l session.Launch) (unlock func(), busy bool, err error) {
+	if l.Harness != p.config.Harness || !idValid(l.ExecutionID) || !idValid(l.AllocationID) {
+		return nil, false, &profile.Rejection{Code: profile.CodeInvalid}
+	}
+	p.mu.RLock()
+	unlockSession, ok := p.journals.TryLock("session/" + l.ExecutionID)
+	if !ok {
+		p.mu.RUnlock()
+		return nil, true, nil
+	}
+	unlockAllocation, ok := p.journals.TryLock("allocation/" + l.AllocationID)
+	if !ok {
+		unlockSession()
+		p.mu.RUnlock()
+		return nil, true, nil
+	}
+	unlock = func() { unlockAllocation(); unlockSession(); p.mu.RUnlock() }
+	if p.lock == nil {
+		unlock()
+		return nil, false, errors.New("placement: closed")
+	}
+	return unlock, false, nil
+}
+
 func digestValid(s string) bool {
 	b, err := hex.DecodeString(s)
 	return err == nil && len(b) == 32 && hex.EncodeToString(b) == s
@@ -310,8 +351,7 @@ func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) 
 	if err != nil {
 		return session.Incarnation{}, semantic(err)
 	}
-	local.Reference = record.Reference
-	if err = p.save(local); err != nil {
+	if local, err = p.adopt(local, record); err != nil {
 		return session.Incarnation{}, err
 	}
 	return p.prepare(ctx, local, record)
@@ -363,7 +403,7 @@ func (p *Placement) prepareWorkspace(ctx context.Context, l session.Launch, data
 			return session.Incarnation{}, &profile.Rejection{Code: profile.CodeConflict}
 		}
 		local.WorkspaceDigest = digest
-		if err = p.save(local); err != nil {
+		if err = p.save(local, nil); err != nil {
 			return session.Incarnation{}, err
 		}
 	} else if local.WorkspaceDigest != digest {
@@ -378,8 +418,7 @@ func (p *Placement) prepareWorkspace(ctx context.Context, l session.Launch, data
 	if err != nil {
 		return session.Incarnation{}, semantic(err)
 	}
-	local.Reference = r.Reference
-	if err = p.save(local); err != nil {
+	if local, err = p.adopt(local, r); err != nil {
 		return session.Incarnation{}, err
 	}
 	return p.prepare(ctx, local, r)

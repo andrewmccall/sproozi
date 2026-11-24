@@ -186,8 +186,9 @@ outside Sproozi:
 
 The agent keeps its sign-in in a [login store](../../GLOSSARY.md#login-store),
 a Docker volume named after your installation, the agent and the login. Every
-session of that login shares it: a sign-in, refresh or sign-out in one session
-reaches the others within about a second. Sproozi never copies a sign-in from
+session of that login shares it: a sign-in or refresh in one session reaches
+the others within about two seconds, and a sign-out within about four.
+Sproozi never copies a sign-in from
 your own machine.
 The gateway forwards the sign-in to the provider, still counts every model
 call against the session's budget, and refuses ChatGPT's own plugins and

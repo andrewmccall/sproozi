@@ -66,6 +66,20 @@ type Placement struct {
 	authority Authority
 	// now is the clock deadlines are checked against.
 	now func() time.Time
+	// log, when set, receives a line for each stop that discards what its
+	// visit's harness did (ADR 0062). It is not part of the configuration
+	// the records are prepared under.
+	log io.Writer
+}
+
+// SetLog sends the placement's log lines to w.
+func (p *Placement) SetLog(w io.Writer) { p.log = w }
+
+// logf writes one line to the placement's log.
+func (p *Placement) logf(format string, args ...any) {
+	if p.log != nil {
+		_, _ = fmt.Fprintf(p.log, format+"\n", args...)
+	}
 }
 
 // placementConfigFile holds the settings a placement's records were prepared under.

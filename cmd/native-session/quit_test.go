@@ -70,7 +70,7 @@ func TestIgnoredQuitIsForcedAtTheQuitBound(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			completedCodexTurn(t)
 			setQuitWait(t, 500*time.Millisecond)
-			native := startNative(t, ignoresQuit, until)
+			native := startNative(t, ignoresQuit, time.Time{})
 			s := watched(native)
 			s.config.Deadline, s.deadline = until, until
 			second := make(chan response, 1)
@@ -92,8 +92,8 @@ func TestIgnoredQuitIsForcedAtTheQuitBound(t *testing.T) {
 			if len(reports) != 0 {
 				t.Fatalf("a graceful stop wrote exit reports: %+v", reports)
 			}
-			if s.cause != causeQuiesced || s.exitCode != 0 {
-				t.Fatalf("settled with cause %d and code %d", s.cause, s.exitCode)
+			if s.life.cause != causeQuiesced || s.life.exitCode != 0 {
+				t.Fatalf("settled with cause %d and code %d", s.life.cause, s.life.exitCode)
 			}
 			if err := unix.Kill(-native.PID(), 0); err == nil {
 				t.Fatal("the harness's process group is still running")
@@ -119,7 +119,7 @@ func TestDeadlineBeforeTheQuitBoundIsReportedAsDeadline(t *testing.T) {
 	completedCodexTurn(t)
 	setQuitWait(t, time.Hour)
 	until := time.Now().Add(700 * time.Millisecond)
-	native := startNative(t, ignoresQuit, until)
+	native := startNative(t, ignoresQuit, time.Time{})
 	s := watched(native)
 	s.config.Deadline, s.deadline = until, until
 	var r response
@@ -130,7 +130,7 @@ func TestDeadlineBeforeTheQuitBoundIsReportedAsDeadline(t *testing.T) {
 	if len(reports) != 1 || reports[0].Cause != harness.NativeExitDeadline {
 		t.Fatalf("deadline reports: %+v", reports)
 	}
-	if s.exitCode == 0 {
+	if s.life.exitCode == 0 {
 		t.Fatal("a stop at the deadline exited the supervisor cleanly")
 	}
 }

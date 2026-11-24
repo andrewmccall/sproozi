@@ -111,6 +111,13 @@ func (e *stageExecutor) captured() int {
 // request whose context the executor saw end.
 func remoteStopHome(t *testing.T, p *Placement, l session.Launch) (*session.Coordinator, <-chan struct{}) {
 	t.Helper()
+	coordinator, _, ended := remoteHome(t, p, l)
+	return coordinator, ended
+}
+
+// remoteHome is remoteStopHome that also returns the protocol client.
+func remoteHome(t *testing.T, p *Placement, l session.Launch) (*session.Coordinator, *profile.Client, <-chan struct{}) {
+	t.Helper()
 	h, err := profile.NewHandler(profile.Config{Harness: l.Harness, Principal: "developer", Authorizer: remoteStopAuthorizer{},
 		Placement: l.Placement, InstructionDigest: l.InstructionDigest, Allowances: l.Allowances, MaxDuration: time.Hour,
 		MaxCheckpointBytes: fixtureMax, Backend: p})
@@ -142,7 +149,7 @@ func remoteStopHome(t *testing.T, p *Placement, l session.Launch) (*session.Coor
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = coordinator.Close() })
-	return coordinator, ended
+	return coordinator, c, ended
 }
 
 // remoteVisit starts a resumed visit of kind on the fixture cluster through

@@ -239,7 +239,7 @@ func (s *server) observeCodexTurn() (string, string, error) {
 func (s *server) writeInput(a *nativepty.Attachment, data []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.state != harness.NativeActive {
+	if !s.life.phase.takesInput() {
 		return 0, errors.New("native terminal input is gated")
 	}
 	n, err := a.Write(data)

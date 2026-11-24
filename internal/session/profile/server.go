@@ -197,7 +197,7 @@ func (h *handler) requestAction(r *http.Request) (string, int, Code) {
 		return "", http.StatusNotFound, CodeInvalid
 	}
 	switch action {
-	case actionPrepare, actionActivate, actionStop, actionInspect, actionAbort, actionAbortPreparation, actionAttach, actionDescribe:
+	case actionPrepare, actionActivate, actionStop, actionInspect, actionAbort, actionAbortPreparation, actionExited, actionAttach, actionDescribe:
 	default:
 		return "", http.StatusNotFound, CodeInvalid
 	}
@@ -320,6 +320,16 @@ func (h *handler) perform(r *http.Request, action string, input request) (respon
 		if err := aborter.AbortPreparation(r.Context(), input.Launch); err != nil {
 			return output, err
 		}
+	case actionExited:
+		observer, ok := p.(session.ExitObserver)
+		if !ok {
+			return output, &Rejection{Code: CodeUnsupported}
+		}
+		exited, err := observer.Exited(r.Context(), input.Launch, *input.Incarnation)
+		if err != nil {
+			return output, err
+		}
+		output.Exited = exited
 	case actionStop:
 		// The stop goes on to its outcome if home goes away or gives up, so
 		// a quiesce in flight is never abandoned; its retry joins it, and an

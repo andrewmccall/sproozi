@@ -241,8 +241,7 @@ records, subagents, compaction and broad long-history portability are unproved.
 
 ### Named MCP
 
-Local Codex sessions can use configured MCP servers; Claude Code sessions get
-none. The `gateway.mcp*` keys and `mcp.<name>` allowances are described in
+Local Codex, Claude Code and Copilot sessions can use configured MCP servers. The `gateway.mcp*` keys and `mcp.<name>` allowances are described in
 [configured MCP: local sessions](../../docs/reference/configured-mcp.md#local-sessions).
 
 ## Remote executors

@@ -21,7 +21,7 @@ func TestStoppedQuiesceWaitsForTheClientBeforeConcluding(t *testing.T) {
 	setTurnlessSettle(t, 100*time.Millisecond)
 	native := startIdleNative(t)
 	deadline := time.Now().Add(time.Minute)
-	s := &server{native: native, state: harness.NativeActive, done: make(chan struct{}),
+	s := &server{native: native, life: lifecycle{phase: phaseActive}, done: make(chan struct{}),
 		config: config{Harness: harness.NativeCodex, Deadline: deadline}, deadline: deadline}
 	if r := s.gate(); r.Error != "" {
 		t.Fatal(r.Error)
@@ -62,7 +62,7 @@ func TestStoppedQuiesceConcludesAfterTheGrace(t *testing.T) {
 	t.Cleanup(func() { quiesceReplyGrace = previous })
 	native := startIdleNative(t)
 	deadline := time.Now().Add(time.Minute)
-	s := &server{native: native, state: harness.NativeActive, done: make(chan struct{}),
+	s := &server{native: native, life: lifecycle{phase: phaseActive}, done: make(chan struct{}),
 		config: config{Harness: harness.NativeCodex, Deadline: deadline}, deadline: deadline}
 	if r := s.gate(); r.Error != "" {
 		t.Fatal(r.Error)

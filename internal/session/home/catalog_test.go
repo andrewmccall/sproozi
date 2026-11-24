@@ -83,7 +83,7 @@ func TestPullClaimReplayAndFreshResumePreserveSourceAccounts(t *testing.T) {
 	}
 	// A retry with a fresh operation and no source continues the retained pull.
 	status, err := s.Pull(t.Context(), id, uuid.NewString(), "")
-	if err != nil || source.begins != 1 || source.claims != 2 || status.InitialStage != stageRetained || status.ThreadID != testNativeUUID {
+	if err != nil || source.begins != 1 || source.claims != 2 || status.InitialStage != string(PhaseRetained) || status.ThreadID != testNativeUUID {
 		t.Fatalf("claim replay: %+v %v, begin=%d claim=%d", status, err, source.begins, source.claims)
 	}
 	assertFreshResume(t, s, local, source, id)
@@ -127,7 +127,7 @@ func assertCompletedResumeCycle(t *testing.T, s *Service, local *placementFixtur
 	id := source.export.ID
 	stopOperation := uuid.NewString()
 	stopped, err := s.Stop(t.Context(), id, stopOperation)
-	if err != nil || stopped.ID != id || stopped.ExecutionID != status.ExecutionID || stopped.AllocationID != status.AllocationID || stopped.Incarnation == nil || stopped.InitialStage != stageRetained || stopped.ThreadID != testNativeUUID {
+	if err != nil || stopped.ID != id || stopped.ExecutionID != status.ExecutionID || stopped.AllocationID != status.AllocationID || stopped.Incarnation == nil || stopped.InitialStage != string(PhaseRetained) || stopped.ThreadID != testNativeUUID {
 		t.Fatalf("stopped session checkpoint: %+v %v", stopped, err)
 	}
 	next, err := s.Resume(t.Context(), id, uuid.NewString(), nil)
@@ -230,7 +230,7 @@ func TestStopMovedProductFinalizesWithoutDestinationAndRemainsReplayable(t *test
 	}
 	prepares := local.prepares + remote.prepares
 	status, err := s.Stop(t.Context(), id, uuid.NewString())
-	if err != nil || status.InitialStage != stageRetained || prepares != local.prepares+remote.prepares {
+	if err != nil || status.InitialStage != string(PhaseRetained) || prepares != local.prepares+remote.prepares {
 		t.Fatalf("stop activated destination: %+v %v", status, err)
 	}
 	if _, err = s.Resume(t.Context(), id, uuid.NewString(), nil); err != nil {
@@ -356,7 +356,7 @@ func TestResumeContinuesAStartedSessionAfterItsDeadline(t *testing.T) {
 		t.Fatalf("resume of a running session replied %+v", r)
 	}
 	stopped, err := s.Stop(t.Context(), id, uuid.NewString())
-	if err != nil || stopped.Phase != stageRetained || stopped.ThreadID != testNativeUUID {
+	if err != nil || stopped.Phase != string(PhaseRetained) || stopped.ThreadID != testNativeUUID {
 		t.Fatalf("stop of a started session: %+v %v", stopped, err)
 	}
 	time.Sleep(time.Until(stopped.Deadline) + 100*time.Millisecond)
@@ -387,7 +387,7 @@ func TestResumeOfTurnlessSessionStartsFromItsWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	stopped, err := s.Stop(t.Context(), id, uuid.NewString())
-	if err != nil || stopped.Phase != stageRetained || stopped.ThreadID != "" {
+	if err != nil || stopped.Phase != string(PhaseRetained) || stopped.ThreadID != "" {
 		t.Fatalf("turnless stop: %+v %v", stopped, err)
 	}
 	resumed, err := s.Resume(t.Context(), id, uuid.NewString(), nil)

@@ -28,8 +28,9 @@ func Removable(r Record) bool { return r.Phase.Settled() }
 
 // RemovalRefusal says why the session id, whose execution is in phase,
 // cannot be removed yet and which command allows it. command spells a
-// command, such as "recover", for this session wherever it is: home's
-// service and a remote executor's sessions share these words.
+// command, such as "recover", for the session. The CLI uses these words for
+// a remote executor's sessions; home's service refuses from its own
+// next-steps table (internal/session/home/phase.go).
 func RemovalRefusal(id string, phase Phase, command func(name string) string) string {
 	switch {
 	case phase.Unresolved():

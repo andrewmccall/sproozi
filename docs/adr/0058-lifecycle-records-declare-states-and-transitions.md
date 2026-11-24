@@ -126,6 +126,14 @@ per-phase validation. Its guards may later move into a table without changing
 behaviour. Remote work keeps its own phases until it runs through the
 execution journal.
 
+The remote executor's retained record of a Kubernetes visit
+(`internal/runtime/kubernetes/placement/storage.go`) adopts rule 2 only. It
+stores no phase: the visit's phase is the session registration's. One
+function, `check`, validates the record on every load and save, and beside the
+registration on every read and every save once the registration exists. What a
+contradicted record does to the operations that read it is
+[ADR 0066](0066-a-contradicted-retained-record-refuses-work-and-never-blocks-an-end.md).
+
 > **Correction, 2026-11-15.** Two statements in this paragraph were not
 > true. Which records have a declared table today:
 >
@@ -233,6 +241,182 @@ as a replay: it is a conflict, since such a record may name a Pod it never
 restored into. Every other guard is unchanged. The registration's stored
 format is unchanged.
 
+**Correction, 2026-11-16: the session registration has a table.** The
+Kubernetes session registration moves from "typed phases and guards, no table
+yet" to "with a table", beside the execution journal and the two Docker
+records, and now follows rules 1 to 5. Each mutator in
+`internal/runtime/kubernetes/registry/registry.go` names an event, an `admit`
+step checks it before the record changes, and one `apply` function is the
+only place the phase changes. The inline deadline checks in `Create` and
+`Activate` are the deadline column. Compare-and-swap, the per-phase
+validation on read and write, the stored format and the exported API are
+unchanged. No mutator's accepted phases, written phase or refusal changed: a
+test runs every mutator from every stored state the registry accepts, before
+and after the deadline and without one, and compares the outcomes with a
+table recorded from the code before the change.
+
+The table, in `internal/runtime/kubernetes/registry/transitions.go`. Its
+terminal phases are `stopped` and `cancelled`.
+
+| Event | From → to | Refused after the deadline |
+| --- | --- | --- |
+| `create` | none → `creating` | yes |
+| `bind-run` | `creating` → `bound` | no |
+| `bind-pod` | `bound` → `bound`; `cancelled` → `cancelled` | no |
+| `prepared` | `bound` → `prepared` | no |
+| `activate` | `prepared` → `active` | yes |
+| `bind-native` | `active` → `active` | no |
+| `stop` | `active` → `stopping` | no |
+| `complete-stop` | `stopping` → `stopped` | no |
+| `cancel` | `creating`, `bound`, `prepared`, `active`, `stopping` → `cancelled` | no |
+| `complete-cancel` | `cancelled` → `cancelled` | no |
+
+`create` starts an execution and `activate` grants it the gateway's
+authority, so both start work. Every other event records an outcome the
+remote executor already observed (a run created, a Pod scheduled, a restore
+completed, a native UUID started), or stops, cancels or accounts for work.
+`prepared` is the restore's outcome, not a request: the restore has
+happened when it is recorded, and `prepared` grants nothing.
+
+Some guards depend on more than the phase and stay in the mutators: `bind-pod`
+needs no Pod yet and, on a `cancelled` registration, a bound run;
+`prepared` needs no Pod or the same one; `bind-native` needs a first visit
+from a Git workspace whose native UUID is unbound; `complete-cancel` needs a
+bound run and Pod. `admit` checks the deadline before the phase, so an
+`Activate` after the deadline reports the deadline from any phase except
+`active`, as before.
+
+These replay before admission and apply no event: `Create` of an existing
+registration with the same intent, `BindRun` of the bound run, `BindPod` of
+the bound Pod, `Prepared` of the Pod a `prepared` or later registration
+restored into, `Activate` of `active`, `BindNative` of the bound UUID, `Stop`
+of `stopping` or `stopped`, and `CompleteStop` of `stopped` with the same
+receipt. `Cancel` of `stopped` or `cancelled` changes nothing: a stopped
+registration is settled. `CompleteCancel` with the retained receipt replays
+after admission, because only `cancelled` holds a cancellation receipt, and a
+turnless stop's receipt would otherwise compare equal to one.
+
+Two deadline checks stay outside the table because they record no event:
+`ResolveRun` refuses an expired run unless its stop completed, and
+`RequireActive` refuses an expired registration on every gateway request.
+
+Corrected 2026-11-16: the home catalogue entry (`internal/session/home`)
+adopts rule 1 only. Before, each caller worked out a session's state from the
+entry's claim, current execution, last exit and source for itself, and status
+reported a word from one of three vocabularies: `importing`, the stopped
+words `retained` and `failed`, or the current execution's phase, including
+`idle`.
+
+- **Rule 1.** The phase is typed, with a closed vocabulary: `importing`,
+  `retained`, `failed` and every execution phase except `idle`, which a
+  session reports as `retained` or `failed`. One function,
+  `derive(entry, record, pastDeadline)` in `internal/session/home/phase.go`,
+  works it out from the entry and its current execution's journal record.
+  An idle current execution, left when a stop's catalogue write failed after
+  the journal recorded it, therefore reads as stopped.
+- **Rule 2.** The entry stores no phase, so there is nothing to validate on
+  load or save. Its stored format is unchanged.
+- **Rules 3 to 5** are not adopted: the entry has no `(from, event) → to`
+  table, no single apply function and no deadline column. In their place,
+  one table, `nextSteps`, maps each derived state to the commands the
+  service refuses and the one reply that names the commands that work, so a
+  refusal and its advice cannot disagree. Writes to the entry (a claim, a new
+  execution, retiring an idle one) are still made inline by the commands.
+
+Reads derive without writing. A command holding the session's lock retires
+an idle current execution, and releases the executions the entry never
+recorded ([ADR 0063](0063-a-session-releases-executions-it-never-recorded.md)).
+`cmd/sproozi/output.go` still works out for itself, against the CLI's wall
+clock, that a starting session is overdue, rather than from `derive`.
+
+Corrected 2026-11-17: the remote executor's driver keeps no lifecycle record,
+so it adopts none of rules 1 to 5; its decision is a table of its own,
+described in [ADR 0057](0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md).
+
+Corrected 2026-11-16: the [supervisor](../../GLOSSARY.md#supervisor)
+(`cmd/native-session`) adopts rules 1, 3, 4 and 5. Before, a typed state and
+separate fields (`cause`, `quiescing`, `ended`, `gatedAt`, `turnless` and the
+exit codes) together decided what each path could do.
+
+- **Rule 1.** `lifecycle.go` holds one `lifecycle`: a phase with a closed
+  vocabulary and the facts that belong to it (the cause, when input was first
+  gated, the turnless latch and the exit codes). The phases are
+  `unconfigured`, `prepared`, `active`, `gated`, `finishing`, `forcing` and
+  `ended`. `finishing` means a graceful stop owns the harness's exit.
+  `forcing` means the supervisor is killing the harness for a cause already
+  decided. The window lasts from the kill until it is confirmed, at most
+  three seconds, and through the sign-in save that follows, at most five
+  more (`loginSaveWait`). In it status already reports `stopped`, and either
+  the stop or the exit watcher may settle the exit.
+  Status and every control reply still report the protocol's five states,
+  derived by one function: `gated` and `finishing` report `stopping`;
+  `forcing` and `ended` report `stopped`.
+- **Rule 2** is not adopted: the supervisor stores nothing, so there is no
+  load or save to validate.
+- **Rules 3 and 4.** The table is below. One `apply`, called under the
+  supervisor's mutex, is the only place the lifecycle changes. Every path
+  that changes it calls `apply`: `configure`, `activate`, `gate` and
+  `quiesce`, the turnless observation, the exit watcher, the stops for
+  `SIGTERM`, the deadline and a failed graceful stop, and the graceful stop
+  itself. `apply` refuses an undeclared change and leaves the lifecycle as it
+  was. Two requests can answer as replays. `activate` of an active
+  supervisor returns its PID before admission. `configure`, which the table
+  admits only from `unconfigured`, compares the contracts in every other
+  phase.
+- **Rule 5.** Only `configure` and `activate` are refused after the deadline.
+  `activate` is checked on entry and again just before the launch.
+  `configure` is refused first by the launch contract's own validation. One
+  owner, `deadline.go`, raises the `deadline` event once
+  ([ADR 0064](0064-the-supervisor-alone-stops-a-harness-at-its-deadline.md)).
+  Without a deadline nothing raises it, and every phase but `ended` can
+  still end without it.
+
+| Event | From → to | Refused after the deadline |
+| --- | --- | --- |
+| `configure` | `unconfigured` → `prepared` | yes |
+| `activate` | `prepared` → `active` | yes |
+| `gate` | `active`, `gated` → `gated`; `finishing` → `finishing` | no |
+| `turnless` | `gated`, `finishing`, `forcing`, `ended` → unchanged | no |
+| `finish` | `gated` → `finishing`; `forcing`, `ended` → unchanged | no |
+| `finished` | `finishing`, `forcing`, `ended` → `ended` | no |
+| `terminate`, `deadline`, `fail` | every phase but `ended` → `forcing`; `ended` → `ended` | no |
+| `exited` | `active`, `gated`, `forcing`, `ended` → `ended`; `finishing` → `finishing` | no |
+
+`TestSupervisorLifecycleRecord` drives every event through every state the
+supervisor reaches: for Codex, Claude Code and Copilot, first and resumed
+visits, with and without a deadline and with one that passes during the
+events, each with a real sign-in sync. A state includes its cause, whether
+input was gated and the turnless latch. The record holds the replies, the
+states status reports, what reached the harness and what the sign-in sync
+had recorded by then, the login store, the exit reports, the log lines and
+the exit codes. Its 1020 steps, written from the supervisor before this
+change, were identical after it. Outside the record, four things differ:
+
+- a stopped `quiesce` reply's `exit.reason` is never `deadline`, which only
+  the terminal's own kill gave;
+- a `quiesce` waiting for a turn sees a passed deadline at its next 100 ms
+  poll, where before it read the clock once a second;
+- when the deadline is raised after the terminal has reaped the harness's
+  own exit, the exit is the harness's own (`exited`), where before it was
+  either; an own exit the terminal has not yet reaped can still be reported
+  as `deadline`;
+- in `forcing` the exit watcher may settle the exit, where before, once a
+  graceful stop had been overtaken, only the stop did. Both settle the same
+  exit and wait result unless the stop's three-second wait ran out first,
+  in which case the stop settles it as before; whichever concludes does so
+  after the one sign-in save. The cause, codes, report and save are the
+  same.
+
+Four changes followed, each a fix with its own test. `activate` no longer
+starts a harness when the deadline passed while it prepared the launch. The
+exit watcher no longer concludes an exit that a graceful stop settled, which
+let the supervisor exit before the stopped reply was read. A forced stop that
+overtakes a graceful end leaves the supervisor's exit code nonzero. A
+`quiesce` whose Codex quit, or turnless kill, a forced stop overtook replies
+`stopping` with an error naming the cause, which changed 12 recorded steps;
+Claude Code and Copilot, ended by a kill after their completed turn, still
+reply `stopped`.
+
 ## Alternatives
 
 - **Check transitions in `save` by rereading the journal.** This catches an
@@ -282,16 +466,31 @@ format is unchanged.
   `internal/session/cancel.go`, `internal/session/finalize.go`,
   `internal/session/store.go`, `internal/session/remove.go`,
   `internal/session/home/exits.go`, `internal/session/home/remove.go`,
+  `internal/session/home/phase.go`, `internal/session/home/reconcile.go`,
   `cmd/sproozi/output.go`, `internal/deadline`,
-  `internal/runtime/docker/transitions.go`, `internal/gateway/docker/owner.go`
+  `internal/runtime/docker/transitions.go`, `internal/gateway/docker/owner.go`,
+  `internal/runtime/kubernetes/registry/transitions.go`,
+  `cmd/native-session/lifecycle.go`, `cmd/native-session/deadline.go`,
+  `cmd/native-session/main.go`,
+  `internal/runtime/kubernetes/placement/storage.go`
 - Tests: `internal/session/phase_test.go`, `internal/session/rules_test.go`,
   `cmd/sproozi/deadline_test.go`, `internal/runtime/docker/transitions_test.go`,
-  `internal/gateway/docker/transitions_test.go`
+  `internal/gateway/docker/transitions_test.go`,
+  `internal/runtime/kubernetes/registry/transitions_test.go`,
+  `internal/runtime/kubernetes/registry/outcomes_test.go`,
+  `internal/session/home/phase_test.go`, `internal/session/home/reconcile_test.go`,
+  `cmd/native-session/lifecycle_test.go`, `cmd/native-session/lifecycle_record_test.go`,
+  `cmd/native-session/lifecycle_paths_test.go`,
+  `internal/runtime/kubernetes/placement/retained_record_test.go`
+  (Corrected 2026-11-16: the home catalogue entry's files added; the
+  supervisor's files added. 2026-11-17: the Kubernetes retained record's
+  files added)
 - Reference: [status and listing output](../reference/session-commands.md#status-and-listing-output)
 - Related: [ADR 0018](0018-coordinator-owns-every-visit.md),
   [ADR 0038](0038-exited-agents-and-one-recovery-path.md),
   [ADR 0041](0041-gateway-state-namespace-and-retained-state-owners.md),
-  [ADR 0056](0056-whoever-starts-work-sets-its-deadline.md)
+  [ADR 0056](0056-whoever-starts-work-sets-its-deadline.md),
+  [ADR 0066](0066-a-contradicted-retained-record-refuses-work-and-never-blocks-an-end.md)
 
 ## Later correction (2026-11-15)
 

@@ -45,6 +45,10 @@ separately. The placement must independently confirm all writers stopped.
 These client-specific mechanisms and their alternatives are recorded in
 [ADR 0011](0011-native-session-compatibility-and-completion.md).
 
+Corrected 2026-11-16: capture keeps the selected file's complete rows and
+leaves out a final row a fenced writer did not finish
+([ADR 0061](0061-a-stop-survives-an-interrupted-write.md)).
+
 A real three-home experiment using the stock CLI preserved the same native UUID
 and cumulative conversation under different absolute workspace paths, transferring
 one rollout file through the production adapter. Fresh provider ports and

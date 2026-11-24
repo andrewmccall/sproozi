@@ -1,6 +1,7 @@
 package home
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -14,9 +15,11 @@ import (
 // Remove deletes a stopped or cancelled session: its catalogue entry, its
 // executions' journals and the retained workspaces, checkpoints and profiles
 // nothing else uses. It refuses a session that still has a writer, an
-// operation in progress or unsettled usage. Accounting and grant records, and
-// the placement's evidence of each finished visit, are kept.
-func (s *Service) Remove(id string) (Status, error) {
+// operation in progress, unsettled usage or an unfinished pull (nextSteps).
+// Accounting and grant records, and the placement's evidence of each
+// finished visit, are kept. Executions of the session that its entry never
+// recorded are released first (releaseOrphans), so none outlives the session.
+func (s *Service) Remove(ctx context.Context, id string) (Status, error) {
 	unlock, err := s.lockSession(id)
 	if err != nil {
 		return Status{}, err
@@ -29,14 +32,21 @@ func (s *Service) Remove(id string) (Status, error) {
 	status.Session = nil
 	catalogued := false
 	var executions []string
+	var c *localSession
 	r, err := s.readCatalog(id)
 	switch {
 	case err == nil:
-		if !r.Claimed {
-			return Status{}, rejectedError(fmt.Sprintf("home: session %s is still being pulled; "+
-				"finish with \"sproozi pull %s\" before removing it", id, id))
+		st, _, stateErr := s.sessionState(r)
+		if stateErr != nil {
+			return Status{}, stateErr
 		}
-		catalogued = true
+		if err = refusal(id, st, ActionRemove); err != nil {
+			return Status{}, err
+		}
+		if err = s.releaseOrphans(ctx, r); err != nil {
+			return Status{}, err
+		}
+		catalogued, c = true, &r
 		executions = slices.Clone(r.Executions)
 		if r.Current != "" && !slices.Contains(executions, r.Current) {
 			executions = append(executions, r.Current)
@@ -47,8 +57,18 @@ func (s *Service) Remove(id string) (Status, error) {
 			return Status{}, inspectErr
 		}
 		if execution.Session != "" {
-			return Status{}, rejectedError(fmt.Sprintf("home: %s belongs to session %s; remove that session", id,
-				execution.Session))
+			unlockOwner, recorded, ownerErr := s.lockUnrecorded(execution)
+			if ownerErr != nil {
+				return Status{}, ownerErr
+			}
+			defer unlockOwner()
+			if recorded {
+				return Status{}, rejectedError(fmt.Sprintf("home: %s belongs to session %s; remove that session", id,
+					execution.Session))
+			}
+			if !session.Removable(execution) {
+				return Status{}, unrecordedProblem(execution.Session, id)
+			}
 		}
 		executions = []string{id}
 	default:
@@ -63,7 +83,7 @@ func (s *Service) Remove(id string) (Status, error) {
 			return Status{}, inspectErr
 		}
 		if !session.Removable(record) {
-			return Status{}, notRemovable(id, record)
+			return Status{}, problem(id, derive(c, &record, s.coordinator.PastDeadline))
 		}
 	}
 	err = s.coordinator.Remove(executions, func() ([]string, error) {
@@ -87,11 +107,23 @@ func (s *Service) Remove(id string) (Status, error) {
 	return status, s.collectCatalogArtifacts()
 }
 
-// notRemovable says why a session cannot be removed yet and what would allow it.
-func notRemovable(id string, r session.Record) error {
-	return rejectedError("home: " + session.RemovalRefusal(id, r.Phase, func(name string) string {
-		return "sproozi " + name + " " + id
-	}))
+// lockUnrecorded holds the lock of execution's session, so the session's own
+// commands cannot release it meanwhile, and reports whether the session
+// records the execution. A session that is gone records nothing.
+func (s *Service) lockUnrecorded(execution session.Record) (func(), bool, error) {
+	unlock, err := s.lockSession(execution.Session)
+	if err != nil {
+		return nil, false, err
+	}
+	owner, err := s.readCatalog(execution.Session)
+	switch {
+	case os.IsNotExist(err):
+		return unlock, false, nil
+	case err != nil:
+		unlock()
+		return nil, false, err
+	}
+	return unlock, owner.Current == execution.ID || slices.Contains(owner.Executions, execution.ID), nil
 }
 
 // removeCatalog deletes a session's catalogue entry.

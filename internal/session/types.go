@@ -165,6 +165,20 @@ type Observation struct {
 // repeats only the seal and capture, never the native handoff.
 var ErrUsageUnsealed = errors.New("session: writer stopped but usage is not sealed")
 
+// ErrRecordContradicted matches a placement refusing to start or extend
+// work because what it retains about the visit contradicts itself or the
+// placement's other records (ADR 0066). Retrying never helps; stopping or
+// cancelling the session ends the visit.
+var ErrRecordContradicted = errors.New("session: the placement's record of the visit contradicts itself; stop or cancel the session")
+
+// RecordContradiction is an ErrRecordContradicted error that can state the
+// contradiction alone, without the errors it is wrapped in, for a problem
+// its session's owner reads.
+type RecordContradiction interface {
+	error
+	Contradiction() string
+}
+
 // ErrRecoveryRequired matches a refusal of a new move or stop because an
 // earlier one on the same execution must be recovered or cancelled first.
 var ErrRecoveryRequired = errors.New("session: recovery required")
@@ -264,6 +278,13 @@ type Placement interface {
 // Cancellation uses it in place of Inspect for such a pending visit.
 type PreparationAborter interface {
 	AbortPreparation(context.Context, Launch) error
+}
+
+// ExitObserver is implemented by placements that can tell when an active
+// visit's harness exited on its own or at its deadline, without a stop being
+// requested. Stopping such a visit reports the exit.
+type ExitObserver interface {
+	Exited(context.Context, Launch, Incarnation) (bool, error)
 }
 
 // Checkpoint identifies a committed private file within the coordinator directory.

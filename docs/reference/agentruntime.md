@@ -71,7 +71,10 @@ No additional egress token or local proxy process is injected.
 gateway's TLS certificate covers. Sandboxes resolve no names, so the controller
 resolves that host itself when it creates each Pod and writes the address into
 the Pod's hosts file. The host must therefore resolve from the controller, not
-only from Pods. Keep it a host name: managed harnesses also use it as the
+only from Pods. A lookup with no answer within one second is asked once more
+with the resolver's own timeout, so a lost DNS reply delays the Pod, and every
+other AgentRun the controller is reconciling, by about a second rather than the
+resolver's five. Keep it a host name: managed harnesses also use it as the
 authority of their control connection, which the gateway serves only by name.
 The address is fixed for the Pod's life; a gateway Service recreated with a new
 cluster IP reaches only new runs. See [ADR 0040](../adr/0040-sandboxes-reach-the-gateway-without-dns.md).
@@ -168,9 +171,32 @@ Set exactly one source:
 In a managed session the supervisor copies the harness's login file
 (`.credentials.json` for Claude Code, `auth.json` for Codex, `config.json` for
 Copilot) from `/etc/sproozi/sign-in` into its native home before launch, then
-keeps the two in step while the harness runs: a sign-in, refresh or sign-out
-in one session reaches the other sessions of that login within about a second
-([ADR 0049](../adr/0049-named-logins-share-a-live-store.md)). With no login
+keeps the two in step while the harness runs, syncing every second. A sign-in
+or refresh in one session reaches the other sessions of that login within
+about two seconds, and a sign-out within about four
+([ADR 0049](../adr/0049-named-logins-share-a-live-store.md),
+[ADR 0061](../adr/0061-a-stop-survives-an-interrupted-write.md)). The sync
+copies only a whole login, in either direction: one that is not a JSON object
+(after Copilot's comment header) stays where it is. Empty, missing and `{}`
+mean "not signed in". A sign-out is shared only once two consecutive syncs
+on each side have seen it, and from the harness's file only while the harness
+runs: a login file
+emptied or removed once a stop has begun leaves the store as it was. Nothing
+from the file is shared once the harness has been killed. Each sync waits at
+most five seconds for the store's lock, and a stop's save at most five
+seconds in all; a stop whose save cannot finish in that time completes
+anyway, leaves the store as it was and logs the missed save. A session that
+starts while another holder keeps the lock fails to start after five
+seconds; one whose volume itself stalls is not bounded.
+
+A store that stops updating shows in the supervisor's standard error, which
+is the agent container's output (`docker logs`, or `kubectl logs -c agent`):
+`Stopped syncing the harness's sign-in with its login store: REASON` appears
+once when syncing stops, again only if the reason changes, and `Resumed
+syncing ...` when it recovers. Reasons include a login file that is not a
+whole login, as from a client whose login format changed, and a store that
+stayed locked by another session. Sessions of the login then ask to sign in
+again, or keep a token another session has rotated. With no login
 stored yet, sign in inside the session as you would on your own machine
 (`/login`, or Codex's device-code sign-in). Sproozi never copies a login from
 your machine, and the login never enters a checkpoint, so a session moved here
@@ -184,7 +210,11 @@ An AgentRun has no supervisor. For Claude Code, `claude-launch.py` (the stock
 example's launch) does the same: it copies `.credentials.json` from the store
 into the run's fresh native home before launch, keeps the two in step every
 second under the store's lock, and saves the last change when Claude Code
-exits, so a token refreshed in one run reaches the next. To sign in a new
+exits, so a token refreshed in one run reaches the next. It follows the same
+rules: a whole login only, a sign-out only once two syncs see it and never
+from the save at exit, nothing once Claude Code was killed, and a store that
+holds no whole login is never copied in. `--sign-in-wait SECONDS` (default 5)
+bounds each wait for the store's lock. To sign in a new
 Claude Code login once, start an AgentRun from a runtime with the same
 `signIn.claims` whose container waits instead of launching, for example
 `sleep 1800`, under a policy that grants `model.inference`. Then run

@@ -118,3 +118,5 @@ checkpoint it started from, because the trusted registry's receipt names a
 checkpoint for every visit with a native identity. No conversation is claimed
 from a stopped container. Implementation:
 [Kubernetes placement](../../internal/runtime/kubernetes/placement/lifecycle.go).
+
+Corrected 2026-11-16: until [ADR 0062](0062-one-exit-rule-and-exits-over-the-wire.md), a first Claude Code visit whose stop bound its conversation before its harness exited was captured, and an exited visit whose capture failed failed every retry; both placements now share one rule, under which only a stopped state the capture helper refuses keeps what the visit started from and any other capture failure, on Docker too, fails the stop so its retry captures again; home notices exits on a cluster.

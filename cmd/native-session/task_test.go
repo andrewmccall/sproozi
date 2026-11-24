@@ -119,7 +119,7 @@ func TestClaudeTaskIsOneLiteralPositionalPrompt(t *testing.T) {
 // conversation.
 func claudeTaskServer(task string) (*server, func(event, prompt string) response) {
 	const id = "8a8f7c40-1d55-4f39-9e4e-6d2b7f3c9a10"
-	s := &server{config: config{Harness: harness.NativeClaude, Task: task}, state: harness.NativeActive}
+	s := &server{config: config{Harness: harness.NativeClaude, Task: task}, life: lifecycle{phase: phaseActive}}
 	path, _ := harness.ClaudeProjectPath(workspace, id)
 	inactive := false
 	return s, func(event, prompt string) response {
@@ -190,7 +190,7 @@ func TestClaudeTaskCompletesOnlyAfterAStopThatFollowsTheTaskPrompt(t *testing.T)
 // turnless, even before any prompt.
 func TestClaudeTaskLaunchIsNeverRestoredUnchangedOrTurnless(t *testing.T) {
 	s := &server{config: config{Harness: harness.NativeClaude, Task: fixtureTask, ThreadID: selected},
-		state: harness.NativeStopping, gatedAt: time.Now().Add(-time.Hour)}
+		life: lifecycle{phase: phaseGated, gatedAt: time.Now().Add(-time.Hour)}}
 	s.mu.Lock()
 	restored := s.claudeRestoredUnchanged()
 	s.mu.Unlock()
@@ -201,7 +201,7 @@ func TestClaudeTaskLaunchIsNeverRestoredUnchangedOrTurnless(t *testing.T) {
 		t.Fatal("task launch observed a completed turn without one")
 	}
 	fresh := &server{config: config{Harness: harness.NativeClaude, Task: fixtureTask},
-		state: harness.NativeStopping, gatedAt: time.Now().Add(-time.Hour)}
+		life: lifecycle{phase: phaseGated, gatedAt: time.Now().Add(-time.Hour)}}
 	if fresh.isTurnless() {
 		t.Fatal("a fresh task launch was turnless")
 	}
@@ -232,7 +232,7 @@ func TestClaudeStockTaskHooksCompleteTheTaskTurn(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, task := range []string{tc.task, strings.TrimSpace(tc.task) + " (changed)"} {
-				s := &server{config: config{Harness: harness.NativeClaude, Task: task}, state: harness.NativeActive}
+				s := &server{config: config{Harness: harness.NativeClaude, Task: task}, life: lifecycle{phase: phaseActive}}
 				for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
 					h, err := readClaudeHook(strings.NewReader(line))
 					if err != nil {

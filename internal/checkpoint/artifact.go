@@ -76,9 +76,13 @@ func CaptureStopped(ctx context.Context, kind harness.NativeKind, home, reposito
 	}
 	_, _, size, err := artifact.native(maxBytes)
 	if err != nil {
-		return nil, Metadata{}, err
+		return nil, Metadata{}, RefuseState(err)
 	}
 	artifact.Workspace, err = workspace.Capture(ctx, repository, selectedIgnored, maxBytes-int64(size))
+	if errors.Is(err, workspace.ErrByteLimit) {
+		// The workspace with the conversation exceeds the bound.
+		return nil, Metadata{}, RefuseState(err)
+	}
 	if err != nil {
 		return nil, Metadata{}, err
 	}
@@ -87,7 +91,7 @@ func CaptureStopped(ctx context.Context, kind harness.NativeKind, home, reposito
 		return nil, Metadata{}, err
 	}
 	meta, _, err := inspect(data, maxBytes)
-	return data, meta, err
+	return data, meta, RefuseState(err)
 }
 
 // Inspect validates native identity and candidate settled state, and reports the exact artifact

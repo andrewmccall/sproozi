@@ -210,6 +210,18 @@ func (c *Client) AbortPreparation(ctx context.Context, l session.Launch) error {
 	return c.settle(p, p.AbortPreparation(ctx, l))
 }
 
+// Exited reports whether an active visit's harness on the executor exited on
+// its own; against an older executor it reports none, as
+// profile.Client.Exited describes.
+func (c *Client) Exited(ctx context.Context, l session.Launch, i session.Incarnation) (bool, error) {
+	p, err := c.client(ctx)
+	if err != nil {
+		return false, err
+	}
+	exited, err := p.Exited(ctx, l, i)
+	return exited, c.settle(p, err)
+}
+
 func (c *Client) Attach(ctx context.Context, l session.Launch, i session.Incarnation, input io.Reader, output io.Writer) error {
 	p, err := c.client(ctx)
 	if err != nil {
@@ -234,6 +246,7 @@ var (
 	_ session.Placement          = (*Client)(nil)
 	_ session.TerminalPlacement  = (*Client)(nil)
 	_ session.PreparationAborter = (*Client)(nil)
+	_ session.ExitObserver       = (*Client)(nil)
 )
 
 // OpenOwnerAttachment attaches to an interactive session the executor owns;

@@ -5,10 +5,12 @@ import (
 	"cmp"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
@@ -70,7 +72,7 @@ func (p *Placement) persistIntent(l session.Launch, data []byte) (retained, erro
 		return retained{}, err
 	}
 	r := retained{Launch: l}
-	return r, p.save(r)
+	return r, p.save(r, nil)
 }
 
 // claimEpoch records l as its session epoch's one allocation. One allocation
@@ -97,6 +99,8 @@ func (p *Placement) claimEpoch(l session.Launch) error {
 	return p.atomic(epochPath, encoded)
 }
 
+// load reads l's retained record. A record whose facts contradict each other
+// is returned with those facts forgotten, and with a *contradiction error.
 func (p *Placement) load(l session.Launch) (retained, error) {
 	if !idValid(l.AllocationID) {
 		return retained{}, &profile.Rejection{Code: profile.CodeInvalid}
@@ -112,7 +116,149 @@ func (p *Placement) load(l session.Launch) (retained, error) {
 	if !session.SameLaunch(r.Launch, l) {
 		return retained{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
-	return r, nil
+	r, err = r.check(nil)
+	return r, p.noted(err)
+}
+
+// A visit's facts are retained in the order they become true, and each
+// needs the facts before it. The record holds its registration's reference
+// once the registration exists. A stop that reached the active source then
+// records it quiet (nativeQuiet) and, while quieting it, a harness that had
+// exited (exited) and a first visit with no conversation (turnless). Once
+// the registration records a stop or a cancellation and the native
+// container is seen ended, the writer is fenced (writerFenced). Only then is
+// what the stop keeps retained (outputDigest). The tombstone of an aborted
+// preparation stands beside any of these.
+//
+// retainedRules lists each contradiction of that order, between the
+// record's own facts or with its session registration, and its correction:
+// what the registration proves is taken from it, and any other fact the
+// contradiction makes untrustworthy is forgotten. A rule that needs the
+// registration holds whenever there is none to compare with.
+//
+// A registration past the point a fact proves is the authority for it: its
+// phase was recorded only after the executor retained the facts before it.
+// A stopped registration's receipt proves the source quiet, the writer
+// fenced and the output it names kept, so a record that lacks them takes
+// them from the receipt rather than forgetting what it keeps. A cancelled
+// registration with a receipt proves the writer fenced: it was sealed only
+// once the fence was seen. A record lacking that fence is not a
+// contradiction (an abort of a preparation this executor never saw writes
+// one), and check adds it. A stopping registration proves only that the
+// gateway's authority was revoked: Stop observes the source again for a
+// record that lacks its quiet marker. The other phases prove no fact of the
+// record.
+var retainedRules = []struct {
+	contradiction string
+	broken        func(r retained, registration *registry.Record) bool
+	correct       func(*retained, *registry.Record)
+}{
+	{"lacks what its stopped registration's receipt proves (a quiet source, a fenced writer and the output it names)",
+		func(r retained, registration *registry.Record) bool {
+			return stoppedReceipt(registration) != nil &&
+				(!r.NativeQuiet || !r.WriterFenced || r.OutputDigest != stoppedReceipt(registration).CheckpointDigest)
+		},
+		func(r *retained, registration *registry.Record) {
+			r.NativeQuiet, r.WriterFenced, r.OutputDigest = true, true, stoppedReceipt(registration).CheckpointDigest
+		}},
+	{"names a workspace, but the launch resumes a checkpoint",
+		func(r retained, _ *registry.Record) bool { return r.WorkspaceDigest != "" && !r.fresh() },
+		func(r *retained, _ *registry.Record) { r.WorkspaceDigest = "" }},
+	{"records a stop, but has no session registration",
+		func(r retained, _ *registry.Record) bool { return r.Reference.UID == "" && r.stopRecorded() },
+		forgetStop},
+	{"records a stop, but its session registration was never active",
+		func(r retained, registration *registry.Record) bool {
+			return registration != nil && r.stopRecorded() &&
+				(registration.Phase == registry.Creating || registration.Phase == registry.Bound || registration.Phase == registry.Prepared)
+		},
+		forgetStop},
+	{"records the writer fenced, but its session registration is still active",
+		func(r retained, registration *registry.Record) bool {
+			return registration != nil && registration.Phase == registry.Active && r.WriterFenced
+		},
+		func(r *retained, _ *registry.Record) { r.WriterFenced = false }},
+	{"keeps output before the source was quiet and its writer fenced",
+		func(r retained, _ *registry.Record) bool {
+			return r.OutputDigest != "" && (!r.NativeQuiet || !r.WriterFenced)
+		},
+		func(r *retained, _ *registry.Record) { r.OutputDigest = "" }},
+	{"is turnless, but the launch resumes a checkpoint",
+		func(r retained, _ *registry.Record) bool { return r.Turnless && !r.fresh() },
+		func(r *retained, _ *registry.Record) { r.Turnless = false }},
+	{"is turnless before the source was quiet",
+		func(r retained, _ *registry.Record) bool { return r.Turnless && !r.NativeQuiet },
+		func(r *retained, _ *registry.Record) { r.Turnless = false }},
+	{"is turnless, but its session registration bound a conversation",
+		func(r retained, registration *registry.Record) bool {
+			return registration != nil && r.Turnless && registration.NativeUUID != ""
+		},
+		func(r *retained, _ *registry.Record) { r.Turnless = false }},
+}
+
+// stoppedReceipt is the receipt of a stopped registration, or nil.
+func stoppedReceipt(registration *registry.Record) *registry.StopReceipt {
+	if registration == nil || registration.Phase != registry.Stopped {
+		return nil
+	}
+	return registration.Receipt
+}
+
+// stopRecorded reports any fact a stop records.
+func (r retained) stopRecorded() bool {
+	return r.NativeQuiet || r.Turnless || r.Exited != nil || r.WriterFenced || r.OutputDigest != ""
+}
+
+func forgetStop(r *retained, _ *registry.Record) {
+	r.NativeQuiet, r.Turnless, r.Exited, r.WriterFenced, r.OutputDigest = false, false, nil, false, ""
+}
+
+// contradiction is a retained record whose facts contradict each other or
+// the session registration it names.
+type contradiction struct {
+	allocation string
+	reasons    []string
+}
+
+// Unwrap makes a contradiction session.ErrRecordContradicted and, over the
+// profile protocol, the permanent conflict a retry does not cure.
+func (c *contradiction) Unwrap() []error {
+	return []error{session.ErrRecordContradicted, &profile.Rejection{Code: profile.CodeConflict}}
+}
+
+func (c *contradiction) Error() string { return "placement: " + c.Contradiction() }
+
+// Contradiction states the contradiction: the visit's allocation ID, which
+// its owner already knows, and the rules its record breaks. It holds no
+// path, configuration or cluster detail.
+func (c *contradiction) Contradiction() string {
+	return fmt.Sprintf("the retained record of visit %s %s", c.allocation, strings.Join(c.reasons, "; it "))
+}
+
+var _ session.RecordContradiction = (*contradiction)(nil)
+
+// check is the one rule for which retained records are valid, alone
+// (registration nil) or beside their session registration. It returns r
+// with what the registration proves taken from it and every other fact a
+// contradiction makes untrustworthy forgotten, and the contradictions, or r
+// and nil. A rule's correction can break only a rule later in
+// retainedRules (forgetting the fence breaks the output's), so one pass in
+// order finds them all.
+func (r retained) check(registration *registry.Record) (retained, error) {
+	if registration != nil && registration.Phase == registry.Cancelled && registration.Receipt != nil {
+		r.WriterFenced = true
+	}
+	var reasons []string
+	for _, rule := range retainedRules {
+		if rule.broken(r, registration) {
+			reasons = append(reasons, rule.contradiction)
+			rule.correct(&r, registration)
+		}
+	}
+	if reasons == nil {
+		return r, nil
+	}
+	return r, &contradiction{allocation: r.Launch.AllocationID, reasons: reasons}
 }
 
 // fresh reports a first visit started from a Git workspace rather than a checkpoint.
@@ -124,7 +270,12 @@ func (r retained) thread(record registry.Record) string {
 	return cmp.Or(r.Launch.ThreadID, record.NativeUUID)
 }
 
-func (p *Placement) save(r retained) error {
+// save retains r, which must be valid beside registration, the session
+// registration the caller holds, or nil before there is one.
+func (p *Placement) save(r retained, registration *registry.Record) error {
+	if _, err := r.check(registration); err != nil {
+		return err
+	}
 	data, err := json.Marshal(r)
 	if err != nil {
 		return err

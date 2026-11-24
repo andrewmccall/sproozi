@@ -27,6 +27,19 @@ An AgentRun harness that is also a native kind for managed sessions
 observes completed turns and checkpoints its conversation. Codex, Claude
 Code and GitHub Copilot CLI. Also seen as: native kind, native harness.
 
+### Supervisor
+
+The trusted `native-session` command that runs a managed harness on a
+terminal inside its sandbox, as the agent container's PID 1. It takes the
+control actions (`configure`, `activate`, `gate`, `status`, `quiesce`,
+`attach`), stops the harness at the execution deadline, and writes an exit
+report when the harness ends without a graceful stop. Its lifecycle is one
+declared state, though it stores nothing; see
+[ADR 0058](docs/adr/0058-lifecycle-records-declare-states-and-transitions.md).
+It is not the terminal it runs the harness on (`nativepty.Supervisor`, the
+"terminal supervisor" of ADR 0061), and not a managed session.
+Also seen as: native supervisor.
+
 ### Run contract
 
 The immutable ConfigMap Sproozi writes for each AgentRun and mounts read-only
@@ -490,6 +503,18 @@ that doesn't match it (`SessionBindingRejected`). It carries the label
 `sessions.sproozi.com/registry=true` and is not yet removed automatically.
 Also seen as: registry record, session registry record.
 
+### Retained record
+
+The remote executor's private file for one Kubernetes visit, beside its
+[session registration](#session-registration): the exact launch, the
+registration's reference and what a stop or cancellation has established so
+far (a quiet source, an exit, a turnless visit, a fenced writer, the kept
+output) or an aborted preparation. It stores no phase. Its facts are checked
+against each other on every load and save, and against the registration
+once it exists; see
+[ADR 0066](docs/adr/0066-a-contradicted-retained-record-refuses-work-and-never-blocks-an-end.md).
+Also seen as: `retained`.
+
 ### Harness conversation ID
 
 The harness's own ID for its conversation, shown as `threadId` in session
@@ -555,9 +580,8 @@ Also seen as: `session.Record`.
 A trusted record that steps a writer through declared phases: a typed phase
 validated on load and save, a `(from, event) → to` table that says which events
 the deadline refuses, and one apply function used by live code and recovery.
-The execution journal, the Docker placement record and the Docker gateway
-grant are lifecycle records; the ADR lists the records still adopting the
-pattern. See
+The execution journal, the Docker placement record, the Docker gateway grant
+and the Kubernetes session registration are lifecycle records. See
 [ADR 0058](docs/adr/0058-lifecycle-records-declare-states-and-transitions.md).
 
 ### Turnless visit
@@ -718,10 +742,22 @@ any other name is a remote executor. Remote commands select one with
 are lowercase DNS labels of 1 to 63 characters. See
 [remote commands](docs/reference/session-commands.md#remote-commands).
 
+### Unrecorded execution
+
+An execution whose journal names a home session that the session's
+catalogue entry neither lists nor names as current. Only an interrupted
+`resume` leaves one, and the session's next `resume` or `rm` releases it
+([ADR 0063](docs/adr/0063-a-session-releases-executions-it-never-recorded.md)).
+Also seen as: orphan, orphaned execution.
+
 ### Catalogue
 
 The list of sessions that one owner holds. `sproozi sessions` combines this
-machine's catalogue with each cluster's. See
+machine's catalogue with each cluster's. On this machine each session has a
+catalogue entry: what the session keeps between its executions and which
+execution is current. The session's phase is derived from the entry and that
+execution's journal: `importing` until a pull's claim is recorded, `retained`
+or `failed` once stopped, and otherwise the execution's own phase. See
 [status and listing output](docs/reference/session-commands.md#status-and-listing-output).
 
 ### Persistent assistant

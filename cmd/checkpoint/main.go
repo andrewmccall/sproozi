@@ -27,9 +27,26 @@ func (s *selections) Set(value string) error {
 
 func main() {
 	if err := run(os.Args[1:], os.Stdin, os.Stdout); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, "Checkpoint operation failed:", err)
-		os.Exit(1)
+		_, _ = fmt.Fprintln(os.Stderr, checkpoint.HelperFailurePrefix, err)
+		os.Exit(exitCode(os.Args[1:], err))
 	}
+}
+
+// captureStopped captures a fenced visit's checkpoint.
+const captureStopped = "capture-stopped"
+
+// exitCode is the code the helper ends with after err. Only capture-stopped
+// says why it failed (checkpoint.ExitStateRefused or ExitCaptureFailed),
+// because only its failure decides what a stop keeps; every other command
+// fails with 1, as every command of an older helper does.
+func exitCode(args []string, err error) int {
+	switch {
+	case err == nil:
+		return 0
+	case len(args) > 0 && args[0] == captureStopped:
+		return checkpoint.CaptureExitCode(err)
+	}
+	return 1
 }
 
 func run(args []string, input io.Reader, output io.Writer) error {
@@ -60,7 +77,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		return c.prepare(ctx, input, output)
 	case "prepare-workspace":
 		return c.prepareWorkspace(ctx, input, output)
-	case "capture-stopped":
+	case captureStopped:
 		return c.capture(ctx, output)
 	case "restore":
 		return c.restore(ctx, input)
@@ -142,7 +159,7 @@ func (c command) capture(ctx context.Context, output io.Writer) error {
 	}
 	if c.instructions != "" {
 		if err = checkpoint.ValidateContinuity(data, c.kind, c.instructions, c.limit); err != nil {
-			return err
+			return checkpoint.RefuseState(err)
 		}
 	}
 	_, err = io.Copy(output, bytes.NewReader(data))

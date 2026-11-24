@@ -9,6 +9,7 @@ import (
 
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/sandboxpod"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/google/uuid"
@@ -69,7 +70,7 @@ func TestAbortIndependentAllocationWhileAnotherStopIsHeld(t *testing.T) {
 		t.Fatalf("first source's active-turn grants were revoked: %+v %v", r, err)
 	}
 	pod, err = p.pod(t.Context(), r)
-	if err != nil || !running(pod, nativeContainer) {
+	if err != nil || !sandboxpod.Observe(pod).Agent.Running {
 		t.Fatalf("first source's actual writer was stopped: %+v %v", pod, err)
 	}
 	release()

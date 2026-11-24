@@ -179,6 +179,15 @@ The Kubernetes adapter creates disposable Pods directly; see
 contract, a projected gateway token and a run-specific NetworkPolicy. Its
 ServiceAccount has no direct Kubernetes read grant.
 
+The controller, the gateway and the remote executor each read a sandbox Pod
+with their own client and permissions, and read what it shows through one
+pure function, `sandboxpod.Observe`
+(`internal/runtime/kubernetes/sandboxpod`): its phase, whether it is being
+deleted or never ran, and for the agent and capture containers whether each
+runs and how it ended. Only an end the container runtime reported proves a
+writer stopped; the kubelet's `ContainerStatusUnknown` placeholder does not
+([ADR 0010](../adr/0010-managed-session-authority-and-admission.md)).
+
 ## Managed session continuity
 
 The [service](../../GLOSSARY.md#service) manages controlled Docker

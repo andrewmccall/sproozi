@@ -27,8 +27,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const stageRetained = "retained"
-
 // WorkSource is authenticated trusted-owner transport, configured by the home
 // administrator. Artifact contents and private socket arguments cannot claim a
 // session; activation requires the source's separately acknowledged ownership.
@@ -387,8 +385,8 @@ func (s *Service) ResumeWithMaxDuration(ctx context.Context, id, operation strin
 	if err != nil {
 		return Status{}, err
 	}
-	if !r.Claimed {
-		return Status{}, errors.New("home: imported session ownership is not acknowledged")
+	if err = s.reconcileForResume(ctx, &r); err != nil {
+		return Status{}, err
 	}
 	allowances, err := s.projectAllowances(r)
 	if err != nil {
@@ -401,7 +399,12 @@ func (s *Service) ResumeWithMaxDuration(ctx context.Context, id, operation strin
 		return status, err
 	}
 	if r.Current != "" {
-		return Status{}, s.notStoppedProblem(id, r.Current)
+		if err = s.refuseIn(r, ActionResume); err != nil {
+			return Status{}, err
+		}
+		// The table admits resume only of a stopped session or a late start,
+		// which replayResume ends; one it could not end is still current.
+		return Status{}, fmt.Errorf("home: session %s still has a current execution; run \"sproozi status %s\"", id, id)
 	}
 	if len(r.Executions) >= 256 {
 		return Status{}, errors.New("home: execution retention limit reached")
@@ -447,6 +450,27 @@ func (s *Service) ResumeWithMaxDuration(ctx context.Context, id, operation strin
 		return Status{}, err
 	}
 	return s.catalogStatus(r)
+}
+
+// reconcileForResume refuses a resume the session's state refuses before
+// anything is released or bound, when the session has no current execution,
+// since nothing resume does next changes it; then it retires an idle current
+// execution and releases the executions the session never recorded. The
+// resume does not need those gone: a failure is logged, and the next command
+// tries again. The caller holds the session's lock.
+func (s *Service) reconcileForResume(ctx context.Context, r *localSession) error {
+	if r.Current == "" {
+		if err := s.refuseIn(*r, ActionResume); err != nil {
+			return err
+		}
+	}
+	if err := s.retireSettled(r); err != nil {
+		return err
+	}
+	if err := s.releaseOrphans(ctx, *r); err != nil {
+		s.logf("Failed to release an execution session %s never recorded: %v\n", r.ID, err)
+	}
+	return nil
 }
 
 // replayResume continues a resume operation the session already bound to an
@@ -519,77 +543,110 @@ func (s *Service) resumeInput(r localSession, local runtimedocker.PlacementConfi
 	return data, checkpoint.ValidateContinuity(data, local.Harness, local.InstructionDigest, local.MaxCheckpointBytes)
 }
 
-func (s *Service) catalogStatus(r localSession) (Status, error) {
-	var info *checkpoint.Metadata
-	if r.Committed.CheckpointDigest != "" {
-		data, err := s.catalogArtifact(r.Committed.CheckpointDigest)
-		if err != nil {
-			return Status{}, err
-		}
-		meta, err := checkpoint.Inspect(data, s.config.Local.MaxCheckpointBytes)
-		if err != nil {
-			return Status{}, err
-		}
-		info = &meta
+// checkpointInfo describes a stop's checkpoint: the bytes it carries, or the
+// catalogue's retained artifact. It is nil for a stop with no conversation.
+func (s *Service) checkpointInfo(stopped session.Stopped) (*checkpoint.Metadata, error) {
+	if stopped.CheckpointDigest == "" {
+		return nil, nil
 	}
-	if r.Current != "" {
-		execution, err := s.coordinator.Inspect(r.Current)
-		if err != nil {
+	data := stopped.Checkpoint
+	if data == nil {
+		var err error
+		if data, err = s.catalogArtifact(stopped.CheckpointDigest); err != nil {
+			return nil, err
+		}
+	}
+	meta, err := checkpoint.Inspect(data, s.config.Local.MaxCheckpointBytes)
+	if err != nil {
+		return nil, err
+	}
+	return &meta, nil
+}
+
+// catalogStatus reports a session in its derived phase. A session whose
+// current execution is idle reads as stopped with that execution's stop, as
+// it will once retired; reading changes nothing.
+func (s *Service) catalogStatus(r localSession) (Status, error) {
+	st, current, err := s.sessionState(r)
+	if err != nil {
+		return Status{}, err
+	}
+	committed := r.Committed
+	if current != nil && st.stopped() {
+		if committed, err = s.settledStop(r, *current); err != nil {
 			return Status{}, err
 		}
-		status := executionStatus(execution)
+	}
+	info, err := s.checkpointInfo(committed)
+	if err != nil {
+		return Status{}, err
+	}
+	if current != nil && !st.stopped() {
+		status := executionStatus(*current)
 		status.Association, status.CheckpointInfo = r.Original.Association, info
 		return status, nil
 	}
-	stage := "importing"
-	ownership := "source"
-	if r.Claimed {
-		stage = committedStage(r)
-		ownership = "home"
+	ownership := ownershipHome
+	if st.phase == PhaseImporting {
+		ownership = ownershipSource
 	}
 	return Status{Association: r.Original.Association, CheckpointInfo: info,
-		ID: r.ID, Ownership: ownership, ExecutionID: r.Committed.Launch.ExecutionID,
-		AllocationID: r.Committed.Launch.AllocationID, Incarnation: &r.Committed.Incarnation,
-		Placement: r.Committed.Launch.Placement, Phase: stage, Harness: r.Committed.Launch.Harness,
-		InitialStage: stage, ThreadID: cmp.Or(r.Committed.ThreadID, r.Committed.Launch.ThreadID),
-		Deadline: r.Committed.Launch.Deadline, Login: r.Committed.Launch.Login, Exit: r.Committed.Exit}, nil
+		ID: r.ID, Ownership: ownership, ExecutionID: committed.Launch.ExecutionID,
+		AllocationID: committed.Launch.AllocationID, Incarnation: &committed.Incarnation,
+		Placement: committed.Launch.Placement, Phase: string(st.phase), Harness: committed.Launch.Harness,
+		InitialStage: string(st.phase), ThreadID: cmp.Or(committed.ThreadID, committed.Launch.ThreadID),
+		Deadline: committed.Launch.Deadline, Login: committed.Launch.Login, Exit: committed.Exit}, nil
 }
 
 // resolveSession maps a session or execution ID to the execution to act on
-// and, when catalogued, its durable session. An execution belonging to a
-// catalogued session must still be that session's current writer.
-func (s *Service) resolveSession(id string) (string, string, error) {
+// and, when catalogued, its durable session. action is the command, which
+// the session's state may refuse (nextSteps), whichever ID names it. An
+// execution belonging to a catalogued session must still be that session's
+// current writer, except that cancel reaches one the session never recorded
+// (see unrecordedProblem); it then acts on that execution alone.
+func (s *Service) resolveSession(id, action string) (string, string, error) {
 	r, err := s.readCatalog(id)
 	if os.IsNotExist(err) {
 		execution, inspectErr := s.coordinator.Inspect(id)
-		if inspectErr == nil && execution.Session != "" {
-			owner, ownerErr := s.readCatalog(execution.Session)
-			if ownerErr != nil {
-				return "", "", ownerErr
-			}
-			if owner.Current != id {
-				return "", "", errors.New("home: execution is no longer the current session writer")
-			}
-			return id, execution.Session, nil
-		}
 		if inspectErr != nil && !os.IsNotExist(inspectErr) {
 			return "", "", inspectErr
 		}
-		return id, "", nil
+		if inspectErr != nil || execution.Session == "" {
+			return id, "", nil
+		}
+		owner, ownerErr := s.readCatalog(execution.Session)
+		recorded := ownerErr == nil && (owner.Current == id || slices.Contains(owner.Executions, id))
+		switch {
+		case !recorded && action == ActionCancel && (ownerErr == nil || os.IsNotExist(ownerErr)):
+			return id, "", nil
+		case ownerErr != nil:
+			return "", "", ownerErr
+		case owner.Current != id:
+			return "", "", errors.New("home: execution is no longer the current session writer")
+		}
+		r, id = owner, execution.Session
+	} else if err != nil {
+		return "", "", err
 	}
+	st, _, err := s.sessionState(r)
 	if err != nil {
 		return "", "", err
 	}
+	if err = refusal(id, st, action); err != nil {
+		return "", id, err
+	}
 	if r.Current == "" {
-		return "", id, stoppedProblem(r)
+		// The table refuses every command that resolves a session to its
+		// execution once the session has none.
+		return "", id, fmt.Errorf("home: session %s has no current execution", id)
 	}
 	return r.Current, id, nil
 }
 
 // lockSessionExecution resolves id like resolveSession and, for a catalogued
 // session, holds its lock while the execution is still its current writer.
-func (s *Service) lockSessionExecution(id string) (string, string, func(), error) {
-	execution, sessionID, err := s.resolveSession(id)
+func (s *Service) lockSessionExecution(id, action string) (string, string, func(), error) {
+	execution, sessionID, err := s.resolveSession(id, action)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -600,7 +657,7 @@ func (s *Service) lockSessionExecution(id string) (string, string, func(), error
 	if err != nil {
 		return "", "", nil, err
 	}
-	current, _, err := s.resolveSession(id)
+	current, _, err := s.resolveSession(id, action)
 	if err != nil || current != execution {
 		unlock()
 		if err == nil {
@@ -636,7 +693,7 @@ func (s *Service) Move(ctx context.Context, id, operation, destination string) (
 	if err := s.moveDestinationProblem(destination); err != nil {
 		return Status{}, err
 	}
-	execution, sessionID, unlock, err := s.lockSessionExecution(id)
+	execution, sessionID, unlock, err := s.lockSessionExecution(id, ActionMove)
 	if err != nil {
 		return Status{}, err
 	}
@@ -656,7 +713,7 @@ func (s *Service) Move(ctx context.Context, id, operation, destination string) (
 // Recover finishes the current execution's pending operation. A stop it
 // finishes, or a start or move its deadline ends, leaves the session stopped.
 func (s *Service) Recover(ctx context.Context, id string) (Status, error) {
-	execution, sessionID, unlock, err := s.lockSessionExecution(id)
+	execution, sessionID, unlock, err := s.lockSessionExecution(id, ActionRecover)
 	if err != nil {
 		return Status{}, err
 	}
@@ -690,7 +747,7 @@ func (s *Service) settledStatus(sessionID string, status Status, err error) (Sta
 }
 
 func (s *Service) Cancel(ctx context.Context, id, operation string) (Status, error) {
-	execution, sessionID, err := s.resolveSession(id)
+	execution, sessionID, err := s.resolveSession(id, ActionCancel)
 	if err != nil {
 		return Status{}, err
 	}
@@ -710,13 +767,13 @@ func (s *Service) Cancel(ctx context.Context, id, operation string) (Status, err
 	// blocked resume, before admit waits on the durable session's lock.
 	admit := func() (func(), error) {
 		if sessionID == "" {
-			return func() {}, nil
+			return s.lockUnrecordedCancel(execution)
 		}
 		unlock, lockErr := s.lockSession(sessionID)
 		if lockErr != nil {
 			return nil, lockErr
 		}
-		current, _, resolveErr := s.resolveSession(id)
+		current, _, resolveErr := s.resolveSession(id, ActionCancel)
 		if resolveErr != nil || current != execution {
 			unlock()
 			return nil, errors.New("home: cancellation target is no longer the current writer")
@@ -731,8 +788,36 @@ func (s *Service) Cancel(ctx context.Context, id, operation string) (Status, err
 	return executionStatus(r), err
 }
 
+// lockUnrecordedCancel admits the cancellation of an execution no session
+// records. For an execution of a session, it holds that session's lock and
+// checks again under it that the session does not record the execution: a
+// resume records its new execution under that lock, so a cancellation never
+// takes one a resume is about to start. An execution with no session needs
+// no lock.
+func (s *Service) lockUnrecordedCancel(id string) (func(), error) {
+	execution, err := s.coordinator.Inspect(id)
+	if err != nil {
+		return nil, err
+	}
+	if execution.Session == "" {
+		return func() {}, nil
+	}
+	unlock, recorded, err := s.lockUnrecorded(execution)
+	if err != nil {
+		return nil, err
+	}
+	if recorded {
+		// A resume recorded it meanwhile: a repeated cancel reaches it as
+		// the session's own execution.
+		unlock()
+		return nil, rejectedError(fmt.Sprintf("home: session %s now records execution %s; run the cancellation again",
+			execution.Session, id))
+	}
+	return unlock, nil
+}
+
 func (s *Service) Attach(ctx context.Context, id string, input io.Reader, output io.Writer) error {
-	execution, _, err := s.resolveSession(id)
+	execution, _, err := s.resolveSession(id, ActionAttach)
 	if err != nil {
 		return err
 	}

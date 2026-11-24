@@ -47,8 +47,12 @@ type placementFixture struct {
 	// lostPrepare prepares the visit, then loses the reply once.
 	lostPrepare bool
 	// turnless stops a visit from a workspace with no conversation.
-	turnless                    bool
-	exited                      *session.Exit
+	turnless bool
+	exited   *session.Exit
+	// exitedErr fails Exited; blockExited makes it wait for its context, as
+	// an executor that cannot be reached does.
+	exitedErr                   error
+	blockExited                 bool
 	rejectActivate, failInspect bool
 	// failInspectOf fails Inspect of one allocation, as Docker does once its
 	// prepared supervisor stopped itself at the deadline.
@@ -63,6 +67,10 @@ type placementFixture struct {
 	abortEntered chan struct{}
 	// unreachableAbort fails Abort, as an unreachable Docker or cluster does.
 	unreachableAbort bool
+	// onStop, when non-nil, runs once as Stop is reached.
+	onStop func()
+	// stopErr, when set, fails every Stop before it reaches the visit.
+	stopErr error
 }
 
 func (p *placementFixture) prepare(l session.Launch) session.Incarnation {
@@ -143,6 +151,13 @@ func (p *placementFixture) Stop(ctx context.Context, l session.Launch, i session
 		<-ctx.Done()
 		return session.Stopped{}, ctx.Err()
 	}
+	if hook := p.onStop; hook != nil {
+		p.onStop = nil
+		hook()
+	}
+	if p.stopErr != nil {
+		return session.Stopped{}, p.stopErr
+	}
 	r := p.rows[l.AllocationID]
 	if r.Incarnation != i {
 		return session.Stopped{}, errors.New("wrong stop incarnation")
@@ -179,7 +194,14 @@ func (p *placementFixture) receipt(l session.Launch, i session.Incarnation) *ses
 
 // Abort fences the writer and seals its usage, as the Docker placement does
 // even when an earlier graceful stop could not seal it.
-func (p *placementFixture) Exited(_ context.Context, l session.Launch, i session.Incarnation) (bool, error) {
+func (p *placementFixture) Exited(ctx context.Context, l session.Launch, i session.Incarnation) (bool, error) {
+	if p.blockExited {
+		<-ctx.Done()
+		return false, ctx.Err()
+	}
+	if p.exitedErr != nil {
+		return false, p.exitedErr
+	}
 	r := p.rows[l.AllocationID]
 	return p.exited != nil && r.Incarnation == i && r.State == session.PlacementActive, nil
 }
@@ -781,11 +803,11 @@ func TestExitedHarnessFailsTheSessionWithItsOutput(t *testing.T) {
 		t.Fatalf("attach to an exited harness: %v", attach)
 	}
 	status, err := s.Status(id)
-	if err != nil || status.Phase != stageFailed || status.Exit == nil || status.Exit.Code != 2 ||
+	if err != nil || status.Phase != string(PhaseFailed) || status.Exit == nil || status.Exit.Code != 2 ||
 		!strings.Contains(status.Exit.Output, "--bad") {
 		t.Fatalf("failed status: %+v %v", status, err)
 	}
-	if stopped, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil || stopped.Phase != stageFailed {
+	if stopped, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil || stopped.Phase != string(PhaseFailed) {
 		t.Fatalf("stop of a failed session: %+v %v", stopped, err)
 	}
 	local.exited = nil
@@ -809,7 +831,7 @@ func TestDeadlineStopRetainsTheSession(t *testing.T) {
 		t.Fatalf("deadline stop not settled: %v %v", settled, err)
 	}
 	status, err := s.Status(id)
-	if err != nil || status.Phase != stageRetained || status.Exit == nil || !status.Exit.Deadline {
+	if err != nil || status.Phase != string(PhaseRetained) || status.Exit == nil || !status.Exit.Deadline {
 		t.Fatalf("deadline status: %+v %v", status, err)
 	}
 	if problem := s.attachProblem(t.Context(), id); problem == nil || !strings.Contains(problem.Error(), "is retained") {

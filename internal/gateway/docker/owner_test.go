@@ -469,6 +469,36 @@ func TestRevokeFromInitializingKeepsSealPossible(t *testing.T) {
 	}
 }
 
+// A grant left initializing is revoked after its deadline, and still seals.
+// Revoke finishes the accounts first, which is the work initialized does, so
+// a deadline check on that step would leave the grant with no exit; the
+// table test sees only revoke's own row.
+func TestRevokeFromInitializingAfterDeadline(t *testing.T) {
+	f := newOwner(t)
+	ledger := &failingInitialization{Ledger: f.ledger, fail: true}
+	if err := f.owner.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f.config.Ledger = ledger
+	owner, err := gatewaydocker.Open(f.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.owner = owner
+	if _, err = f.owner.Initialize(t.Context(), f.launch, f.instance); err == nil {
+		t.Fatal("initialization succeeded without accounting")
+	}
+	ledger.fail = false
+	late := f.launch.Deadline.Add(time.Hour)
+	gatewaydocker.SetClock(f.owner, func() time.Time { return late })
+	if err = f.owner.Revoke(t.Context(), f.launch, f.instance); err != nil {
+		t.Fatalf("revoke of an initializing grant after the deadline: %v", err)
+	}
+	if _, err = f.owner.Seal(t.Context(), f.launch, f.instance); err != nil {
+		t.Fatalf("seal after the deadline: %v", err)
+	}
+}
+
 // Revoking a grant that was never initialized reports it missing, so a
 // cancelled preparation can tell it had nothing to revoke.
 func TestRevokeMissingGrantReportsAbsence(t *testing.T) {

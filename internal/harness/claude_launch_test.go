@@ -12,16 +12,19 @@ import (
 )
 
 const (
+	storedLogin         = `{"claudeAiOauth":{"refreshToken":"stored"}}`
+	refreshedLogin      = `{"claudeAiOauth":{"refreshToken":"refreshed"}}`
 	claudeLaunchScript  = "launch.py"
 	claudeAPIKeyCase    = "api-key"
 	claudeErrorCase     = "error"
 	claudeAnswer        = "Fixture answer"
 	claudeMalformedCase = "malformed"
+	unfinishedStoreCase = "sign-in-unfinished-store"
 )
 
 // fakeClaude checks the stock launch, then behaves as FIXTURE_CASE asks.
 const fakeClaude = `
-import json, os, sys
+import json, os, signal, sys, time
 from pathlib import Path
 contract = os.environ["FIXTURE_CONTRACT"]
 args = sys.argv[1:]
@@ -35,11 +38,28 @@ config = Path(os.environ["CLAUDE_CONFIG_DIR"])
 assert config == Path(os.environ["HOME"]) / ".claude"
 credentials = config / ".credentials.json"
 scenario = os.environ["FIXTURE_CASE"]
-if scenario.startswith("sign-in"):
+if scenario == "sign-in-unfinished-store":
+    assert not credentials.exists(), credentials.read_text()
+elif scenario.startswith("sign-in"):
     assert "ANTHROPIC_API_KEY" not in os.environ
-    assert credentials.read_text() == "stored-login"
-    if scenario == "sign-in-refresh":
-        credentials.write_text("refreshed-login")
+    assert credentials.read_text() == '{"claudeAiOauth":{"refreshToken":"stored"}}'
+    if scenario in ("sign-in-refresh", "sign-in-killed", "sign-in-signalled"):
+        credentials.write_text('{"claudeAiOauth":{"refreshToken":"refreshed"}}')
+    if scenario == "sign-in-half-written":
+        credentials.write_text('{"claudeAiOauth":{"refreshTo')
+    if scenario == "sign-in-removed":
+        credentials.unlink()
+    if scenario == "sign-in-empty-object":
+        credentials.write_text("{}")
+    if scenario == "sign-in-killed":
+        # Ended by the helper's forwarded signal before any sync copied its
+        # login, exiting 0 as a client that handles the signal would, so only
+        # the record made before forwarding it keeps the login out.
+        signal.signal(signal.SIGTERM, lambda *_: os._exit(0))
+        Path(contract, "ready").write_text("")
+        time.sleep(30)
+    if scenario == "sign-in-signalled":
+        os.kill(os.getpid(), signal.SIGKILL)
 else:
     assert os.environ["ANTHROPIC_API_KEY"] == "sproozi-local-placeholder"
 if scenario == "proxy":
@@ -143,8 +163,14 @@ func TestClaudeLaunchPublishesOnlyASuccessfulResult(t *testing.T) {
 	}
 }
 
+// A refresh reaches the store. A login file Claude Code left cut short,
+// removed or emptied as it exited does not: none is a sign-out made while it
+// ran. A store another writer left unfinished is not copied into Claude
+// Code, which starts without a login.
 func TestClaudeLaunchKeepsTheLoginStoreInStep(t *testing.T) {
-	for _, scenario := range []string{"sign-in", "sign-in-refresh"} {
+	const unfinishedStore = `{"claudeAiOauth":{"refre`
+	for _, scenario := range []string{"sign-in", "sign-in-refresh", "sign-in-half-written", "sign-in-removed",
+		"sign-in-empty-object", unfinishedStoreCase} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 			f := newClaudeFixture(t, scenario, "--model", "fixture-model")
@@ -152,13 +178,23 @@ func TestClaudeLaunchKeepsTheLoginStoreInStep(t *testing.T) {
 				t.Fatal(err)
 			}
 			store := filepath.Join(f.signIn, ".credentials.json")
-			if err := os.WriteFile(store, []byte("stored-login"), 0o600); err != nil {
+			want := storedLogin
+			switch scenario {
+			case "sign-in-refresh":
+				want = refreshedLogin
+			case unfinishedStoreCase:
+				want = unfinishedStore
+			}
+			initial := storedLogin
+			if scenario == unfinishedStoreCase {
+				initial = unfinishedStore
+			}
+			if err := os.WriteFile(store, []byte(initial), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			if output, err := f.cmd.CombinedOutput(); err != nil {
 				t.Fatalf("%v: %s", err, output)
 			}
-			want := map[string]string{"sign-in": "stored-login", "sign-in-refresh": "refreshed-login"}[scenario]
 			if data, _ := os.ReadFile(store); string(data) != want {
 				t.Fatalf("store holds %q, want %q", data, want)
 			}
@@ -175,13 +211,13 @@ func TestClaudeLaunchOnlyReadsAReadOnlyStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := filepath.Join(f.signIn, ".credentials.json")
-	if err := os.WriteFile(store, []byte("stored-login"), 0o400); err != nil {
+	if err := os.WriteFile(store, []byte(storedLogin), 0o400); err != nil {
 		t.Fatal(err)
 	}
 	if output, err := f.cmd.CombinedOutput(); err != nil {
 		t.Fatalf("%v: %s", err, output)
 	}
-	if data, _ := os.ReadFile(store); string(data) != "stored-login" {
+	if data, _ := os.ReadFile(store); string(data) != storedLogin {
 		t.Fatalf("a read-only store changed: %q", data)
 	}
 }

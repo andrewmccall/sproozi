@@ -28,6 +28,7 @@ type CodexState struct {
 // CaptureCodexState selects one native rollout after the supervisor has stopped
 // every native writer. A completed-turn marker alone does not prove process stop.
 // Only the selected native session file is selected; no home or index DB is copied.
+// A final row the stopped writer did not finish is left out (stoppedJournal).
 func CaptureCodexState(home, threadID string, maxBytes int64) (CodexState, error) {
 	if !codexThreadID.MatchString(threadID) || maxBytes <= 0 {
 		return CodexState{}, fmt.Errorf("invalid Codex checkpoint selection")
@@ -36,10 +37,10 @@ func CaptureCodexState(home, threadID string, maxBytes int64) (CodexState, error
 	var result CodexState
 	err := filepath.WalkDir(root, func(name string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return walkErr
+			return stateFileError(walkErr)
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("native session symlinks are unsupported")
+			return refusedState(fmt.Errorf("native session symlinks are unsupported"))
 		}
 		if entry.IsDir() || filepath.Ext(name) != ".jsonl" {
 			return nil
@@ -48,36 +49,37 @@ func CaptureCodexState(home, threadID string, maxBytes int64) (CodexState, error
 			return nil
 		}
 		if result.ThreadID != "" {
-			return fmt.Errorf("ambiguous native thread state")
+			return refusedState(fmt.Errorf("ambiguous native thread state"))
 		}
 		info, err := entry.Info()
 		if err != nil {
-			return err
+			return stateFileError(err)
 		}
 		if !info.Mode().IsRegular() || info.Size() > maxBytes {
-			return fmt.Errorf("native state exceeds checkpoint limit")
+			return refusedState(fmt.Errorf("native state exceeds checkpoint limit"))
 		}
 		data, err := os.ReadFile(name)
 		if err != nil {
-			return err
+			return stateFileError(err)
 		}
 		if int64(len(data)) > maxBytes {
-			return fmt.Errorf("native state exceeds checkpoint limit")
+			return refusedState(fmt.Errorf("native state exceeds checkpoint limit"))
 		}
 		relative, err := filepath.Rel(home, name)
 		if err != nil {
 			return err
 		}
-		result = CodexState{ThreadID: threadID, Path: filepath.ToSlash(relative), Rollout: data}
+		result = CodexState{ThreadID: threadID, Path: filepath.ToSlash(relative), Rollout: stoppedJournal(data)}
 		workspace, _, err := inspectCodexState(result, maxBytes)
 		result.Workspace = workspace
-		return err
+		return refusedState(err)
 	})
 	if err != nil {
 		return CodexState{}, err
 	}
 	if result.ThreadID == "" {
-		return CodexState{}, fmt.Errorf("native thread state is unavailable")
+		// The agent can delete its own rollout before it exits.
+		return CodexState{}, refusedState(fmt.Errorf("native thread state is unavailable"))
 	}
 	return result, nil
 }

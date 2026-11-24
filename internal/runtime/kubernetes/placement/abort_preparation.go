@@ -66,7 +66,13 @@ func (p *Placement) AbortPreparation(ctx context.Context, l session.Launch) erro
 	defer unlock()
 	ctx, cancel := context.WithTimeout(ctx, p.abortWait)
 	defer cancel()
+	// Like Abort, this ends a visit, so it continues from the facts of a
+	// contradicted record that hold, and saves the record as corrected
+	// (settling).
 	local, err := p.load(l)
+	var contradicted *contradiction
+	corrected := errors.As(err, &contradicted)
+	err = forgiven(err)
 	unseen := os.IsNotExist(err)
 	if unseen {
 		if err = p.validateInput(l, l.ThreadID == "" && l.CheckpointDigest == ""); err != nil {
@@ -81,6 +87,26 @@ func (p *Placement) AbortPreparation(ctx context.Context, l session.Launch) erro
 	r, found, err := p.preparationRegistration(ctx, local)
 	if err != nil {
 		return err
+	}
+	var registration *registry.Record
+	if found {
+		// The registration found is this launch's, even when a crash or an
+		// unseen launch left the record without its reference; the
+		// tombstone records the reference when it was lost.
+		registration = &r
+		checked := local
+		checked.Reference = r.Reference
+		checked, err = checked.check(registration)
+		corrected = corrected || p.noted(err) != nil
+		if !corrected {
+			checked.Reference = local.Reference
+		}
+		local = checked
+	}
+	if corrected {
+		if err = p.save(local, registration); err != nil {
+			return err
+		}
 	}
 	if err = p.saveTombstone(&local, unseen, r, found); err != nil || !found {
 		return err
@@ -153,10 +179,11 @@ func (p *Placement) saveTombstone(local *retained, unseen bool, r registry.Recor
 		return nil
 	}
 	local.PreparationAborted = true
-	if found {
-		local.Reference = r.Reference
+	if !found {
+		return p.save(*local, nil)
 	}
-	return p.save(*local)
+	local.Reference = r.Reference
+	return p.save(*local, &r)
 }
 
 func isConflict(err error) bool {
@@ -294,21 +321,4 @@ func (p *Placement) sandbox(ctx context.Context, r registry.Record) (*corev1.Pod
 		return nil, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	return &pod, nil
-}
-
-// neverScheduled reports a Pod no kubelet ever ran: being deleted, assigned
-// to no node and with no container ever started. The API server refuses to
-// bind a Pod that is being deleted to a node, so it never will run.
-func neverScheduled(pod *corev1.Pod) bool {
-	if pod.Spec.NodeName != "" || pod.DeletionTimestamp.IsZero() {
-		return false
-	}
-	for _, statuses := range [][]corev1.ContainerStatus{pod.Status.InitContainerStatuses, pod.Status.ContainerStatuses, pod.Status.EphemeralContainerStatuses} {
-		for _, c := range statuses {
-			if c.ContainerID != "" {
-				return false
-			}
-		}
-	}
-	return true
 }

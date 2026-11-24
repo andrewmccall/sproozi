@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -577,9 +578,18 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	// exited harness keeps a checkpoint only when a harness whose state proves
 	// completion, such as Codex, reported a completed conversation that
 	// validates; otherwise the session keeps its previous one.
-	if r.needsCapture(harness.ProvesCompletion(r.Launch.Harness)) {
-		if err = p.capture(ctx, &r); err != nil && r.Exited == nil {
-			return session.Stopped{}, err
+	if proves := harness.ProvesCompletion(r.Launch.Harness); r.needsCapture(proves) {
+		// An exited harness whose captured state does not validate keeps
+		// what the visit started from, and the discard is logged; any other
+		// failure fails the stop, and its retry captures again.
+		if err = p.capture(ctx, &r); err != nil {
+			_, onFailure := r.kept(proves)
+			if !session.FallsBack(ctx, err, onFailure) {
+				return session.Stopped{}, err
+			}
+			p.logf("Discarded the captured state of stopped visit %s of execution %s and kept the %s it started from: %v",
+				r.Launch.AllocationID, r.Launch.ExecutionID, map[session.Kept]string{session.KeptInput: "checkpoint",
+					session.KeptWorkspace: "workspace"}[onFailure], err)
 		}
 	}
 	if err = p.commit(&r, evStopped); err != nil {
@@ -919,6 +929,10 @@ func (p *Placement) quiesceNative(ctx context.Context, r *placementRecord, i ses
 		}
 		// Only a turnless first visit quiesces without a bound thread.
 		r.Turnless = thread == ""
+	} else if p.endedGracefully(ctx, *r, state) {
+		// A stop whose quiesce reply was lost, and whose own call did not
+		// see the container stop, as the Kubernetes placement decides.
+		r.Turnless = r.thread() == ""
 	} else if err = p.recordExit(ctx, r, i, state); err != nil {
 		return err
 	}
@@ -958,6 +972,20 @@ func (p *Placement) recordExit(ctx context.Context, r *placementRecord, i sessio
 	return p.save(*r)
 }
 
+// endedGracefully reports, for a stop that finds the agent container already
+// stopped, that this placement's own quiesce stopped it and its reply was
+// lost: a harness whose state proves completion, a supervisor that exited 0
+// and output, read, that holds no exit report. The supervisor writes one for
+// every other ending (ADR 0038, ADR 0062). A Claude Code container never
+// proves its turn, so its ending is always an exit.
+func (p *Placement) endedGracefully(ctx context.Context, r placementRecord, state Observation) bool {
+	if !harness.ProvesCompletion(r.Launch.Harness) || state.ExitCode != 0 {
+		return false
+	}
+	logs, err := p.engine.ExitLogs(ctx, *r.Agent)
+	return err == nil && !bytes.Contains(logs, []byte(harness.NativeExitReportPrefix))
+}
+
 // agentStops reports whether the agent container is observed stopped within
 // a few seconds, as it is when quiesce ended the supervisor before its reply
 // reached the caller.
@@ -979,6 +1007,28 @@ func (p *Placement) agentStops(ctx context.Context, agent Instance) bool {
 	return false
 }
 
+// captureFailure maps a failed capture-stopped command onto the shared rule
+// (session.FallsBack, ADR 0062). The helper's checkpoint.ExitStateRefused is
+// a refusal of the fenced state, session.ErrUncapturable. Its
+// ExitCaptureFailed, a Docker or exec failure, a killed helper and any other
+// code fail the stop, and its retry captures again. Code 1 is what a helper
+// image older than the codes returns for every failure, which cannot be told
+// apart: this placement keeps what it did before the codes and treats it as a
+// refusal, so an exited visit still finishes its stop keeping what it started
+// from, and a newer image says which it is. The docker CLI also exits 1 for
+// its own failures, so code 1 counts as the helper's only when the error
+// carries the helper's own failure line from its standard error; any other
+// code 1 fails the stop. The legacy mapping goes once images older than the
+// codes are no longer supported.
+func captureFailure(err error) error {
+	code, exited := checkpoint.HelperExitCode(err)
+	legacy := exited && code == 1 && strings.Contains(err.Error(), checkpoint.HelperFailurePrefix)
+	if exited && code == checkpoint.ExitStateRefused || legacy {
+		return fmt.Errorf("%w: %w", session.ErrUncapturable, err)
+	}
+	return err
+}
+
 // capture retains the stopped visit's checkpoint.
 func (p *Placement) capture(ctx context.Context, r *placementRecord) error {
 	if err := p.engine.VerifyManaged(ctx, *r.Helper, p.spec(*r, roleHelper)); err != nil {
@@ -986,14 +1036,16 @@ func (p *Placement) capture(ctx context.Context, r *placementRecord) error {
 	}
 	data, err := p.engine.CaptureCheckpoint(ctx, *r.Helper, p.config.Harness, r.thread(), r.Launch.IncludeIgnored, p.config.MaxCheckpointBytes)
 	if err != nil {
-		return err
+		return captureFailure(err)
 	}
+	// What came back is the fenced state's checkpoint: a failure of these
+	// checks is the state's, and capturing again finds the same.
 	if err = checkpoint.ValidateContinuity(data, p.config.Harness, p.config.InstructionDigest, p.config.MaxCheckpointBytes); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", session.ErrUncapturable, err)
 	}
 	meta, err := checkpoint.Inspect(data, p.config.MaxCheckpointBytes)
 	if err != nil || meta.Harness != r.Launch.Harness || meta.ThreadID != r.thread() {
-		return errors.New("docker capture identity mismatch")
+		return fmt.Errorf("%w: docker capture identity mismatch", session.ErrUncapturable)
 	}
 	if err = p.retain("out-"+meta.SHA256+".checkpoint", data); err != nil {
 		return err

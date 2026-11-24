@@ -2,9 +2,11 @@ package kubernetes
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 )
@@ -18,10 +20,27 @@ const sandboxNameserver = "127.0.0.1"
 // The controller resolves it, so the sandbox needs no DNS.
 type GatewayResolver func(ctx context.Context, host string) (string, error)
 
+// gatewayLookupTry bounds the first lookup of the gateway host. A cluster
+// resolver answers in milliseconds, but a lost DNS datagram holds a lookup
+// for the resolver's whole timeout, five seconds by default, and the
+// controller's only reconciler with it: every AgentRun waits. A first lookup
+// that reaches this bound is asked again, with the resolver's own bounds, so
+// a slow resolver still answers.
+var gatewayLookupTry = time.Second
+
 // LookupGateway resolves host with the controller's own resolver and prefers
 // an IPv4 address.
 func LookupGateway(ctx context.Context, host string) (string, error) {
-	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	return lookupGateway(ctx, net.DefaultResolver, host)
+}
+
+func lookupGateway(ctx context.Context, resolver *net.Resolver, host string) (string, error) {
+	first, cancel := context.WithTimeout(ctx, gatewayLookupTry)
+	addrs, err := resolver.LookupIPAddr(first, host)
+	if err != nil && errors.Is(first.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+		addrs, err = resolver.LookupIPAddr(ctx, host)
+	}
+	cancel()
 	if err != nil {
 		return "", err
 	}

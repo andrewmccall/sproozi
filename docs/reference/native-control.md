@@ -50,7 +50,25 @@ Code and Copilot are always stopped by a kill; the same waits apply to its
 confirmation. A harness that exited by itself instead keeps its own exit code
 and reason. If the turn observed after the kill differs, or the kill is not
 confirmed, `quiesce` replies with an error and the supervisor reports the
-cause `failed`; if the deadline passes first, the cause `deadline`.
+cause `failed`; if the deadline passes first, the cause `deadline`. If a
+`SIGTERM` or the deadline kills Codex while `quiesce` is asking it to quit,
+or kills a turnless first visit, the reply is `stopping` with an error naming
+that cause, as the exit report does, and the supervisor exits nonzero.
+Claude Code and Copilot are ended by a kill once their turn is observed
+complete, so a forced stop's kill that lands first ends them the same way:
+the reply is `stopped` with the conversation and turn, which the placement
+keeps, while the exit report names the forced cause and the supervisor
+exits nonzero.
+
+A kill can cut short a row the harness was appending to its conversation
+file. The supervisor's observation refuses that file, so a Codex stop whose
+observation after the kill met it fails with the cause `failed` and the error
+`the forced stop left a native journal row unfinished; repeat the stop to
+complete it with the completed turns kept`. Capture, which runs only after the
+placement has confirmed the writer stopped, keeps the complete rows and leaves
+the unfinished final one out, then validates them as usual. Repeating the stop
+therefore finishes and keeps the visit's completed turns
+([ADR 0061](../adr/0061-a-stop-survives-an-interrupted-write.md)).
 
 A first visit with no task that the supervisor reports `turnless` records no
 ID: `quiesce` stops the harness and replies `stopped` with `turnless` and no
@@ -84,7 +102,7 @@ sproozi-native-exit {"code":2,"cause":"exited","thread":"<id>","output":"<last l
 | `cause` | Decided when | Session after the stop |
 | --- | --- | --- |
 | `exited` | The harness exited by itself, including after input was gated for a stop that had not yet asked it to quit. | `failed` for a nonzero code, otherwise `retained`. |
-| `deadline` | The supervisor or its terminal stopped the harness at the execution deadline. | `retained`, with `"deadline": true`. |
+| `deadline` | The supervisor stopped the harness at the execution deadline. | `retained`, with `"deadline": true`. |
 | `terminated` | The supervisor received `SIGTERM` or `SIGINT`, as when its container is stopped. | `retained`; also `"deadline": true` when the host stopped it at the deadline. |
 | `failed` | A graceful stop failed and the supervisor stopped the harness itself. | `retained`. |
 
@@ -98,13 +116,59 @@ Docker placement reads the agent container's output. The Kubernetes placement
 reads the native container's output through `pods/log` (at most 64 KiB) when
 it stops a visit whose native container already ended. It reports the
 container as ended through `Exited` while the visit is still active, so the
-remote executor's exit sweep can stop it
-([remote executors](remote-executors.md#interactive-sessions)). A first Codex
-visit that ended before any completed turn stops turnless; one whose report
-names a completed turn's thread keeps that conversation. A Claude Code visit
-binds no thread from a report: a first visit stops turnless, and a resumed
-visit's stop names the checkpoint it started from. The report is a
-workload diagnostic, never a writer fence or accounting fact.
+remote executor's exit sweep, or home's exit watcher through the placement
+protocol's `exited` action, can stop it
+([remote executors](remote-executors.md#noticing-an-exit)). A first visit of a
+harness whose state proves completion (Codex, Copilot) binds the thread a
+report names; the supervisor reports one only for Codex today. A Claude Code
+visit binds no thread from a report. The report is a workload diagnostic,
+never a writer fence or accounting fact.
+
+A stop whose quiesce reply was lost, of a harness whose state proves
+completion, is a graceful stop on both placements: the agent's container is
+seen to end within about ten seconds, or a later stop finds it ended with
+the supervisor's exit code 0 and no exit report in its output. No exit
+is recorded, and the stop captures as any graceful stop does. A Claude Code
+stop whose reply was lost is an exit
+([ADR 0062](../adr/0062-one-exit-rule-and-exits-over-the-wire.md)).
+
+### What a stopped visit keeps
+
+Once the writer is fenced and usage sealed, both placements decide what the
+stop keeps by one rule
+([ADR 0062](../adr/0062-one-exit-rule-and-exits-over-the-wire.md)). "Started
+from" is the checkpoint a resumed visit started from, or, for a first visit,
+no checkpoint: the session keeps the workspace the visit started from.
+
+| How the visit ended | Kept | If the stopped state is refused | If the capture fails otherwise |
+| --- | --- | --- | --- |
+| Graceful stop, with a conversation | A new checkpoint | The stop fails | The stop fails |
+| Turnless first visit | What it started from | Nothing is captured | Nothing is captured |
+| Harness exited, its state proves completion (Codex, Copilot) and it has a conversation | A new checkpoint | What it started from; the stop finishes | The stop fails |
+| Harness exited, and its state does not prove completion (Claude Code) | What it started from, even when the visit bound a conversation before it exited | Nothing is captured | Nothing is captured |
+| Harness exited before any conversation | What it started from | Nothing is captured | Nothing is captured |
+
+The stopped state is refused when the checkpoint helper's `capture-stopped`
+exits 65, or when what it returned does not validate in the placement's own
+checks. The writer is fenced, so capturing again would be refused the same
+way. The helper's exit codes
+([checkpoint helper](../../cmd/checkpoint/README.md#capture-results)):
+
+| Code | Meaning | Docker | Kubernetes |
+| --- | --- | --- | --- |
+| 65 | The stopped state was refused: no completed turn, as when the agent left its turn unfinished; another conversation; a conversation file the agent deleted, made unreadable or replaced, or a native directory that fails the safety checks; a failed continuity check; a state over the checkpoint bound. | Refused | Refused |
+| 74 | The capture could not be carried out, such as a file it could not read. | The stop fails | The stop fails |
+| 1 | Any failure of a helper image older than these codes. Docker counts it only when the failure carries the helper's line `Checkpoint operation failed:`; the docker CLI's own code 1 fails the stop. | Refused, as before them | The stop fails, as before them |
+
+Everything else fails the stop too, and repeating it captures again: the
+stop's bound or an abort cutting the capture off, any other exit code or a
+killed helper, an exec or Docker failure, a failed write. A stop that kept
+what the visit started from still reports the visit's `exit`, and the
+placement logs `Discarded the captured state of stopped visit ALLOCATION of
+execution EXECUTION and kept the checkpoint it started from: ...` (or `the
+workspace`) to the service's or the executor's log. A stop that fails on
+every repeat, as a Kubernetes stop of a refused state with an older helper
+image does, ends with `cancel`, or with a newer image.
 
 ## Terminal attachment
 

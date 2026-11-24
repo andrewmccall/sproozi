@@ -7,7 +7,7 @@ import (
 )
 
 func validateResponse(action string, input request, r response, max int64) error {
-	if r.Version != protocolVersion || r.Error != "" || r.Waiting != "" || r.Executor != nil {
+	if r.Version != protocolVersion || r.Error != "" || r.Waiting != "" || r.Executor != nil || r.Exited && action != actionExited {
 		return errors.New("profile: invalid success response")
 	}
 	switch action {
@@ -15,9 +15,10 @@ func validateResponse(action string, input request, r response, max int64) error
 		if r.Incarnation == nil || !incarnationValid(*r.Incarnation) || r.Stopped != nil || r.Observation != nil || len(r.Checkpoint) > 0 {
 			return errors.New("profile: invalid prepared response")
 		}
-	case actionActivate, actionAbortPreparation:
+	case actionActivate, actionAbortPreparation, actionExited:
+		// Only an exited answer may carry its one field, checked above.
 		if r.Incarnation != nil || r.Stopped != nil || r.Observation != nil || len(r.Checkpoint) > 0 {
-			return errors.New("profile: invalid activation response")
+			return errors.New("profile: invalid " + action + " response")
 		}
 	case actionStop:
 		if r.Stopped == nil || r.Incarnation != nil || r.Observation != nil {

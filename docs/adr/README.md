@@ -98,6 +98,10 @@ also replaces ADR 0057's rule that an interactive session whose execution has
 not started by its deadline is cancelled: the session now stops with its work
 kept.
 
+ADR 0065 replaces ADR 0057's rule that an interactive session's unsettled stop
+or cancellation always waits for `recover`: once its project is revoked, the
+driver settles it as it settles a task's.
+
 | Decision | Topic |
 | --- | --- |
 | [0001](0001-mcp-capabilities-through-shared-gateway.md) | MCP access through the shared gateway. |
@@ -150,6 +154,12 @@ kept.
 | [0057](0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md) | The remote executor owns its sessions through the coordinator: the work catalogue keeps intent, project, executions, the task's result and the pull, and derives its phase from the coordinator's; work-token tasks take `workTokenMaxDuration`; `retainedBytes` bounds the executor's storage; stopped version 1 records stay readable. |
 | [0058](0058-lifecycle-records-declare-states-and-transitions.md) | Lifecycle records declare a typed phase validated on load and save, a `(from, event) → to` table with a deadline column, and one apply function for live code and recovery; the execution journal derives its phase from its structure and adopts it first. |
 | [0060](0060-no-state-waits-on-a-deadline-to-end.md) | No state waits on a deadline to end: a start or move that its deadline overtakes ends as `abandoned`, once nothing can run at its destination, and leaves the execution idle with its last checkpoint, so `resume` continues the session instead of `cancel` being the only way on. |
+| [0061](0061-a-stop-survives-an-interrupted-write.md) | A stop survives an interrupted write: capture keeps the rows a fenced writer finished; the login store's lock and a stop's save are bounded and a skipped save is logged; only a whole login, or a sign-out two syncs see while the harness runs, crosses between a login file and its store, nothing after a kill, and the store is rewritten so that a stopped write is never empty. |
+| [0062](0062-one-exit-rule-and-exits-over-the-wire.md) | One rule decides what a stopped visit keeps on Docker and Kubernetes: an exited visit whose stopped state the capture helper refuses, by its own exit code, keeps what it started from, any other capture failure is retried, a helper older than the codes keeps each placement's earlier behaviour, a lost quiesce reply is a graceful stop, a discard is logged, and a stopped Claude Code container is never captured; a first Kubernetes visit may keep no checkpoint after binding a conversation; an `exited` placement action lets home's bounded exit watcher stop a visit on a cluster, and an older executor reports no exits. |
+| [0063](0063-a-session-releases-executions-it-never-recorded.md) | A home session releases the executions it never recorded, which an interrupted `resume` leaves: one that never ran is cancelled and deleted at the session's next `resume` or `rm`, one that ran is kept and reached by `cancel` and `rm` of its own ID, and an unreadable journal is kept and logged. |
+| [0064](0064-the-supervisor-alone-stops-a-harness-at-its-deadline.md) | The supervisor alone acts on the execution's deadline: one `deadline` event, raised once by its watcher or a `quiesce` that finds it passed, unless the harness already exited by itself; `activate` checks it again just before the launch; the harness's terminal no longer has a deadline of its own. |
+| [0065](0065-a-revoked-project-settles-interactive-sessions.md) | A revoked project settles interactive sessions: the remote executor's driver carries out a held cancellation, or cancels for the revoked project, an interactive session whose stop or cancellation is unsettled, since its owner can no longer recover it. |
+| [0066](0066-a-contradicted-retained-record-refuses-work-and-never-blocks-an-end.md) | A contradicted retained record of a Kubernetes visit refuses work: `Prepare`, `Activate` and `Attach` answer `conflict`; `Inspect`, `Exited`, `Stop`, `Abort` and `AbortPreparation` continue from the facts that hold, take what the registration's phase proves from it, observe the rest again and never trust a forgotten fence. |
 
 ## Reserved numbers
 

@@ -69,6 +69,9 @@ type Service struct {
 	workSources map[string]WorkSource
 	// log receives the daemon's operator messages; nil discards them.
 	log io.Writer
+	// exitChecks holds the sessions whose exit check runs, and exitProblems
+	// the reason each failing one last logged (sweepExits).
+	exitChecks, exitProblems sync.Map
 	// images resolves Docker image IDs; CheckDocker uses it to reach the engine.
 	images imageResolver
 }
@@ -110,7 +113,7 @@ func executionStatus(r session.Record) Status {
 	if r.ID == "" {
 		return Status{}
 	}
-	out := Status{ID: cmp.Or(r.Session, r.ID), ExecutionID: r.ID, Harness: r.Harness, Ownership: "home",
+	out := Status{ID: cmp.Or(r.Session, r.ID), ExecutionID: r.ID, Harness: r.Harness, Ownership: ownershipHome,
 		Phase: string(r.Phase), InitialStage: string(r.Phase), ThreadID: r.ThreadID, Deadline: r.Deadline, Session: &r}
 	var launch *session.Launch
 	var incarnation *session.Incarnation
@@ -318,7 +321,7 @@ func (s *Service) catalogStartedLocked(r session.Record, maxDuration string) err
 	c := localSession{Version: 1, ID: r.ID, Source: ReservedHome, Operation: first.OperationID, Claimed: true,
 		Original: work.Export{ID: r.ID, Harness: r.Harness, OperationID: first.OperationID, Claimed: true},
 		Current:  r.ID, Executions: []string{r.ID}, MaxDuration: maxDuration}
-	if r.Phase == session.PhaseIdle && r.CancelOperation == "" {
+	if derive(nil, &r, s.coordinator.PastDeadline).stopped() {
 		if c.Committed, err = s.settledStop(c, r); err != nil {
 			return err
 		}

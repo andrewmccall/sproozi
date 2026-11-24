@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -291,6 +292,62 @@ func TestPlacementDeadlineRefusesOnlyEventsThatStartWork(t *testing.T) {
 	if err := (placementRecord{Phase: phaseStopped}).admit(evActivate, at); err == nil {
 		t.Fatal("admitted an undeclared event")
 	}
+}
+
+// No phase waits on the deadline to end (ADR 0060). Terminal means stopped,
+// aborted and preparation-aborting, whose release is a sub-state; an exit is
+// an event that admit accepts past the launch's deadline and that leads to a
+// different phase. Every other phase has one.
+func TestEveryPlacementPhaseHasAnExitAfterTheDeadline(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
+	terminal := []dockerPhase{phaseStopped, phaseAborted, phasePreparationAborting}
+	for _, p := range dockerPhases {
+		if slices.Contains(terminal, p) {
+			continue
+		}
+		r := placementRecord{Phase: p, Launch: session.Launch{Deadline: at}}
+		exit := false
+		for ev, rule := range placementTransitions {
+			if to, ok := rule.to[p]; ok && to != p && r.admit(ev, at) == nil {
+				exit = true
+			}
+		}
+		if !exit {
+			t.Errorf("phase %s has no exit after the deadline", p)
+		}
+	}
+}
+
+// A preparation that never completed is cancelled after its deadline: the
+// creating record's only exit, abort-preparation, is applied without admit,
+// so the table test cannot see a deadline check written into AbortPreparation
+// itself. The execution journal's abandon and cancel both end through it.
+func TestAbortPreparationOfCreatingRecordAfterDeadline(t *testing.T) {
+	t.Parallel()
+	f := newFakeDocker()
+	a := &fakeAuthority{engine: f}
+	p := openFixture(t, testutil.PrivateDir(t), f, a)
+	original := p.engine.execute
+	p.engine.execute = func(ctx context.Context, input []byte, max int, args []string) ([]byte, error) {
+		if args[0] == createCommand && strings.HasSuffix(args[2], "-"+roleAgent) {
+			return nil, errors.New("agent image unavailable")
+		}
+		return original(ctx, input, max, args)
+	}
+	l := fixtureLaunch(t, fixtureArtifact(t))
+	l.ThreadID, l.CheckpointDigest = "", ""
+	if _, err := p.Prepare(t.Context(), l, []byte("workspace-continuity")); err == nil {
+		t.Fatal("expected failed preparation")
+	}
+	if r, err := p.load(l); err != nil || r.Phase != phaseCreating {
+		t.Fatalf("fixture record: %+v %v", r, err)
+	}
+	p.now = func() time.Time { return l.Deadline.Add(time.Hour) }
+	if err := p.AbortPreparation(t.Context(), l); err != nil {
+		t.Fatalf("abort-preparation after the deadline: %v", err)
+	}
+	assertReleasedPreparation(t, p, f, l)
 }
 
 // Preparing a visit already prepared replays its incarnation after the

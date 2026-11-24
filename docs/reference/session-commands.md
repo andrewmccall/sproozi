@@ -197,8 +197,20 @@ session through the same path. A nonzero exit code leaves it `failed`;
 `attach` refuses with `session ID stopped because its agent exited with code
 N; see "sproozi status ID", then "sproozi resume ID" to continue it or
 "sproozi rm ID" to remove it`. Code 0 leaves it `retained`. Codex keeps the
-conversation of a completed turn it reported before exiting; otherwise the
-session keeps its previous checkpoint, or the workspace it started from.
+conversation of a completed turn it reported before exiting; otherwise, or
+when the capture helper refuses it, as for a turn it left unfinished, the
+session keeps its previous checkpoint, or the workspace it started from, and
+the service logs `Discarded the captured state of stopped visit …`. A capture
+that fails for any other reason fails the stop; `sproozi stop ID` tries
+again, and `sproozi cancel ID` ends a stop that cannot finish
+([what a stopped visit keeps](native-control.md#what-a-stopped-visit-keeps)).
+A stop that fails leaves the session `stopping` or `unknown-stop`. The
+service on this machine does not repeat it by itself, unlike a remote
+executor, which retries its own: run `sproozi stop ID` or `sproozi recover
+ID` to try again, or `sproozi cancel ID`.
+This holds on this machine and for a session moved to a cluster: the service
+asks the remote executor, and an executor older than this Sproozi reports no
+exits, so its sessions stay `active` until `stop`.
 
 A session with a deadline (`--max-duration`, or `maxDuration` in
 `config.json`; none by default) is stopped the same way when it reaches it, and
@@ -265,26 +277,68 @@ control](native-control.md#exit-reports)).
 
 A stopped session's phase is `retained`, or `failed` after its agent exited
 with an error. `resume` continues either; `attach`, `move`, `cancel` and
-`recover` refuse it with `session ID is stopped; "sproozi resume ID" continues
-it`, or the `failed` message above. `resume` of a running session fails with
-`session ID is running; attach to it with "sproozi attach ID", or stop it with
-"sproozi stop ID" before resuming`; of a stopping one, with `session ID is
-still stopping; run "sproozi stop ID" to finish, or "sproozi cancel ID" to
-force-stop it`. `attach` refuses a session that isn't running before it
-prints `Attached`. Each `resume` is a new execution, so the
-`executionId` changes while `id` and `threadId` stay the same.
+`recover` refuse it with `session ID is retained (stopped, with its work
+kept); "sproozi resume ID" continues it`, or the `failed` message above. A
+pull whose claim is not recorded yet is `importing`; every command but `pull`
+and `status` refuses it with `session ID is still being pulled; finish with
+"sproozi pull ID" first`. A stop whose record of the session could not be
+saved after its agent stopped, for example because the service's catalogue
+was full, still reads as `retained` or `failed` with that stop's checkpoint,
+and the next `resume`, `stop` or `rm` records it. Every other phase is the
+current execution's: `preparing`, `activating`, `active`, `stopping`,
+`unknown-stop`, `unknown-usage`, `cancelling` or `cancelled`; a session never
+reports `idle`.
+
+A command the session's phase does not allow is refused with one reply per
+state, which names the commands that work from it. A command that names the
+session's current execution instead of the session gets the same reply:
+
+| State | Refused | Reply |
+| --- | --- | --- |
+| `importing` | `resume`, `attach`, `stop`, `move`, `recover`, `cancel`, `rm` | `session ID is still being pulled; finish with "sproozi pull ID" first` |
+| `retained` | `attach`, `move`, `recover`, `cancel` | `session ID is retained (stopped, with its work kept); "sproozi resume ID" continues it` |
+| `failed` | `attach`, `move`, `recover`, `cancel` | `session ID stopped because its agent exited with code N; see "sproozi status ID", then "sproozi resume ID" to continue it or "sproozi rm ID" to remove it` |
+| `preparing` or `activating` | `resume`, `attach`, `rm` | `session ID is still starting or moving; run "sproozi recover ID" to finish that first, or "sproozi cancel ID" to stop it now` |
+| `preparing` or `activating` after its deadline | `attach`, `rm` | `session ID reached its deadline before it started; "sproozi resume ID" ends that start and continues the session with a new deadline, or, if the placement cannot show that nothing runs there, "sproozi cancel ID" records the cancellation and finishes it once the placement can show that` |
+| `active` | `resume`, `rm` | `session ID is running; attach to it with "sproozi attach ID", stop it with "sproozi stop ID", or force-stop it with "sproozi cancel ID"` |
+| `stopping`, `unknown-stop` or `unknown-usage`, of a stop | `resume`, `attach`, `rm` | `session ID is still stopping; run "sproozi stop ID" to finish, or "sproozi cancel ID" to force-stop it` |
+| the same, of a move | `resume`, `attach`, `rm` | `session ID is still stopping to move; run "sproozi recover ID" to finish the move, or "sproozi cancel ID" to force-stop it` |
+| `cancelling`, or `unknown-stop` or `unknown-usage` of a cancellation | `resume`, `attach`, `rm` | `session ID is being cancelled; run "sproozi recover ID" to finish the cancellation, then "sproozi rm ID" to remove it` |
+| `cancelled` | `resume`, `attach`, `stop` | `session ID was cancelled, so it cannot be stopped or resumed; remove it with "sproozi rm ID", and start new work with "sproozi run"` |
+
+The service carries out every command a state does not refuse. It handles
+some itself: `pull`, `stop` of a stopped session, which reports it stopped
+again, `resume` of one, which starts a new execution, and `rm`. The rest go
+to the session's execution, which may still refuse them with one of the
+replies listed after `rm`. `attach` refuses before it prints `Attached`.
+Each `resume` is a new execution, so the `executionId` changes while `id`
+and `threadId` stay the same.
+
+An interrupted `resume` can keep a new execution that the session never
+recorded. Nothing ran in it. It counts towards the service's 256 executions
+until the session's next `resume` or `rm`, which cancels and deletes it
+([ADR 0063](../adr/0063-a-session-releases-executions-it-never-recorded.md)).
+If that cancellation cannot finish, `resume` goes on and the service logs
+`Failed to release an execution session ID never recorded: …`, while `rm`
+refuses with `cancelling execution EXECUTION that session ID never recorded:
+…`; either tries again next time, so repeat it once Docker or the cluster is
+reachable. A journal the service cannot read, such as one a newer release
+wrote, is kept, and the service logs `Failed to read execution EXECUTION's
+journal FILE, so kept it: …` once. Since the service cannot tell which
+session such a journal belongs to, `rm` of its session goes ahead and leaves
+it, still counting towards the 256; `status` and `rm` of its ID fail to read
+it too. Remove it with the release that wrote it, or delete `FILE` once you
+know nothing runs from it.
 
 `rm ID` deletes a `retained`, `failed` or `cancelled` session: its record, its executions'
 journals, and the saved workspaces, checkpoints and profiles no other session
 uses. It keeps the accounting and grant records, and the service's record of
-each finished container. It refuses:
+each finished container. Besides the replies in the table above, it refuses:
 
 | Reply | Cause | Run |
 | --- | --- | --- |
-| `session ID is running; stop it with "sproozi stop ID" or "sproozi cancel ID" first` | The session has a running agent. | `sproozi stop ID` or `sproozi cancel ID`, then `rm`. |
-| `session ID has unfinished work (PHASE); run "sproozi recover ID", then remove it` | A stop, move or cancellation was interrupted, or its usage is not settled. | `sproozi recover ID`. |
-| `session ID is still being pulled; finish with "sproozi pull ID" before removing it` | A pull has not finished. | The same `pull` command. |
 | `another operation is in progress; run the command again shortly` | Another command on this session held it for more than five seconds. Operations on other sessions never delay `rm`. | `rm` again. |
+| `session ID has execution EXECUTION, which the session never recorded and which may hold work; it is kept until you remove it: see "sproozi status EXECUTION", run "sproozi cancel EXECUTION" if it still runs, then "sproozi rm EXECUTION", then remove the session` | The session has an execution it never recorded that ran. No command of this release leaves one. | The commands it names, then `rm ID`. `rm EXECUTION` of an unrecorded execution that has not settled replies the same. |
 
 When an earlier operation blocks a command, the service refuses it and names
 the command that unblocks it. Nothing was recorded, so there is no retry
@@ -300,7 +354,7 @@ hint. `ID` is the session and `OP` an operation.
 | `session: the writer stopped, but its usage is not finalized yet; recover again once the placement can finalize it` | `recover` of a cancellation whose usage could not be settled yet. | `sproozi recover ID` again; the service log has the cause. |
 | `session: the placement has not yet proved the writer stopped; recover again once it is reachable` | `recover` of a cancellation that could not confirm the agent stopped. | Restore Docker or the cluster, then `sproozi recover ID`. |
 | `session ID was cancelled, so it cannot be stopped or resumed; remove it with "sproozi rm ID", and start new work with "sproozi run"` | `stop`, `resume`, `move` or `attach` of a cancelled session. Nothing can continue it. | `sproozi rm ID`. |
-| `session ID is being cancelled; run "sproozi recover ID" to finish the cancellation, then "sproozi rm ID" to remove it` | `resume` while a cancellation is unfinished. | `sproozi recover ID`. |
+| `session ID now records execution EXECUTION; run the cancellation again` | `cancel EXECUTION` of an execution its session had not recorded, while a `resume` recorded it. Nothing was cancelled. | `sproozi cancel EXECUTION` again, or `sproozi cancel ID`. |
 
 When a Docker command the service runs fails, the error includes Docker's
 standard error, cut to its first 4096 bytes and marked ` [output truncated]`.
@@ -403,9 +457,10 @@ it. It takes no agent arguments after `--`.
 `pulled` session and everything its [remote
 executor](remote-executors.md#removing-sessions) keeps for it, and prints
 `Deleted session ID from cluster NAME.` It refuses a session that is
-starting, running, stopping, has unfinished work or is being pulled, with the
-replies [`rm`](#stopping-removing-and-recovering) gives on this machine, naming the commands
-with `--remote`: `session ID is running; stop it with "sproozi stop ID
+starting, running, stopping, has unfinished work or is being pulled, with
+these replies, which name the commands with `--remote`. They are not the
+replies `rm` gives on this machine, which come from the table
+[above](#stopping-removing-and-recovering): `session ID is running; stop it with "sproozi stop ID
 --remote" or "sproozi cancel ID --remote" first`, `session ID has unfinished
 work (PHASE); run "sproozi recover ID --remote", then remove it`, `session ID
 is PHASE; wait for it to finish, then remove it` and `session ID is still
@@ -510,6 +565,7 @@ from this machine shows only the executor's answer.
 | `writer fence remains unknown`, or `absent Pod has no retained writer fence` | `session profile: unavailable (HTTP 503)` | A Pod appeared and its agent container was not seen to stop within the 30 seconds, for example because its node is unreachable or the container never started. | Restore the node, then `recover`. |
 | `the session registration … was deleted, so its Pod cannot be fenced`, or `AgentRun … now has UID …; an administrator replaced it` | `session profile: conflict (HTTP 409)` | An administrator deleted the visit's registration or replaced its run. The message names the Pod label to check. | An administrator confirms no such Pod remains; the session cannot be recovered. |
 | `… is active, not a preparation` (or `stopping`, `stopped`, `cancelled`) | `session profile: conflict (HTTP 409)` | The visit may already have run, so it is not cancelled as a preparation. A coordinator never asks this; it points to a defect. | Report it. |
+| `the retained record of visit … ` followed by what it contradicts, ending `cancel this session` or `stop or cancel this session` | `session profile: conflict (HTTP 409)` | The executor's own record of the visit contradicts itself or the visit's registration: a corrupt write, a hand edit or an older executor. Nothing starts from it again ([ADR 0066](../adr/0066-a-contradicted-retained-record-refuses-work-and-never-blocks-an-end.md)). | `cancel` (or `stop` an interactive session), then `rm`. If the visit had stopped and the executor lost the checkpoint its stop kept, neither works until the executor's storage is restored. |
 | — | `the remote executor cannot abort a preparation that has not reported its Pod; it is older than this Sproozi` | The executor is from before this release. | Update the executor, then `recover ID`. |
 
 With `--json`, `status` and the session commands print the session:

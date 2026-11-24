@@ -4,12 +4,14 @@ package work
 import (
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/google/uuid"
 )
@@ -117,6 +119,55 @@ func TestWorkStatusRetainsSafeAsyncRecoveryCategory(t *testing.T) {
 	}
 	if status.CheckpointDigest != "" || status.ThreadID != "" {
 		t.Fatalf("refused preparation manufactured completion: %+v", status)
+	}
+}
+
+// contradictedRecord is a placement's contradicted record of a visit.
+type contradictedRecord struct{}
+
+func (contradictedRecord) Error() string {
+	return "placement: the retained record of visit V records a stop, but its session registration was never active"
+}
+
+func (contradictedRecord) Contradiction() string {
+	return "the retained record of visit V records a stop, but its session registration was never active"
+}
+
+func (contradictedRecord) Unwrap() []error {
+	return []error{session.ErrRecordContradicted, &profile.Rejection{Code: profile.CodeConflict}}
+}
+
+// A placement's contradicted record of the visit is permanent: the problem
+// states the contradiction alone, without the errors the coordinator wraps
+// it in, and says how to end the session: cancel a task, which cannot be
+// stopped, and stop or cancel an interactive session; never recover it.
+func TestWorkStatusNamesAContradictedPlacementRecord(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []Mode{"task", ModeInteractive} {
+		t.Run(string(mode), func(t *testing.T) {
+			t.Parallel()
+			c, p := fixture(t)
+			p.refusePrepare = fmt.Errorf("session: preparing under /private/executor/state: %w", contradictedRecord{})
+			o, err := Open(c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = o.Close() }()
+			want := "conflict: the retained record of visit V records a stop, but its session registration was never active; "
+			var id string
+			if mode == ModeInteractive {
+				v, err := o.Submit(t.Context(), interactiveRequest())
+				if err != nil {
+					t.Fatal(err)
+				}
+				id, want = v.ID, want+"stop or cancel this session"
+			} else {
+				id, want = submit(t, o).ID, want+"cancel this session"
+			}
+			if status := waitDriver(t, o, id); status.Problem != want {
+				t.Fatalf("problem of a contradicted placement record:\n got %q\nwant %q", status.Problem, want)
+			}
+		})
 	}
 }
 

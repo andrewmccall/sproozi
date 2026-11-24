@@ -87,3 +87,26 @@ func TestGrantDeadlineRefusesOnlyEventsThatStartWork(t *testing.T) {
 		t.Fatal("admitted an undeclared event")
 	}
 }
+
+// No phase waits on the deadline to end (ADR 0060). Terminal means revoked;
+// an exit is an event that admit accepts past the launch's deadline and that
+// leads to a different phase. Every other phase has one. The grant's other
+// deadline check, refusing to authenticate after it, records no event.
+func TestEveryGrantPhaseHasAnExitAfterTheDeadline(t *testing.T) {
+	at := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
+	for _, p := range grantPhases {
+		if p == revoked {
+			continue
+		}
+		r := record{Phase: p, Launch: session.Launch{Deadline: at}}
+		exit := false
+		for ev, rule := range grantTransitions {
+			if to, ok := rule.to[p]; ok && to != p && r.admit(ev, at) == nil {
+				exit = true
+			}
+		}
+		if !exit {
+			t.Errorf("phase %s has no exit after the deadline", p)
+		}
+	}
+}

@@ -16,7 +16,7 @@ func (s *Service) Stop(ctx context.Context, id, operation string) (Status, error
 		return Status{}, errors.New("home: stop operation UUID required")
 	}
 	if execution, err := s.coordinator.Inspect(id); err == nil && execution.Session != "" {
-		if _, _, err = s.resolveSession(id); err != nil {
+		if _, _, err = s.resolveSession(id, ActionStop); err != nil {
 			return Status{}, err
 		}
 		id = execution.Session
@@ -39,6 +39,14 @@ func (s *Service) Stop(ctx context.Context, id, operation string) (Status, error
 	defer unlock()
 	r, err = s.readCatalog(id)
 	if err != nil {
+		return Status{}, err
+	}
+	if err = s.refuseIn(r, ActionStop); err != nil {
+		return Status{}, err
+	}
+	// A stop the journal recorded but this entry did not is the stop asked
+	// for: retire it, and the request replays as for any stopped session.
+	if err = s.retireSettled(&r); err != nil {
 		return Status{}, err
 	}
 	if r.Current == "" {
@@ -88,14 +96,11 @@ func (s *Service) retire(r *localSession, execution session.Record) error {
 // or move (ADR 0060). Anything else stays current. The caller holds the
 // session's lock.
 func (s *Service) retireSettled(r *localSession) error {
-	if r.Current == "" {
-		return nil
-	}
-	execution, err := s.coordinator.Inspect(r.Current)
-	if err != nil || execution.Phase != session.PhaseIdle || execution.CancelOperation != "" {
+	st, current, err := s.sessionState(*r)
+	if err != nil || current == nil || !st.stopped() {
 		return err
 	}
-	return s.retire(r, execution)
+	return s.retire(r, *current)
 }
 
 // retireSettledSession is retireSettled for a session the caller has locked
@@ -116,11 +121,11 @@ func (s *Service) retireSettledSession(id string) error {
 // from what it kept (ADR 0060). A destination that did become active stays
 // current. The caller holds the session's lock.
 func (s *Service) endLate(ctx context.Context, r *localSession) error {
-	execution, err := s.coordinator.Inspect(r.Current)
+	st, execution, err := s.sessionState(*r)
 	if err != nil {
 		return err
 	}
-	if execution.Phase.Starting() && execution.CancelOperation == "" && s.coordinator.PastDeadline(execution) {
+	if st.overdue {
 		if _, err = s.coordinator.Recover(ctx, execution.ID); err != nil && !errors.Is(err, session.ErrDeadlinePassed) {
 			return err
 		}

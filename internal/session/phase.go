@@ -50,6 +50,10 @@ const (
 var phases = []Phase{PhaseIdle, PhasePreparing, PhaseActivating, PhaseActive, PhaseStopping,
 	PhaseUnknownStop, PhaseUnknownUsage, PhaseCancelling, PhaseCancelled}
 
+// Phases is every phase a record can have, for callers that must decide
+// something for each of them.
+func Phases() []Phase { return slices.Clone(phases) }
+
 func (p Phase) valid() bool {
 	return slices.Contains(phases, p)
 }

@@ -135,13 +135,7 @@ func trustCopilotWorkspace(path string) error {
 	case len(data) > maxSignInBytes:
 		return errors.New("copilot config.json exceeds its limit")
 	default:
-		var body []byte
-		for line := range bytes.SplitSeq(data, []byte{'\n'}) {
-			if !bytes.HasPrefix(bytes.TrimSpace(line), []byte("//")) {
-				body = append(body, line...)
-				body = append(body, '\n')
-			}
-		}
+		body := withoutCommentLines(data)
 		if len(bytes.TrimSpace(body)) != 0 {
 			if err = json.Unmarshal(body, &document); err != nil {
 				return fmt.Errorf("copilot config.json: %w", err)
@@ -203,7 +197,7 @@ func (s *server) copilotSession() string {
 func (s *server) observeCopilotTurn() (string, string, error) {
 	id := s.copilotSession()
 	s.mu.Lock()
-	settled := s.inputGeneration == 0 || s.inputSettled() || s.state == harness.NativeStopped
+	settled := s.inputGeneration == 0 || s.inputSettled() || s.life.phase.over()
 	maxBytes := s.config.RolloutMaxBytes
 	s.mu.Unlock()
 	if id == "" || !settled {

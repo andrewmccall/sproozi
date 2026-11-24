@@ -121,7 +121,11 @@ func TestTurnlessInitialVisitStopsWithoutCheckpoint(t *testing.T) {
 	}
 }
 
-func TestStopWithoutCheckpointNeedsUnboundInitialVisit(t *testing.T) {
+// Only a first visit stops without a checkpoint. One that bound a
+// conversation may, when its harness exited without proving that
+// conversation (ADR 0062); its receipt then never gains one. A resumed visit
+// always keeps one, and an unbound first visit never does.
+func TestStopWithoutCheckpointNeedsInitialVisit(t *testing.T) {
 	seals := map[api.CapabilityKind]budget.TrustedUsage{api.CapabilityModelInference: {Units: 1}}
 	t.Run("bound initial", func(t *testing.T) {
 		s, _ := registry(t, nil)
@@ -132,8 +136,15 @@ func TestStopWithoutCheckpointNeedsUnboundInitialVisit(t *testing.T) {
 		if _, err := s.Stop(t.Context(), r.Reference); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.CompleteStop(t.Context(), r.Reference, "", seals); err == nil {
-			t.Fatal("a visit with a native conversation stopped without a checkpoint")
+		stopped, err := s.CompleteStop(t.Context(), r.Reference, "", seals)
+		if err != nil || stopped.Receipt == nil || stopped.Receipt.CheckpointDigest != "" || stopped.NativeUUID == "" {
+			t.Fatalf("a bound first visit that kept nothing: %+v %v", stopped.Receipt, err)
+		}
+		if read, err := s.Get(t.Context(), r.Reference); err != nil || !reflect.DeepEqual(read.Receipt, stopped.Receipt) {
+			t.Fatalf("stored stop without a checkpoint: %v", err)
+		}
+		if _, err = s.CompleteStop(t.Context(), r.Reference, strings.Repeat("d", 64), seals); err == nil {
+			t.Fatal("a receipt without a checkpoint was amended with one")
 		}
 	})
 	t.Run("unbound initial with checkpoint", func(t *testing.T) {

@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/harness"
 	runtimekube "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/sandboxpod"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/google/uuid"
@@ -54,6 +56,13 @@ const fixtureWorker = "approved-worker"
 const fixtureTemplate = "approved"
 const fixturePolicy = "policy"
 
+// containerStatusUnknown is the kubelet's reason for a termination it made
+// up for a container it could no longer find.
+const containerStatusUnknown = "ContainerStatusUnknown"
+
+// unknownTerminationMessage is the kubelet's message for that termination.
+const unknownTerminationMessage = "The container could not be located when the pod was terminated"
+
 func fixtureTermination(containerID string, exitCode int32) corev1.ContainerState {
 	return corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
 		ContainerID: containerID, ExitCode: exitCode, FinishedAt: metav1.Now(), Reason: "Completed",
@@ -79,7 +88,7 @@ func TestWriterFenceRejectsSyntheticUnknownContainerTermination(t *testing.T) {
 	// retained, but synthetic termination carries no runtime ID or finish time.
 	pod.Status.ContainerStatuses[0].State = corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
 		ExitCode: 137, Reason: "ContainerStatusUnknown",
-		Message: "The container could not be located when the pod was terminated",
+		Message: unknownTerminationMessage,
 	}}
 	if err = kube.Status().Update(t.Context(), pod); err != nil {
 		t.Fatal(err)
@@ -117,7 +126,7 @@ func TestWriterFenceRejectsSyntheticUnknownContainerTermination(t *testing.T) {
 			candidate := pod.DeepCopy()
 			candidate.Status.ContainerStatuses[0].State = fixtureTermination(candidate.Status.ContainerStatuses[0].ContainerID, 0)
 			test.mutate(candidate.Status.ContainerStatuses[0].State.Terminated)
-			if got := terminated(candidate); got != test.want {
+			if got := sandboxpod.Observe(candidate).Agent.Ended(); got != test.want {
 				t.Fatalf("writer termination=%v, want %v", got, test.want)
 			}
 		})
@@ -139,6 +148,21 @@ type admissionClient struct {
 	reconcile func(context.Context, *api.AgentRun)
 	// patchErr fails the next patch once, as a crash before it would.
 	patchErr error
+	// podRead, when set, changes each Pod a Get reads, as a Pod the
+	// kubelet or a deletion changed between reads would read.
+	podRead atomic.Pointer[func(*corev1.Pod)]
+}
+
+func (c *admissionClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, options ...client.GetOption) error {
+	if err := c.Client.Get(ctx, key, obj, options...); err != nil {
+		return err
+	}
+	if pod, ok := obj.(*corev1.Pod); ok {
+		if read := c.podRead.Load(); read != nil {
+			(*read)(pod)
+		}
+	}
+	return nil
 }
 
 func (c *admissionClient) Create(ctx context.Context, obj client.Object, options ...client.CreateOption) error {
@@ -228,16 +252,35 @@ type protocolExecutor struct {
 	lostQuiesce                bool
 	// turnless makes the supervisor report a first visit with no native
 	// conversation once input is gated (ADR 0032).
-	turnless    bool
-	captureArgs []string
+	turnless bool
+	// pendingQuiesce makes the supervisor answer a quiesce with a turn
+	// still running: input stays gated and the harness keeps running.
+	pendingQuiesce bool
+	// captureErr makes the capture helper fail; captureFailures makes it
+	// fail that many times first. captureInvalid makes it return bytes that
+	// are not a checkpoint, as a captured state that does not validate.
+	captureErr      error
+	captureFailures int
+	// captureExit makes the capture helper end with that code;
+	// captureFrom runs the helper's capture on a fixture state instead.
+	captureExit    int
+	captureFrom    func(context.Context) ([]byte, error)
+	captureInvalid bool
+	captures       int
+	captureArgs    []string
 	// logs is the native container's output, where the supervisor writes
 	// its exit report.
 	logs []byte
+	// logsErr makes reading the native container's output fail.
+	logsErr error
 }
 
 func (e *protocolExecutor) Logs(_ context.Context, _, _, container string) ([]byte, error) {
 	if container != nativeContainer {
 		return nil, errors.New("unexpected container logs")
+	}
+	if e.logsErr != nil {
+		return nil, e.logsErr
 	}
 	return e.logs, nil
 }
@@ -249,36 +292,73 @@ func (e *protocolExecutor) Execute(ctx context.Context, namespace, pod, containe
 		}
 	}
 	if container == runtimekube.CaptureContainer {
-		switch args[1] {
-		case helperPrepareWorkspace:
-			if slices.Contains(args, "--instruction-digest") {
-				return errors.New("initial workspace restore cannot accept resume-only instructions")
-			}
-			data, err := io.ReadAll(input)
-			if err != nil || string(data) != string(e.initial) {
-				return errors.New("invalid initial input")
-			}
-			return json.NewEncoder(output).Encode(checkpoint.Metadata{Harness: e.meta.Harness, SHA256: fmt.Sprintf("%x", sha256.Sum256(data)), Bytes: len(data)})
-		case helperPrepare:
-			data, err := io.ReadAll(input)
-			if err != nil || string(data) != string(e.data) {
-				return errors.New("invalid input")
-			}
-			return json.NewEncoder(output).Encode(e.meta)
-		case helperCapture:
-			e.captureArgs = append([]string(nil), args...)
-			_, err := output.Write(e.data)
+		if handled, err := e.helper(ctx, namespace, pod, args, input, output); handled {
 			return err
-		case helperFinish:
-			e.finishes++
-			var actual corev1.Pod
-			if err := e.kube.Get(ctx, client.ObjectKey{Namespace: namespace, Name: pod}, &actual); err != nil {
-				return err
-			}
-			actual.Status.ContainerStatuses[1].State = fixtureTermination(actual.Status.ContainerStatuses[1].ContainerID, 0)
-			return e.kube.Status().Update(ctx, &actual)
 		}
 	}
+	return e.supervisor(ctx, namespace, pod, args, output)
+}
+
+// helper answers the fixed capture helper's commands, and reports false for
+// any other command.
+func (e *protocolExecutor) helper(ctx context.Context, namespace, pod string, args []string, input io.Reader, output io.Writer) (bool, error) {
+	switch args[1] {
+	case helperPrepareWorkspace:
+		if slices.Contains(args, "--instruction-digest") {
+			return true, errors.New("initial workspace restore cannot accept resume-only instructions")
+		}
+		data, err := io.ReadAll(input)
+		if err != nil || string(data) != string(e.initial) {
+			return true, errors.New("invalid initial input")
+		}
+		return true, json.NewEncoder(output).Encode(checkpoint.Metadata{Harness: e.meta.Harness, SHA256: fmt.Sprintf("%x", sha256.Sum256(data)), Bytes: len(data)})
+	case helperPrepare:
+		data, err := io.ReadAll(input)
+		if err != nil || string(data) != string(e.data) {
+			return true, errors.New("invalid input")
+		}
+		return true, json.NewEncoder(output).Encode(e.meta)
+	case helperCapture:
+		e.captureArgs = append([]string(nil), args...)
+		e.captures++
+		if e.captureErr != nil {
+			return true, e.captureErr
+		}
+		if e.captureFailures > 0 {
+			e.captureFailures--
+			return true, errors.New("capture helper failed")
+		}
+		if e.captureInvalid {
+			_, err := output.Write([]byte(`{"version":2,"harness":"codex"}`))
+			return true, err
+		}
+		if e.captureExit != 0 {
+			return true, exitStatus(e.captureExit)
+		}
+		if e.captureFrom != nil {
+			data, err := e.captureFrom(ctx)
+			if err != nil {
+				return true, exitStatus(checkpoint.CaptureExitCode(err))
+			}
+			_, err = output.Write(data)
+			return true, err
+		}
+		_, err := output.Write(e.data)
+		return true, err
+	case helperFinish:
+		e.finishes++
+		var actual corev1.Pod
+		if err := e.kube.Get(ctx, client.ObjectKey{Namespace: namespace, Name: pod}, &actual); err != nil {
+			return true, err
+		}
+		actual.Status.ContainerStatuses[1].State = fixtureTermination(actual.Status.ContainerStatuses[1].ContainerID, 0)
+		return true, e.kube.Status().Update(ctx, &actual)
+	}
+	return false, nil
+}
+
+// supervisor answers the native supervisor's commands.
+func (e *protocolExecutor) supervisor(ctx context.Context, namespace, pod string, args []string, output io.Writer) error {
 	switch args[1] {
 	case string(harness.NativeActivate):
 		if !e.skipActivate {
@@ -293,6 +373,10 @@ func (e *protocolExecutor) Execute(ctx context.Context, namespace, pod, containe
 	case string(harness.NativeQuiesce):
 		if e.failQuiesce {
 			return errors.New("native completed turn remains unavailable")
+		}
+		if e.pendingQuiesce {
+			return json.NewEncoder(output).Encode(harness.NativeReply{Op: harness.NativeQuiesce, State: e.state,
+				ThreadID: fixtureThread, Waiting: "the native turn to complete"})
 		}
 		e.state = harness.NativeStopped
 		var actual corev1.Pod
@@ -398,7 +482,7 @@ func TestMoveStopWaitsForNativeTurnBeforeGatewayRevocationAndSeal(t *testing.T) 
 		if err != nil {
 			return err
 		}
-		if !terminated(pod) {
+		if !sandboxpod.Observe(pod).Agent.Ended() {
 			return errors.New("seal preceded actual writer stop")
 		}
 		events = append(events, "seal")
@@ -1004,7 +1088,7 @@ func TestDeleteRetainsPodUntilObservedTerminationAndPersistentFence(t *testing.T
 		t.Fatalf("early fence or seal: %+v %+v %v", local, r, err)
 	}
 	pod, err := p.exactPod(t.Context(), r)
-	if err != nil || pod.DeletionTimestamp.IsZero() || !running(pod, nativeContainer) ||
+	if err != nil || pod.DeletionTimestamp.IsZero() || !sandboxpod.Observe(pod).Agent.Running ||
 		!slices.Contains(pod.Finalizers, runtimekube.ManagedWriterFenceFinalizer) {
 		t.Fatalf("delete lost writer observation: %+v %v", pod, err)
 	}
@@ -1150,7 +1234,7 @@ func TestOldPartialPreparationObservesAndCancelsWithoutHelperOrAdmission(t *test
 		t.Fatal(err)
 	}
 	local.Reference = r.Reference
-	if err = p.save(local); err != nil {
+	if err = p.save(local, &r); err != nil {
 		t.Fatal(err)
 	}
 	run, err := p.ensureRun(t.Context(), r)
