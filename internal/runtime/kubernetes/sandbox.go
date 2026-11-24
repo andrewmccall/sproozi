@@ -78,8 +78,8 @@ var ErrInvalidRuntime = errors.New("cannot launch a sandbox")
 // SandboxClient abstracts Sandbox Pod lifecycle operations for unit-testable reconciliation.
 type SandboxClient interface {
 	// ValidateRuntime checks that rt can launch a sandbox. Run admission calls
-	// it so an unlaunchable runtime fails the run before it takes the active
-	// slot. Errors wrapping ErrInvalidRuntime are permanent.
+	// it so an unlaunchable runtime fails the run before it counts against a
+	// concurrency cap. Errors wrapping ErrInvalidRuntime are permanent.
 	ValidateRuntime(ctx context.Context, rt *sprooziv1alpha1.AgentRuntime) error
 
 	// Ensure creates the Sandbox Pod if it does not already exist. Idempotent.

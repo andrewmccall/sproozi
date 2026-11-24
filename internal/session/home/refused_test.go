@@ -32,9 +32,7 @@ func TestMoveRefusedByTheDestinationStopsTheSessionWithItsWork(t *testing.T) {
 	t.Parallel()
 	s, local, remote, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	remote.refuse = &session.StartRefused{Reason: testRefusal}
 	operation := uuid.NewString()
 	r := exchange(t, s, Request{Action: ActionMove, ID: id, OperationID: operation, Destination: testRemote})
@@ -63,9 +61,7 @@ func TestASessionWhoseMoveWasRefusedIsKeptUntilRemoved(t *testing.T) {
 	t.Parallel()
 	s, _, remote, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	remote.refuse = &session.StartRefused{Reason: testRefusal}
 	if _, err := s.Move(t.Context(), id, uuid.NewString(), testRemote); !errors.Is(err, session.ErrStartRefused) {
 		t.Fatalf("refused move: %v", err)
@@ -88,9 +84,7 @@ func TestUnprovenRefusedMoveNamesRetryAndCancel(t *testing.T) {
 	t.Parallel()
 	s, _, remote, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	remote.refuse = &session.StartRefused{Reason: testRefusal}
 	remote.unreachableAbort = true
 	r := exchange(t, s, Request{Action: ActionMove, ID: id, OperationID: uuid.NewString(), Destination: testRemote})

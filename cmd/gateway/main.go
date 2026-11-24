@@ -1226,7 +1226,7 @@ func validateModelUpstream(name, value string) error {
 }
 
 // warnSystemConfigWrites reports any grant that lets the gateway write the
-// ConfigMaps in sproozi-system that hold its own configuration (ADR 0041). It
+// ConfigMaps in sproozi-system that hold its own configuration (ADR 0045). It
 // changes nothing; an administrator removes the binding.
 func warnSystemConfigWrites(ctx context.Context, clients authentication.Interface, out io.Writer) {
 	for _, verb := range []string{"create", "update", "patch", "delete"} {
@@ -1240,7 +1240,7 @@ func warnSystemConfigWrites(ctx context.Context, clients authentication.Interfac
 		}
 		if review.Status.Allowed {
 			_, _ = fmt.Fprintf(out, "WARNING: the gateway can %s ConfigMaps in sproozi-system, "+
-				"which hold its own configuration; remove the Role or binding that grants it (ADR 0041)\n", verb)
+				"which hold its own configuration; remove the Role or binding that grants it (ADR 0045)\n", verb)
 			return
 		}
 	}

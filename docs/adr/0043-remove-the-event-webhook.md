@@ -37,7 +37,8 @@ Secret-reading Role and an audit event type to every install.
 This replaces ADR 0022 (HMAC Secrets in their own namespace) and ADR 0042
 (idempotent delivery), both [removed](README.md#removed) with it, and the
 replay-record part of
-[ADR 0017](0017-runtime-admission-and-replay-retention.md).
+ADR 0017, [removed](README.md#removed) in a later change; its runtime check at
+admission moved to [ADR 0027](0027-configurable-concurrent-admission.md).
 
 ## Alternatives
 

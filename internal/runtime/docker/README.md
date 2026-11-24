@@ -102,7 +102,7 @@ After `removed`, retried `Stop`, `Abort` and `Inspect` calls answer from the
 record without Docker. A removal failure leaves the recorded stop intact. The
 local service retries it with `ReleaseStopped` when it starts and every five
 minutes, so removal does not wait for another `Stop` or `Abort` that may never
-come ([ADR 0041](../../../docs/adr/0041-gateway-state-namespace-and-retained-state-owners.md)). A visit whose usage is
+come ([ADR 0020](../../../docs/adr/0020-docker-placement-removes-stopped-visits.md)). A visit whose usage is
 still unknown keeps its containers until an `Abort` retry seals it. See
 [ADR 0020](../../../docs/adr/0020-docker-placement-removes-stopped-visits.md).
 

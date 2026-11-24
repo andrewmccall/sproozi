@@ -11,6 +11,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/andrewmccall/sproozi/internal/privatefs/internal/durability"
 )
 
 func currentUser() (*windows.SID, error) {
@@ -303,7 +305,7 @@ func replaceFile(temp, target, _ string) error {
 	// readers open the new file. MoveFileEx can deny replacement during a read.
 	// Lock handles still omit delete sharing and cannot be replaced.
 	err = windows.SetFileInformationByHandle(windows.Handle(f.Fd()), windows.FileRenameInfoEx, &buffer[0], uint32(len(buffer)))
-	if err == nil {
+	if err == nil && !durability.Skipped() {
 		err = f.Sync()
 	}
 	err = errors.Join(err, f.Close())

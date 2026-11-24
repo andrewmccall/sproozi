@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -23,6 +25,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/privatefs/privatefstest"
 	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/workspace"
@@ -253,9 +256,19 @@ var template struct {
 	repo   string
 	data   []byte
 	digest string
+	// captured is the workspace archive Start would capture from the
+	// template repository (see startSetup).
+	captured []byte
 }
 
+// fixturePrefix begins the template directory's name, followed by the process
+// ID, so a run a timeout killed leaves a directory the next run removes.
+const fixturePrefix = "sproozi-home-fixture-"
+
 func TestMain(m *testing.M) {
+	// The tests write host-private files through privatefs; no test can
+	// observe a sync, and on macOS each one waits on every process's writes.
+	privatefstest.SkipSync()
 	code := m.Run()
 	if template.root != "" {
 		_ = os.RemoveAll(template.root)
@@ -268,7 +281,8 @@ func TestMain(m *testing.M) {
 func testWorkspace(t *testing.T) (string, []byte, string) {
 	t.Helper()
 	template.once.Do(func() {
-		root, err := os.MkdirTemp("", "sproozi-home-fixture-")
+		testutil.RemoveAbandoned(fixturePrefix)
+		root, err := testutil.FixtureDir(fixturePrefix)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -276,6 +290,11 @@ func testWorkspace(t *testing.T) (string, []byte, string) {
 		template.repo = filepath.Join(root, "repository")
 		createWorkspace(t, template.repo)
 		template.data, template.digest = testArtifact(t, template.repo)
+		captured, err := workspace.CaptureLocal(t.Context(), template.repo, nil, testLimit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		template.captured = captured
 		template.built = true
 	})
 	if !template.built {
@@ -303,6 +322,45 @@ func testWorkspace(t *testing.T) (string, []byte, string) {
 		t.Fatal(err)
 	}
 	return repo, bytes.Clone(template.data), template.digest
+}
+
+// startSetup is Start for a test whose subject is not the capture. Capturing
+// a workspace runs about nineteen Git processes, and every such test starts
+// from the same template, so the retained first execution is created from the
+// template's capture (taken once by testWorkspace) instead. Start then finds
+// that retained intent, the same path it takes when it recovers an
+// interrupted start, and carries out everything after the capture itself:
+// the intent checks, cataloguing and the first visit. Tests of the capture
+// (ignored-file selection, unusable workspaces, harness arguments, retried
+// starts) call Start directly.
+//
+// The launch is rebuilt here from createWorkspaceExecution's. Start itself
+// compares only Harness, OperationID, IncludeIgnored, HarnessArgs, Login,
+// CheckpointDigest and Session of it, so a drift in any other field would go
+// unnoticed by the starts. TestStartSetupLaunchMatchesStart covers the rest:
+// it compares every field of the two launches.
+func startSetup(t *testing.T, s *Service, id, operationID, repo string) {
+	t.Helper()
+	if template.captured == nil {
+		t.Fatal("startSetup needs testWorkspace to have built the template")
+	}
+	until, err := s.executionDeadline("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	local, err := s.localFor(s.config.Local.Harness)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := session.Launch{Harness: local.Harness, ExecutionID: id, OperationID: operationID,
+		AllocationID: uuid.NewString(), Epoch: 1, Placement: local.Name,
+		InstructionDigest: local.InstructionDigest, Deadline: until, Allowances: maps.Clone(s.config.Allowances)}
+	if _, err = s.createExecution(first, "", func() ([]byte, error) { return bytes.Clone(template.captured), nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Start(t.Context(), id, operationID, repo, "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func createWorkspace(t *testing.T, repo string) {
@@ -467,9 +525,7 @@ func TestInitialSessionImportRoundTripAndLostReplies(t *testing.T) {
 func TestRecoverFirstMoveRetainedBeforeRestart(t *testing.T) {
 	s, local, remote, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	local.lostStop = true
 	if _, err := s.Move(t.Context(), id, uuid.NewString(), testRemote); err == nil {
 		t.Fatal("lost stop reply succeeded")
@@ -563,9 +619,7 @@ func TestUnknownInitialUsageNeverStartsRemoteAndCanCancel(t *testing.T) {
 	t.Parallel()
 	s, local, remote, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	local.unknownUsage = true
 	if _, err := s.Move(t.Context(), id, uuid.NewString(), testRemote); err == nil {
 		t.Fatal("unknown initial usage admitted move")
@@ -799,9 +853,7 @@ func TestExitedHarnessFailsTheSessionWithItsOutput(t *testing.T) {
 	t.Parallel()
 	s, local, _, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	if settled, err := s.settleExit(t.Context(), id); err != nil || settled {
 		t.Fatalf("running harness settled as exited: %v %v", settled, err)
 	}
@@ -831,9 +883,7 @@ func TestDeadlineStopRetainsTheSession(t *testing.T) {
 	t.Parallel()
 	s, local, _, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	local.exited = &session.Exit{Code: 1, Deadline: true}
 	if settled, err := s.settleExit(t.Context(), id); err != nil || !settled {
 		t.Fatalf("deadline stop not settled: %v %v", settled, err)
@@ -852,9 +902,7 @@ func TestCancelledSessionPointsToRemove(t *testing.T) {
 	t.Parallel()
 	s, _, _, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	if _, err := s.Cancel(t.Context(), id, uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
@@ -867,5 +915,41 @@ func TestCancelledSessionPointsToRemove(t *testing.T) {
 		if !strings.Contains(r.Error, "cancelled") || !strings.Contains(r.Error, "sproozi rm "+id) {
 			t.Errorf("%s of a cancelled session replied %+v", q.Action, r)
 		}
+	}
+}
+
+// TestStartSetupLaunchMatchesStart requires the launch startSetup retains to
+// equal, field by field, the launch a direct Start retains. Fields are
+// compared by reflection, so one added to session.Launch later is compared
+// unless it is excluded here. Only what necessarily differs is excluded: the
+// IDs (random) and the
+// deadline (taken from the clock, so checked to be near instead).
+func TestStartSetupLaunchMatchesStart(t *testing.T) {
+	t.Parallel()
+	s, _, _, repo := testService(t)
+	direct, viaSetup := uuid.NewString(), uuid.NewString()
+	if _, err := s.Start(t.Context(), direct, uuid.NewString(), repo, "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	startSetup(t, s, viaSetup, uuid.NewString(), repo)
+	launch := func(id string) session.Launch {
+		r, err := s.coordinator.Inspect(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return *r.Operations[0].Launch
+	}
+	want, got := launch(direct), launch(viaSetup)
+	if want.Deadline.IsZero() || got.Deadline.Sub(want.Deadline).Abs() > time.Minute {
+		t.Fatalf("deadlines differ: Start %v, startSetup %v", want.Deadline, got.Deadline)
+	}
+	for _, name := range []string{"ExecutionID", "OperationID", "AllocationID", "Deadline"} {
+		for _, l := range []*session.Launch{&want, &got} {
+			f := reflect.ValueOf(l).Elem().FieldByName(name)
+			f.Set(reflect.Zero(f.Type()))
+		}
+	}
+	if !reflect.DeepEqual(want, got) {
+		t.Fatalf("startSetup retains a different launch than Start:\nStart:      %+v\nstartSetup: %+v", want, got)
 	}
 }

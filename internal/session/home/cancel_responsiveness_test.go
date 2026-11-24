@@ -18,9 +18,7 @@ import (
 func TestCancelInterruptsDisconnectedInitialMove(t *testing.T) {
 	s, local, remote, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	entered, aborted := holdStop(local)
 	moveCtx, releaseMove := context.WithCancel(t.Context())
 	defer releaseMove()
@@ -70,9 +68,7 @@ func TestCancelInterruptsDisconnectedInitialMove(t *testing.T) {
 func TestCancelInterruptsInitialRecovery(t *testing.T) {
 	s, local, remote, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	// The failed Stop retains the first move operation; Recover must wait for the
 	// same source's native turn and still allow a separate forced cancellation.
 	local.lostStop = true
@@ -104,9 +100,7 @@ func TestCancelIndependentInitialSessionWhileAnotherMoveIsHeld(t *testing.T) {
 	s, local, remote, repo := testService(t)
 	heldID, cancelledID := uuid.NewString(), uuid.NewString()
 	for _, id := range []string{heldID, cancelledID} {
-		if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-			t.Fatal(err)
-		}
+		startSetup(t, s, id, uuid.NewString(), repo)
 	}
 	entered, _ := holdStop(local)
 	ctx, release := context.WithCancel(t.Context())

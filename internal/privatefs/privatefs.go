@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/andrewmccall/sproozi/internal/privatefs/internal/durability"
 )
 
 // ErrLocked reports that Lock found the lock held, normally by another process
@@ -45,7 +47,9 @@ func ReadFile(path string, max int64) ([]byte, error) {
 
 // Replace flushes a private temporary file, then replaces a private regular file
 // in the same directory. Successful return includes the platform durability
-// operation. It does not establish hardware power-loss guarantees.
+// operation. It does not establish hardware power-loss guarantees. In a test
+// binary that called privatefstest.SkipSync it skips the file and directory
+// syncs and nothing else.
 func Replace(dir, leaf string, data []byte) error {
 	if !validLeaf(leaf) {
 		return errors.New("privatefs: ordinary filename required")
@@ -75,7 +79,7 @@ func Replace(dir, leaf string, data []byte) error {
 	temp := f.Name()
 	defer func() { _ = os.Remove(temp) }()
 	_, err = f.Write(data)
-	if err == nil {
+	if err == nil && !durability.Skipped() {
 		err = f.Sync()
 	}
 	err = errors.Join(err, f.Close())

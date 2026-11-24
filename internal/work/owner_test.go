@@ -25,6 +25,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/privatefs/privatefstest"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/google/uuid"
@@ -268,6 +269,9 @@ var template struct {
 }
 
 func TestMain(m *testing.M) {
+	// The tests write host-private files through privatefs; no test can
+	// observe a sync, and on macOS each one waits on every process's writes.
+	privatefstest.SkipSync()
 	code := m.Run()
 	if template.root != "" {
 		_ = os.RemoveAll(template.root)
@@ -275,8 +279,13 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// fixturePrefix begins the template directory's name, followed by the process
+// ID, so a run a timeout killed leaves a directory the next run removes.
+const fixturePrefix = "sproozi-work-fixture-"
+
 func buildTemplate() error {
-	root, err := os.MkdirTemp("", "sproozi-work-fixture-")
+	testutil.RemoveAbandoned(fixturePrefix)
+	root, err := testutil.FixtureDir(fixturePrefix)
 	if err != nil {
 		return err
 	}

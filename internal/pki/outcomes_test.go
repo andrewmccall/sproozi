@@ -480,12 +480,10 @@ func recordOutcome(t *testing.T, base string, ev outcomeEvent) string {
 
 func outcomeLines(t *testing.T) []string {
 	t.Helper()
-	bases := map[string]string{}
+	bases := buildStates(t)
 	lines := make([]string, 0, 1024)
 	for _, state := range outcomeStates() {
-		root := t.TempDir()
-		state.build(t, outcomeStore(t, root))
-		bases[state.name] = root
+		root := bases[state.name]
 		lines = append(lines, fmt.Sprintf("state %s | start | %s", state.name, describeStore(root, leafOf(root))))
 		for _, ev := range outcomeEvents() {
 			lines = append(lines, fmt.Sprintf("state %s | %s -> %s", state.name, ev.name, recordOutcome(t, root, ev)))
@@ -507,6 +505,7 @@ func outcomeLines(t *testing.T) []string {
 // generated from the store before its rotation record adopted ADR 0058's
 // pattern; each later difference is a deliberate change in its own commit.
 func TestStoreOutcomesMatchTheRecordedTable(t *testing.T) {
+	t.Parallel() // one of the largest tables; see sharedStates
 	lines := outcomeLines(t)
 	got := strings.Join(lines, "\n") + "\n"
 	if *updateOutcomes {

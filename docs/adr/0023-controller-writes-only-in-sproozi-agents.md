@@ -3,6 +3,11 @@
 Status: accepted
 Date: 2026-10-18
 
+Corrected 2026-11-24: `controller-sandbox-writer` also grants `create` on
+PersistentVolumeClaims, for the named login claims of ADR 0049
+(`config/agent-rbac/controller_sandbox_role.yaml`). The list of writes below is
+otherwise as installed.
+
 ## Problem and constraints
 
 The controller's ClusterRole granted create and delete on Pods,

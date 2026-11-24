@@ -22,6 +22,7 @@ var caNumber = regexp.MustCompile(`^ca-([1-9][0-9]*)\.(pem|key)$`)
 // untouched. Guards replaceable in record.go and the phaseRefused row of
 // evReplace in transitions.go.
 func TestReplaceRecoversARefusedRecord(t *testing.T) {
+	t.Parallel() // one of the largest tables; see sharedStates
 	refusals := refusedRecordErrors()
 	roots := buildStates(t)
 	for _, c := range refusedRecordCases() {

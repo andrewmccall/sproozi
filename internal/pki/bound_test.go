@@ -17,7 +17,7 @@ func padNames(t *testing.T, st *State, target int) {
 	t.Helper()
 	label := strings.Repeat("a", 60)
 	long := label + "." + label + "." + label + "." + label
-	for i := 0; ; i++ {
+	for i := 0; ; {
 		size, err := recordSize(*st)
 		must(t, err)
 		if size > target {
@@ -26,7 +26,14 @@ func padNames(t *testing.T, st *State, target int) {
 		if target-size <= 240 {
 			break
 		}
-		st.Names.DNS = append(st.Names.DNS, fmt.Sprintf("z%04d.%s", i, long)[:200])
+		// Add a 200-byte name while more than 240 bytes are missing. A name
+		// adds at most perName bytes to the record, so the first n of them
+		// all start more than 240 bytes short: add them before measuring
+		// again, rather than encoding the whole record once per name.
+		const perName = 256
+		for n := (target-size-241)/perName + 1; n > 0; n, i = n-1, i+1 {
+			st.Names.DNS = append(st.Names.DNS, fmt.Sprintf("z%04d.%s", i, long)[:200])
+		}
 	}
 	// One last name, sized to land exactly on target.
 	st.Names.DNS = append(st.Names.DNS, "z9999")
@@ -94,9 +101,18 @@ func boundStore(t *testing.T, base string, size int) *Store {
 }
 
 // largestAccepted is the largest record size, padded from base, at which
-// start succeeds.
+// start succeeds. A larger record is never accepted where a smaller one is
+// refused, so a size that is accepted while one byte more is refused is
+// that largest size. It checks the size the reserve predicts that way
+// first, with the two probes a binary search ends on, and searches the
+// whole range only if the prediction is wrong; every probe copies a store,
+// and a full search takes 16.
 func largestAccepted(t *testing.T, base string, start func(s *Store) error) int {
 	t.Helper()
+	if want := maxState - growthReserve; start(boundStore(t, base, want)) == nil &&
+		start(boundStore(t, base, want+1)) != nil {
+		return want
+	}
 	lo, hi := storedSize(t, base), maxState
 	for lo < hi {
 		mid := (lo + hi + 1) / 2
@@ -160,6 +176,7 @@ var (
 // renewal with unchanged names) commit, until the store is single again.
 // Guards growthReserve and its check in startsWithin.
 func TestEveryFinishingMoveCommitsAtTheLargestStartedRecord(t *testing.T) {
+	t.Parallel() // one of the largest tables; see sharedStates
 	bases := boundBases(t)
 	chains := []struct {
 		from  Phase

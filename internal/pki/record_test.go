@@ -1,25 +1,127 @@
 package pki
 
 import (
+	"fmt"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/andrewmccall/sproozi/internal/privatefs/privatefstest"
+	"github.com/andrewmccall/sproozi/internal/testutil"
 )
 
-// buildStates builds every state in outcomeStates once, keyed by name, each
-// in its own root.
+// sharedStates is every state in outcomeStates, built once per test binary
+// by the first test that asks. Tests read a state, or copy it with
+// copyStore and change the copy. Building the states runs the store's
+// operations from an empty directory for each of them, 175 store file
+// writes and 28 new authorities in all; building them
+// again in every test that used them (24 directly, 6 more through
+// boundBases) was most of the package's time. TestMain fails the package
+// if a test left a shared state's files, contents or permissions
+// different; a file changed and then restored before the run ends is not
+// detected.
+//
+// The directory is named after the test binary's process ID, so a binary
+// that a timeout killed before TestMain could remove it leaves a directory
+// the next run of this package recognises: buildStates removes every
+// pki-states directory whose process no longer exists (testutil.RemoveAbandoned).
+//
+// The five tests with the most store operations
+// (TestStoreOutcomesMatchTheRecordedTable,
+// TestInterruptedOperationsConvergeAfterRestart,
+// TestEveryFinishingMoveCommitsAtTheLargestStartedRecord,
+// TestReplaceRecoversARefusedRecord and
+// TestOnlyReplaceProceedsOnARefusedRecord) call t.Parallel, so their CPU
+// and file work overlap. Two tests change package state every store
+// operation reads and must not be parallel: TestEveryMoveGoesThroughApply
+// sets appliedHook, and TestApplyRefusesAResultTheTableDoesNotDeclare
+// edits the transitions map. Go finishes every non-parallel top-level test
+// before it resumes the parallel ones, so neither overlaps them.
+var sharedStates struct {
+	once  sync.Once
+	dir   string
+	roots map[string]string
+	files map[string]string
+	err   error
+}
+
+// sharedStatesPrefix begins every shared directory's name, followed by the
+// process ID and a random suffix.
+const sharedStatesPrefix = "pki-states-"
+
+// buildStates returns every state in outcomeStates, keyed by name, each in
+// its own root. The states are shared: copy one before changing it.
 func buildStates(t *testing.T) map[string]string {
 	t.Helper()
-	roots := map[string]string{}
-	for _, state := range outcomeStates() {
-		root := t.TempDir()
-		state.build(t, outcomeStore(t, root))
-		roots[state.name] = root
+	sharedStates.once.Do(func() {
+		// Stays set if a build step stops t, so every later caller fails too.
+		sharedStates.err = fmt.Errorf("building the shared states failed in %s", t.Name())
+		testutil.RemoveAbandoned(sharedStatesPrefix)
+		dir, err := testutil.FixtureDir(sharedStatesPrefix)
+		must(t, err)
+		sharedStates.dir = dir
+		roots := map[string]string{}
+		for _, state := range outcomeStates() {
+			root := filepath.Join(dir, state.name)
+			must(t, os.Mkdir(root, 0o700))
+			state.build(t, outcomeStore(t, root))
+			roots[state.name] = root
+		}
+		files, err := treeFiles(dir)
+		must(t, err)
+		sharedStates.roots, sharedStates.files, sharedStates.err = roots, files, nil
+	})
+	if sharedStates.err != nil {
+		t.Fatal(sharedStates.err)
 	}
-	return roots
+	return maps.Clone(sharedStates.roots)
+}
+
+// treeFiles reads every regular file under dir but the store's lock file,
+// by path, with its permission bits, so a test that changes a shared
+// file's contents or mode, adds one or removes one is seen.
+func treeFiles(dir string) (map[string]string, error) {
+	files := map[string]string{}
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.Name() == lockFile {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			files[path] = info.Mode().String()
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		files[path] = info.Mode().String() + " " + string(data)
+		return err
+	})
+	return files, err
+}
+
+// TestMain removes the shared states, and fails the package if a test
+// changed one.
+func TestMain(m *testing.M) {
+	// The tests write host-private files through privatefs; no test can
+	// observe a sync, and on macOS each one waits on every process's writes.
+	privatefstest.SkipSync()
+	code := m.Run()
+	if sharedStates.dir != "" {
+		files, err := treeFiles(sharedStates.dir)
+		if sharedStates.err == nil && (err != nil || !maps.Equal(files, sharedStates.files)) {
+			fmt.Fprintf(os.Stderr, "a test changed the shared states in %s (%v)\n", sharedStates.dir, err)
+			code = 1
+		}
+		_ = os.RemoveAll(sharedStates.dir)
+	}
+	os.Exit(code)
 }
 
 // refusedRecordErrors maps each corruption no phase describes to the error
@@ -87,6 +189,7 @@ func refusedRecordCases() []corruption {
 // changes. Guards describe in record.go (each case removes one rule) and the
 // refusal of phaseRefused by every event but replace in transitions.go.
 func TestOnlyReplaceProceedsOnARefusedRecord(t *testing.T) {
+	t.Parallel() // one of the largest tables; see sharedStates
 	refusals := refusedRecordErrors()
 	roots := buildStates(t)
 	seen := map[string]bool{}

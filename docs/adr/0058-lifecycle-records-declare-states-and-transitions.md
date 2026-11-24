@@ -37,7 +37,7 @@ omitted remote work's `pending` and `finalizing`.
 The execution deadline added a second implicit rule. Starting or extending work
 is refused once the deadline passes; stopping, accounting and cancelling are
 not, so a stop the controller first sees after the deadline still completes
-(ADR 0041). An execution may also have no deadline (ADR 0056). No record
+(ADR 0045). An execution may also have no deadline (ADR 0056). No record
 stated which of its events the deadline refuses, so each new event got it right
 only by copying an existing one.
 
@@ -627,7 +627,7 @@ file. Records the code wrote before still load.
 - Reference: [status and listing output](../reference/session-commands.md#status-and-listing-output)
 - Related: [ADR 0018](0018-coordinator-owns-every-visit.md),
   [ADR 0038](0038-exited-agents-and-one-recovery-path.md),
-  [ADR 0041](0041-gateway-state-namespace-and-retained-state-owners.md),
+  [ADR 0045](0045-budget-ledgers-are-a-custom-resource.md),
   [ADR 0056](0056-whoever-starts-work-sets-its-deadline.md),
   [ADR 0066](0066-a-contradicted-retained-record-refuses-work-and-never-blocks-an-end.md)
 

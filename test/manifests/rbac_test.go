@@ -202,7 +202,7 @@ func managedSessionDocs(t *testing.T) []map[string]any {
 }
 
 // No identity other than the controller can write the gateway's
-// configuration ConfigMaps in sproozi-system (ADR 0041). A writer there could
+// configuration ConfigMaps in sproozi-system (ADR 0045). A writer there could
 // repoint an MCP registration and receive its bearer token after a restart.
 // A write limited to named ConfigMaps still counts.
 func TestOnlyTheControllerWritesSystemConfigMaps(t *testing.T) {

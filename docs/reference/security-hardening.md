@@ -603,7 +603,6 @@ registrations in run namespaces are not yet removed automatically: list them
 with `kubectl get configmaps -A -l sessions.sproozi.com/registry=true` and delete those
 whose AgentRun is gone and whose sessions you no longer need to stop or
 resume. See
-[ADR 0041](../adr/0041-gateway-state-namespace-and-retained-state-owners.md) and
 [ADR 0045](../adr/0045-budget-ledgers-are-a-custom-resource.md).
 
 ## Restrict trusted services
@@ -628,7 +627,7 @@ The remote executor example's Roles are not limited to its own runs. In
 `sproozi-system` it can update any BudgetLedger, though no ConfigMap. A compromised executor therefore
 holds the authority of every Kubernetes run in the cluster. Run it only where
 all runs share one trust domain, and treat its ServiceAccount like the
-controller's ([ADR 0041](../adr/0041-gateway-state-namespace-and-retained-state-owners.md)).
+controller's ([ADR 0045](../adr/0045-budget-ledgers-are-a-custom-resource.md)).
 
 The gateway's only plain HTTP listener is its health port, 8081, for the
 kubelet readiness probe. It serves `GET /readyz` with a fixed `ok` body and
