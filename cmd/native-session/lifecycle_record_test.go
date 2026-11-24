@@ -40,17 +40,24 @@ const lifecycleRecord = "testdata/supervisor-lifecycle.txt"
 const recordedHarness = `exec 2>/dev/null; stty -echo; trap 'exit 3' USR1; printf ready; ` +
 	`read -r line </dev/tty & wait $! && exit 0; exec sleep 3600`
 
-// The recorded harness's shell, and the names of two events other tests also
-// name.
+// The recorded harness's shell, the names of two events other tests also
+// name, and of the event that waits for a late world's deadline.
 const (
-	recordedShell      = "/bin/sh"
-	recordedTerminated = "terminated"
-	recordedDeadline   = "deadline"
+	recordedShell          = "/bin/sh"
+	recordedTerminated     = "terminated"
+	recordedDeadline       = "deadline"
+	recordedDeadlinePasses = "the deadline passes"
 )
 
 // lateDeadline is how long after a late world's supervisor starts its
-// deadline passes. Every event before it takes far less.
+// deadline passes, at first. Every event before it usually takes far less;
+// a replay or step the deadline overtook is started again with it doubled
+// (stepFresh).
 const lateDeadline = 4 * time.Second
+
+// overtakenAttempts is how many times stepFresh starts a step again whose
+// outcome a bound it assumed would not pass, or would pass, may have decided.
+const overtakenAttempts = 6
 
 // errRecordedTurn is the error the recorded harness's observer gives while no
 // turn has completed.
@@ -95,6 +102,10 @@ type mode struct {
 	finish func(r *recording, n *nativepty.Supervisor, ctx context.Context) (nativepty.Exit, error)
 	// unconfirmed: the forced stop's kill is never confirmed.
 	unconfirmed bool
+	// beforeBound: the recorded reply is the one the quiesce gives before
+	// quiesceWait passes. A reply that came later may have been the bound's,
+	// whichever the scheduler let win, so the step is started again.
+	beforeBound bool
 }
 
 // recording is one supervisor driven along one path of events.
@@ -124,6 +135,9 @@ type recording struct {
 	diagnostics *lockedBuffer
 	reported    int
 	diagnosed   int
+	// overrun: a beforeBound quiesce replied only once quiesceWait could
+	// have passed.
+	overrun bool
 }
 
 // recordings finds the recording of a supervisor or of its harness, for the
@@ -148,11 +162,13 @@ func (r *recording) config() config {
 	return c
 }
 
-func newRecording(t *testing.T, w world, bootstrap bool) *recording {
+// newRecording starts a supervisor in w; a late world's deadline passes
+// ahead from now.
+func newRecording(t *testing.T, w world, bootstrap bool, ahead time.Duration) *recording {
 	r := &recording{t: t, w: w, reports: &lockedBuffer{}, diagnostics: &lockedBuffer{}}
 	switch {
 	case w.late:
-		r.until = time.Now().Add(lateDeadline)
+		r.until = time.Now().Add(ahead)
 	case w.deadline:
 		r.until = recordDeadline
 	}
@@ -434,7 +450,9 @@ func reply(q response) string {
 
 func (r *recording) quiesce(m mode) string {
 	r.setMode(m)
+	started := time.Now()
 	q := r.s.quiesce()
+	r.overrun = m.beforeBound && time.Since(started) >= quiesceWait
 	r.setMode(mode{})
 	if q.State == harness.NativeStopped {
 		r.pending = true
@@ -552,14 +570,18 @@ var recordedEvents = []recordedEvent{
 		return said(r.quiesce(m))
 	}},
 	{"quiesce, harness exits while waiting for its turn", false, func(r *recording) *string {
-		return said(r.quiesce(mode{conversation: true, onObserve: (*recording).exits}))
+		// The observation returns once the harness has exited, without
+		// waiting for the exit watcher's sign-in save, which the step
+		// settles afterwards.
+		return said(r.quiesce(mode{conversation: true, beforeBound: true,
+			onObserve: func(r *recording) { untilExited(r.t, r.n) }}))
 	}},
 	{"quiesce, deadline passes while waiting for its turn", false, func(r *recording) *string {
 		if !r.w.deadline {
 			return nil
 		}
 		deadlineIn(r.s, 200*time.Millisecond)
-		return said(r.quiesce(mode{conversation: true}))
+		return said(r.quiesce(mode{conversation: true, beforeBound: true}))
 	}},
 	{"quiesce, deadline passes while waiting for the finish", false, func(r *recording) *string {
 		if !r.w.deadline {
@@ -598,13 +620,13 @@ var recordedEvents = []recordedEvent{
 		raiseDeadline(r.s)
 		return said("")
 	}},
-	{"the deadline passes", true, func(r *recording) *string {
+	{recordedDeadlinePasses, true, func(r *recording) *string {
 		if !r.w.late {
 			return nil
 		}
 		select {
 		case <-r.s.done:
-		case <-time.After(10 * time.Second):
+		case <-time.After(time.Until(r.until) + 10*time.Second):
 			r.t.Fatal("the supervisor did not stop at its deadline")
 		}
 		return said("")
@@ -779,18 +801,62 @@ func (n node) describe() string {
 	return strings.Join(names, " > ")
 }
 
-// replay drives a new supervisor along n's path.
-func replay(t *testing.T, w world, n node) *recording {
-	r := newRecording(t, w, n.bootstrap)
+// replay drives a new supervisor along n's path, with a late world's
+// deadline ahead from its start. It reports a replay that a bound overtook
+// (overtaken) without checking its outcome.
+func replay(t *testing.T, w world, n node, ahead time.Duration) (*recording, bool) {
+	r := newRecording(t, w, n.bootstrap, ahead)
 	for i, e := range n.path {
 		if _, ok := r.step(recordedEvents[e]); !ok {
 			t.Fatalf("%s: step %d did not happen on replay", n.describe(), i)
 		}
-		if got := r.snapshot(); got != n.rest[i] {
+		got := r.snapshot()
+		if r.overtaken(recordedEvents[e]) {
+			return r, true
+		}
+		if got != n.rest[i] {
 			t.Fatalf("%s: step %d replayed as %q, recorded %q", n.describe(), i, got, n.rest[i])
 		}
 	}
-	return r
+	return r, false
+}
+
+// overtaken reports that a bound the step e just taken assumed would not
+// pass may have decided its outcome: a quiesce that must reply before
+// quiesceWait replied after it, or, in a late world, the deadline passed
+// before any step but the one that waits for it had been recorded. Which of
+// two ready events wins is then the scheduler's choice, not the record's.
+func (r *recording) overtaken(e recordedEvent) bool {
+	if r.overrun {
+		return true
+	}
+	return r.w.late && e.name != recordedDeadlinePasses && !time.Now().Before(r.until)
+}
+
+// stepFresh drives a new supervisor along from's path and applies e, and
+// returns e's record, the snapshot after it and whether the supervisor
+// concluded. A replay or step that a bound overtook is not trusted: it
+// starts again, with a late world's deadline twice as far ahead, at most
+// overtakenAttempts times, as testutil.PassDeadline does for set-up.
+func stepFresh(t *testing.T, w world, from node, e recordedEvent) (out []string, ok bool, at string, ended bool) {
+	ahead := lateDeadline
+	for attempt := 1; ; attempt++ {
+		r, overtaken := replay(t, w, from, ahead)
+		if !overtaken {
+			out, ok = r.step(e)
+			at, ended = r.snapshot(), r.concluded()
+			overtaken = ok && r.overtaken(e)
+		}
+		r.close()
+		if !overtaken {
+			return out, ok, at, ended
+		}
+		if attempt == overtakenAttempts {
+			t.Fatalf("%s > %s: a bound overtook it %d times", from.describe(), e.name, attempt)
+		}
+		t.Logf("%s > %s: a bound overtook it; starting again", from.describe(), e.name)
+		ahead *= 2
+	}
 }
 
 // recordWorld applies every event to every state reached in w, breadth
@@ -803,7 +869,7 @@ func recordWorld(t *testing.T, w world) (string, int) {
 	var frontier []node
 	for _, bootstrap := range []bool{true, false} {
 		n := node{bootstrap: bootstrap}
-		r := replay(t, w, n)
+		r, _ := replay(t, w, n, lateDeadline)
 		at := r.snapshot()
 		r.close()
 		fmt.Fprintf(&b, "\n%s: %s\n", n.describe(), at)
@@ -815,11 +881,7 @@ func recordWorld(t *testing.T, w world) (string, int) {
 		var next []node
 		for _, from := range frontier {
 			for i, e := range recordedEvents {
-				r := replay(t, w, from)
-				out, ok := r.step(e)
-				at := r.snapshot()
-				ended := r.concluded()
-				r.close()
+				out, ok, at, ended := stepFresh(t, w, from, e)
 				if !ok {
 					continue
 				}
