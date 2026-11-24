@@ -61,9 +61,15 @@ func running(t *testing.T) *loginSync {
 // loginInterval for 0.
 func runningEvery(t *testing.T, interval time.Duration) *loginSync {
 	t.Helper()
+	return runningWithin(t, interval, testSaveWait)
+}
+
+// runningWithin is runningEvery with its syncs bounded by wait.
+func runningWithin(t *testing.T, interval, wait time.Duration) *loginSync {
+	t.Helper()
 	l := &loginSync{stored: filepath.Join(t.TempDir(), "auth.json"), native: filepath.Join(t.TempDir(), "auth.json"),
 		interval: interval, quit: make(chan struct{}), stopped: make(chan struct{}), diagnostics: &lockedBuffer{},
-		wait: testSaveWait}
+		wait: wait}
 	if err := l.sync(); err != nil {
 		t.Fatal(err)
 	}

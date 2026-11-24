@@ -13,10 +13,16 @@ func signedIn(t *testing.T) *loginSync {
 	return signedInEvery(t, 0)
 }
 
+// unreachedSaveWait bounds the syncs of a test about what a sync copies, not
+// about its bound. Nothing holds their store's lock, so each sync, and a
+// stop's save, ends when its reads and writes do; a stalled machine makes it
+// slower, never a skipped save. A test about the bound sets testSaveWait.
+const unreachedSaveWait = time.Hour
+
 // signedInEvery is signedIn with its periodic sync every interval.
 func signedInEvery(t *testing.T, interval time.Duration) *loginSync {
 	t.Helper()
-	l := runningEvery(t, interval)
+	l := runningWithin(t, interval, unreachedSaveWait)
 	write(t, l.native, refreshedR3)
 	syncAll(t, l)
 	if content(t, l.stored) != refreshedR3 {
