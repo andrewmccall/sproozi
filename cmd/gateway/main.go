@@ -164,10 +164,12 @@ const memoryLimitEnv = "SPROOZI_GATEWAY_MEMORY_LIMIT"
 
 // Environment variables that select model credentials.
 const (
-	openAIKeyEnv     = "OPENAI_API_KEY"
-	copilotTokenEnv  = "COPILOT_SIGN_IN_TOKEN"
-	anthropicKeyEnv  = "ANTHROPIC_API_KEY"
-	modelAuthModeEnv = "MODEL_AUTH_MODE"
+	openAIKeyEnv      = "OPENAI_API_KEY"
+	copilotTokenEnv   = "COPILOT_SIGN_IN_TOKEN"
+	openAITokenEnv    = "OPENAI_SIGN_IN_TOKEN"
+	anthropicTokenEnv = "ANTHROPIC_SIGN_IN_TOKEN"
+	anthropicKeyEnv   = "ANTHROPIC_API_KEY"
+	modelAuthModeEnv  = "MODEL_AUTH_MODE"
 )
 
 // minContainerMemoryLimit is the smallest container memory limit the gateway
@@ -336,8 +338,9 @@ func loadStartupConfig() (*startupConfig, error) {
 		withoutModel := maps.Clone(enabled)
 		delete(withoutModel, sprooziv1alpha1.CapabilityModelInference)
 		owned := inspectionHosts(host, withoutModel, profiles, mcpRegistry)
-		pruneModelHosts(hosts, owned, modelAuthMode, openAIKey+openAIToken != "", anthropicKey+anthropicToken != "",
-			copilotToken != "")
+		pruneModelHosts(hosts, owned, providerModes(&startupConfig{modelAuthMode: modelAuthMode,
+			openAIKey: openAIKey, anthropicKey: anthropicKey, openAIToken: openAIToken, anthropicToken: anthropicToken,
+			copilotToken: copilotToken}))
 	}
 	for name := range hosts {
 		if err := leaf.VerifyHostname(name); err != nil {
@@ -358,40 +361,38 @@ func loadStartupConfig() (*startupConfig, error) {
 	}, nil
 }
 
-// pruneModelHosts drops model hosts no route serves: a provider API with no
-// credential, and a signed-in client's hosts unless the provider forwards its
-// sign-in, so a gateway with keys needs no extra certificate names. It never
-// drops a host in owned, which other capabilities and egress profiles route.
-func pruneModelHosts(hosts, owned map[string]bool, mode string, openAIHeld, anthropicHeld, copilotHeld bool) {
-	drop := func(host string) {
-		if !owned[host] {
-			delete(hosts, host)
-		}
-	}
-	workload := mode == modelauth.WorkloadMode
-	if !anthropicHeld && !workload {
-		drop("api.anthropic.com")
-	}
-	if !openAIHeld && mode == modelauth.APIKeyMode {
-		drop("api.openai.com")
-	}
-	for name, forwards := range map[string]bool{modelgateway.ProviderOpenAI: workload && !openAIHeld,
-		modelgateway.ProviderAnthropic: workload && !anthropicHeld} {
+// pruneModelHosts keeps the hosts each provider's credential needs and drops
+// every other model host, so a gateway with keys needs no extra certificate
+// names. A credential that forwards the harness's own sign-in, or one for a
+// provider with no API host such as Copilot, needs every model, sign-in and
+// account host; any other needs the API host. A model.inference semantic
+// authority outside the provider table is never served, so its host is
+// dropped too. It never drops a host in owned, which other capabilities and
+// egress profiles route. modes are the credentials' modes by provider, as
+// providerModes chooses them.
+func pruneModelHosts(hosts, owned map[string]bool, modes map[string]string) {
+	needed := map[string]bool{}
+	for name, mode := range modes {
 		provider, _ := modelgateway.ProviderFor(name)
-		if !forwards {
-			for _, extra := range provider.Hosts(true)[1:] {
-				drop(extra)
-			}
+		for _, host := range provider.Hosts(mode == modelauth.WorkloadMode || !provider.HasAPIAuthority()) {
+			needed[host] = true
 		}
 	}
-	// Copilot has only signed-in hosts, served with a gateway-held GitHub
-	// token or the harness's own sign-in.
-	copilot, _ := modelgateway.ProviderFor(modelgateway.ProviderCopilot)
-	for _, host := range copilot.Hosts(true) {
-		if copilotHeld || workload {
+	var candidates []string
+	for _, provider := range modelgateway.Providers() {
+		candidates = append(candidates, provider.Hosts(true)...)
+	}
+	for authority, capability := range endpoints.SemanticAuthorities {
+		if capability == sprooziv1alpha1.CapabilityModelInference {
+			host, _, _ := net.SplitHostPort(authority)
+			candidates = append(candidates, host)
+		}
+	}
+	for _, host := range candidates {
+		if needed[host] {
 			hosts[host] = true
-		} else {
-			drop(host)
+		} else if !owned[host] {
+			delete(hosts, host)
 		}
 	}
 }
@@ -403,8 +404,8 @@ func loadSignInTokens(mode, openAIKey, anthropicKey string) (string, string, str
 	anthropic := strings.TrimSpace(os.Getenv("ANTHROPIC_SIGN_IN_TOKEN"))
 	copilot := strings.TrimSpace(os.Getenv(copilotTokenEnv))
 	for _, token := range []struct{ env, key, value, apiKey string }{
-		{"OPENAI_SIGN_IN_TOKEN", "openai-sign-in-token", openAI, openAIKey},
-		{"ANTHROPIC_SIGN_IN_TOKEN", "anthropic-sign-in-token", anthropic, anthropicKey},
+		{openAITokenEnv, "openai-sign-in-token", openAI, openAIKey},
+		{anthropicTokenEnv, "anthropic-sign-in-token", anthropic, anthropicKey},
 		{copilotTokenEnv, "copilot-sign-in-token", copilot, ""},
 	} {
 		if strings.ContainsAny(token.value, "\r\n") {
@@ -528,10 +529,13 @@ func githubAppInteger(key, secretKey string) (int64, error) {
 
 // providerAuth chooses one provider's credential (ADR 0047): its gateway
 // API key, then its gateway-held sign-in token, then in workload mode the
-// harness's own sign-in. ok is false when the provider has none.
+// harness's own sign-in. ok is false when the provider has none. A provider
+// the gateway has no key or token setting for can only forward a sign-in.
 func providerAuth(cfg *startupConfig, name string) (auth modelauth.Authenticator, ok bool) {
-	key, token := cfg.openAIKey, cfg.openAIToken
+	var key, token string
 	switch name {
+	case modelgateway.ProviderOpenAI:
+		key, token = cfg.openAIKey, cfg.openAIToken
 	case modelgateway.ProviderAnthropic:
 		key, token = cfg.anthropicKey, cfg.anthropicToken
 	case modelgateway.ProviderCopilot:
@@ -539,10 +543,8 @@ func providerAuth(cfg *startupConfig, name string) (auth modelauth.Authenticator
 	}
 	provider, _ := modelgateway.ProviderFor(name)
 	switch {
-	case key != "" && name == modelgateway.ProviderAnthropic:
-		return modelauth.AnthropicAPIKey{Key: key}, true
-	case key != "":
-		return modelauth.APIKey{Key: key}, true
+	case key != "" && provider.APIKey != nil:
+		return provider.APIKey(key), true
 	case token != "":
 		return modelauth.Token{Value: token, Headers: provider.TokenHeaders}, true
 	case cfg.modelAuthMode == modelauth.WorkloadMode:
@@ -551,85 +553,70 @@ func providerAuth(cfg *startupConfig, name string) (auth modelauth.Authenticator
 	return nil, false
 }
 
-// modelProviders are the providers the gateway composes routes for.
-var modelProviders = []string{modelgateway.ProviderOpenAI, modelgateway.ProviderAnthropic, modelgateway.ProviderCopilot}
-
-// signedInRoute is a provider route beyond its API host, and whether it
-// forwards the harness's own credential.
-type signedInRoute struct {
-	handler  http.Handler
-	forwards bool
-	// prefixes make the route a path route of a host another capability
-	// owns, such as Copilot's account requests on api.github.com.
-	prefixes []string
+// modelCredentials are each provider's one credential, keyed by provider
+// name; a provider without one is absent. In chatgpt mode the gateway's
+// ChatGPT sign-in is OpenAI's.
+func modelCredentials(cfg *startupConfig, chatGPT modelauth.SessionStore) map[string]modelauth.Authenticator {
+	credentials := map[string]modelauth.Authenticator{}
+	for name, mode := range providerModes(cfg) {
+		if mode == modelauth.ChatGPTMode {
+			credentials[name] = modelauth.NewChatGPT(chatGPT, modelauth.NewRefreshClient())
+		} else {
+			credentials[name], _ = providerAuth(cfg, name)
+		}
+	}
+	return credentials
 }
 
-// modelHandlers builds the OpenAI and Anthropic API routes' handlers; either
-// is nil when its route is disabled. signedIn holds the extra routes of each
-// provider that forwards the harness's own sign-in: a subscription backend
-// such as chatgpt.com, and the provider's sign-in relay.
-func modelHandlers(cfg *startupConfig, auditLogger audit.Writer, modelClient *http.Client,
-	drain *modelgateway.Drain, chatGPT modelauth.SessionStore,
-) (openAIHandler, anthropicHandler http.Handler, signedIn map[string]signedInRoute) {
-	signedIn = map[string]signedInRoute{}
-	if !cfg.enabled[sprooziv1alpha1.CapabilityModelInference] {
-		return nil, nil, signedIn
-	}
-	config := func(upstream string, auth modelauth.Authenticator) modelgateway.HandlerConfig {
-		c := modelgateway.HandlerConfig{Pricing: cfg.pricing, AuditLogger: auditLogger, UpstreamURL: upstream,
-			ProviderAuth: auth, HTTPClient: modelClient, Drain: drain}
-		if os.Getenv("MODEL_DIAGNOSTICS") == "true" {
-			// Administrator opt-in: bounded provider errors only, separate from audit.
-			// Never log prompts, model text, reasoning, raw bodies or auth headers.
-			c.Diagnostics = func(d modelgateway.ResponseDiagnostic) { _ = json.NewEncoder(os.Stderr).Encode(d) }
+// providerModes are the mode of each provider's credential, keyed by
+// provider name, without building it; a provider without one is absent.
+func providerModes(cfg *startupConfig) map[string]string {
+	modes := map[string]string{}
+	for _, provider := range modelgateway.Providers() {
+		if auth, ok := providerAuth(cfg, provider.Name); ok {
+			modes[provider.Name] = auth.Mode()
 		}
-		return c
 	}
-	if auth, ok := providerAuth(cfg, modelgateway.ProviderAnthropic); ok {
-		anthropicHandler = modelgateway.NewAnthropicHandler(config(cfg.anthropicUpstreamURL, auth))
-	}
-	auth, ok := providerAuth(cfg, modelgateway.ProviderOpenAI)
 	if cfg.modelAuthMode == modelauth.ChatGPTMode {
-		auth, ok = modelauth.NewChatGPT(chatGPT, modelauth.NewRefreshClient()), true
+		modes[modelgateway.ProviderOpenAI] = modelauth.ChatGPTMode
 	}
-	if ok {
-		openAIHandler = &modelgateway.Handler{Config: config(cfg.openAIUpstreamURL, auth)}
+	return modes
+}
+
+// modelRoutes are the provider table's routes for each provider with a
+// credential, or none when model inference is disabled.
+func modelRoutes(cfg *startupConfig, auditLogger audit.Writer, modelClient *http.Client,
+	drain *modelgateway.Drain, chatGPT modelauth.SessionStore,
+) []modelgateway.ServedRoute {
+	if !cfg.enabled[sprooziv1alpha1.CapabilityModelInference] {
+		return nil
 	}
-	for _, name := range modelProviders {
-		auth, ok := providerAuth(cfg, name)
-		if !ok {
-			continue
-		}
-		forwards := auth.Mode() == modelauth.WorkloadMode
-		provider, _ := modelgateway.ProviderFor(name)
-		apiRoute := !provider.Models[0].SignedIn
-		for _, m := range provider.Models {
-			// A provider's API route is composed above. Its signed-in routes
-			// serve a forwarded sign-in, or a gateway-held token for a provider
-			// with no API route, such as Copilot.
-			if !m.SignedIn || !forwards && apiRoute {
-				continue
-			}
-			signedIn[m.Authority] = signedInRoute{handler: m.New(config(m.UpstreamURL, auth)), forwards: forwards}
-		}
-		if forwards && provider.SignInAuthority != "" {
-			route := signedInRoute{handler: provider.SignInRelay(modelClient, auditLogger)}
-			if provider.SignInPrefix != "" {
-				route.prefixes = []string{provider.SignInPrefix}
-			}
-			signedIn[provider.SignInAuthority] = route
-		}
-		if provider.AccountAuthority != "" {
-			signedIn[provider.AccountAuthority] = signedInRoute{handler: provider.AccountRelay(auth, modelClient, auditLogger),
-				forwards: forwards, prefixes: provider.AccountPrefixes}
+	config := modelgateway.RouteConfig{
+		Handler: modelgateway.HandlerConfig{Pricing: cfg.pricing, AuditLogger: auditLogger, HTTPClient: modelClient,
+			Drain: drain},
+		// The administrator's API origins; every other model authority keeps
+		// the table's.
+		Upstreams: map[string]string{modelgateway.OpenAIAuthority: cfg.openAIUpstreamURL,
+			modelgateway.AnthropicAuthority: cfg.anthropicUpstreamURL},
+	}
+	if os.Getenv("MODEL_DIAGNOSTICS") == "true" {
+		// Administrator opt-in: bounded provider errors only, separate from audit.
+		// Never log prompts, model text, reasoning, raw bodies or auth headers.
+		config.Handler.Diagnostics = func(d modelgateway.ResponseDiagnostic) { _ = json.NewEncoder(os.Stderr).Encode(d) }
+	}
+	credentials := modelCredentials(cfg, chatGPT)
+	var routes []modelgateway.ServedRoute
+	for _, provider := range modelgateway.Providers() {
+		if auth, ok := credentials[provider.Name]; ok {
+			routes = append(routes, provider.Routes(auth, config)...)
 		}
 	}
-	return openAIHandler, anthropicHandler, signedIn
+	return routes
 }
 
 func composeDispatcher(
 	cfg *startupConfig, handlers map[sprooziv1alpha1.CapabilityKind]http.Handler,
-	mcpHandler http.Handler, anthropicHandler http.Handler, signedIn ...map[string]signedInRoute,
+	mcpHandler http.Handler, models []modelgateway.ServedRoute,
 ) gateway.Dispatcher {
 	routes := gateway.Dispatcher{}
 	host := cfg.host
@@ -651,64 +638,26 @@ func composeDispatcher(
 	for authority, cap := range endpoints.SemanticAuthorities {
 		// Reserve semantic authorities even when a module is disabled. Generic
 		// egress must never become a weaker fallback for a semantic service.
+		// A model authority stays closed unless a provider route below
+		// serves it, so one outside the provider table is never served.
 		route := gateway.Route{Capability: cap, Tier: audit.TierSemantic}
-		if cfg.enabled[cap] {
+		if cfg.enabled[cap] && cap != sprooziv1alpha1.CapabilityModelInference {
 			route.Handler = handlers[cap]
 		}
 		routes[authority] = route
 	}
-	// The two fixed provider protocols share model.inference accounting, while
-	// credentials and upstream transport remain administrator-owned.
-	anthropic := routes[modelgateway.AnthropicAuthority]
-	anthropic.Handler = anthropicHandler
-	routes[modelgateway.AnthropicAuthority] = anthropic
-	// A provider that forwards each harness's own sign-in marks its model
-	// routes so the transport keeps the credential (ADR 0047).
-	apiRoutes := map[string]string{modelgateway.OpenAIAuthority: modelgateway.ProviderOpenAI,
-		modelgateway.AnthropicAuthority: modelgateway.ProviderAnthropic}
-	for authority, name := range apiRoutes {
-		if auth, ok := providerAuth(cfg, name); ok && auth.Mode() == modelauth.WorkloadMode {
-			route := routes[authority]
-			route.ProviderCredential = true
-			routes[authority] = route
+	// A provider route serves its reserved authority, or is a path route of
+	// a host another capability owns. A provider that forwards each
+	// harness's own sign-in marks its routes so the transport keeps the
+	// credential (ADR 0047).
+	for _, served := range models {
+		route := routes[served.Authority]
+		if served.Prefix != "" {
+			route.Paths = append(route.Paths, gateway.PathRoute{Prefix: served.Prefix, Route: served.Route})
+		} else {
+			route.Handler, route.ProviderCredential = served.Route.Handler, served.Route.ProviderCredential
 		}
-	}
-	// The signed-in and sign-in authorities stay reserved but closed unless a
-	// provider serves them.
-	for _, name := range modelProviders {
-		provider, _ := modelgateway.ProviderFor(name)
-		var closed []string
-		if provider.SignInPrefix == "" {
-			// A sign-in path route shares its host with another owner,
-			// such as Copilot's on github.com, which stays open.
-			closed = append(closed, provider.SignInAuthority)
-		}
-		for _, m := range provider.Models {
-			if m.SignedIn {
-				closed = append(closed, m.Authority)
-			}
-		}
-		for _, authority := range closed {
-			if route, reserved := routes[authority]; reserved {
-				route.Handler = nil
-				routes[authority] = route
-			}
-		}
-	}
-	for _, extra := range signedIn {
-		for authority, served := range extra {
-			route := routes[authority]
-			if len(served.prefixes) > 0 {
-				for _, prefix := range served.prefixes {
-					route.Paths = append(route.Paths, gateway.PathRoute{Prefix: prefix, Route: gateway.Route{
-						Capability: sprooziv1alpha1.CapabilityModelInference, Tier: audit.TierSemantic,
-						Handler: served.handler, ProviderCredential: served.forwards}})
-				}
-			} else {
-				route.Handler, route.ProviderCredential = served.handler, served.forwards
-			}
-			routes[authority] = route
-		}
+		routes[served.Authority] = route
 	}
 	if cfg.enabled[sprooziv1alpha1.CapabilityNetworkEgress] {
 		for _, dest := range cfg.profiles.Destinations() {
@@ -749,10 +698,7 @@ func composeGateway(cfg *startupConfig, deps gatewayDeps) (gateway.Dispatcher, e
 		MaxResponseBytes: 8 << 20,
 		AuditLogger:      deps.journal})
 	handlers := map[sprooziv1alpha1.CapabilityKind]http.Handler{sprooziv1alpha1.CapabilityKubernetesRead: kube}
-	openAIHandler, anthropicHandler, signedIn := modelHandlers(cfg, deps.journal, deps.model, deps.drain, deps.chatGPT)
-	if openAIHandler != nil {
-		handlers[sprooziv1alpha1.CapabilityModelInference] = openAIHandler
-	}
+	models := modelRoutes(cfg, deps.journal, deps.model, deps.drain, deps.chatGPT)
 	if cfg.enabled[sprooziv1alpha1.CapabilityGitHubPullRequest] {
 		handlers[sprooziv1alpha1.CapabilityGitHubPullRequest] = &githubgateway.Handler{Config: githubgateway.HandlerConfig{
 			TokenProvider: deps.githubTokens,
@@ -770,7 +716,7 @@ func composeGateway(cfg *startupConfig, deps gatewayDeps) (gateway.Dispatcher, e
 		HTTPClient:  deps.upstream}}
 	named := mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: cfg.mcpRegistry, HTTPClient: deps.mcp,
 		Budgets: deps.budgets, AuditLogger: deps.journal})
-	dispatcher := composeDispatcher(cfg, handlers, diagnose.NewControl(deps.journal, named), anthropicHandler, signedIn)
+	dispatcher := composeDispatcher(cfg, handlers, diagnose.NewControl(deps.journal, named), models)
 	attachAccounting(dispatcher, deps.budgets, deps.journal)
 	if err := dispatcher.Validate(); err != nil {
 		return nil, err

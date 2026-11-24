@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -177,25 +178,35 @@ func TestEveryStartupConfigurationDeclaresItsRoutes(t *testing.T) {
 }
 
 // A model.inference authority added to endpoints.SemanticAuthorities without
-// a provider-table entry is served by the OpenAI handler with the OpenAI
-// credential. This is a known exception, kept until the Kubernetes
-// composition builds its model routes from the provider table as the Docker
-// composition does (ADR 0070); this test fails once that is fixed, so the
-// exception is removed with it.
-func TestKnownExceptionAModelAuthorityOutsideTheProviderTableGetsTheOpenAIHandler(t *testing.T) {
-	const stray = "api.newmodel.example:443"
+// a provider-table entry is reserved and closed in every credential mode, and
+// the gateway's certificate need not name it (ADR 0070).
+func TestAModelAuthorityOutsideTheProviderTableIsNotServed(t *testing.T) {
 	validGatewayEnvironment(t)
-	cfg, err := loadStartupConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	endpoints.SemanticAuthorities[stray] = api.CapabilityModelInference
-	t.Cleanup(func() { delete(endpoints.SemanticAuthorities, stray) })
-	cfg.mcpRegistry = routetest.MCPRegistry(t)
-	routes, _ := composeServing(t, cfg, &routetest.Recorder{})
-	strays := routetest.ModelAuthorities(routes)
-	if len(strays) != 1 || strays[stray] != "*model.Handler" {
-		t.Fatalf("model.inference routes outside the provider table: %v; if the stray authority is now closed, "+
-			"remove this known exception", strays)
+	endpoints.SemanticAuthorities[strayModelAuthority] = api.CapabilityModelInference
+	t.Cleanup(func() { delete(endpoints.SemanticAuthorities, strayModelAuthority) })
+	host, _, _ := net.SplitHostPort(strayModelAuthority)
+	for _, mode := range credentialModes {
+		t.Run(mode.name, func(t *testing.T) {
+			t.Setenv(copilotTokenEnv, "")
+			for key, value := range mode.env {
+				t.Setenv(key, value)
+			}
+			cfg, err := loadStartupConfig()
+			if err != nil {
+				t.Fatalf("the certificate does not name %s, which is not served: %v", host, err)
+			}
+			if _, certified := cfg.certificates[host]; certified {
+				t.Errorf("%s needs a certificate name, but is not served", host)
+			}
+			cfg.mcpRegistry = routetest.MCPRegistry(t)
+			routes, _ := composeServing(t, cfg, &routetest.Recorder{})
+			route, reserved := routes[strayModelAuthority]
+			if !reserved || route.Handler != nil || routes.Allows(strayModelAuthority) {
+				t.Errorf("%s is not reserved and closed: %+v", strayModelAuthority, route)
+			}
+			if strays := routetest.ModelAuthorities(routes); len(strays) != 0 {
+				t.Errorf("model.inference routes outside the provider table: %v", strays)
+			}
+		})
 	}
 }
