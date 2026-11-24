@@ -191,9 +191,14 @@ func (r *recording) close() {
 	if r.n == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	// The exit watcher looks the recording up until it returns, so the
+	// recording is forgotten only once the harness has stopped and the
+	// watcher has returned, however long a loaded machine takes.
+	ctx, cancel := realStop(context.Background())
 	defer cancel()
-	_, _ = r.n.Stop(ctx)
+	if _, err := r.n.Stop(ctx); errors.Is(err, context.DeadlineExceeded) {
+		r.t.Fatalf("the recorded harness did not stop within %s", realStopLimit)
+	}
 	r.settle()
 	recordings.Delete(r.n)
 }
