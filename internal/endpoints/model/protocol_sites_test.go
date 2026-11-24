@@ -74,6 +74,15 @@ func protocolConstants(f *ast.File) []string {
 	return names
 }
 
+// allProtocolConstants names the protocol constants the package declares.
+func allProtocolConstants(files map[string]*ast.File) []string {
+	constants := make([]string, 0, len(protocolSitesDecidedFor))
+	for _, name := range slices.Sorted(maps.Keys(files)) {
+		constants = append(constants, protocolConstants(files[name])...)
+	}
+	return constants
+}
+
 // scopeOf names a top-level declaration: a function, or a method as
 // Receiver.Name.
 func scopeOf(decl ast.Decl) string {
@@ -191,10 +200,7 @@ func protocolBranches(fset *token.FileSet, file string, f *ast.File, constants [
 // streamed call reaches its reader only through eventStream.
 func TestProtocolBranchesStayInTheirSites(t *testing.T) {
 	fset, files := parsedSources(t)
-	var constants []string
-	for _, f := range files {
-		constants = append(constants, protocolConstants(f)...)
-	}
+	constants := allProtocolConstants(files)
 	if !slices.Equal(slices.Sorted(slices.Values(constants)), slices.Sorted(slices.Values(protocolSitesDecidedFor))) {
 		t.Fatalf("the protocols are %v; protocolSites was decided for %v. A new protocol decides each site, "+
 			"then is added to protocolSitesDecidedFor", constants, protocolSitesDecidedFor)
@@ -224,10 +230,7 @@ func TestProtocolBranchesStayInTheirSites(t *testing.T) {
 // protocol constant, so a new protocol is not read as another's stream.
 func TestEveryProtocolHasAStreamReader(t *testing.T) {
 	fset, files := parsedSources(t)
-	var constants []string
-	for _, f := range files {
-		constants = append(constants, protocolConstants(f)...)
-	}
+	constants := allProtocolConstants(files)
 	var named []string
 	for _, b := range protocolBranches(fset, "protocol.go", files["protocol.go"], constants) {
 		if b.site == "protocol.go: providerProtocol.newStream" {

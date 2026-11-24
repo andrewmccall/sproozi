@@ -19,16 +19,24 @@ import (
 	"github.com/andrewmccall/sproozi/internal/modelauth"
 )
 
+// Media type, header, call name and Copilot path the header record repeats.
+const (
+	jsonMediaType       = "application/json"
+	contentTypeHeader   = "Content-Type"
+	chatCompletionsCall = "chat completions"
+	copilotChatPath     = "/chat/completions"
+)
+
 // clientHeaders are what a harness sends with every recorded call: its own
 // credentials, the gateway's proxy credential, a cookie, protocol headers of
 // both providers and headers of its own.
 var clientHeaders = map[string]string{
-	"Accept":                 "application/json",
+	"Accept":                 jsonMediaType,
 	"Accept-Encoding":        gzipEncoding,
 	"Anthropic-Beta":         "client-beta",
 	"Anthropic-Version":      "2099-01-01",
 	"Authorization":          "Bearer client-token",
-	"Content-Type":           "application/json",
+	contentTypeHeader:        jsonMediaType,
 	"Cookie":                 "session=client",
 	"Copilot-Integration-Id": "client-integration",
 	"Openai-Beta":            "client-openai-beta",
@@ -41,7 +49,7 @@ var clientHeaders = map[string]string{
 // providerHeaders are what the provider answers every recorded call with.
 var providerHeaders = map[string]string{
 	"Anthropic-Ratelimit-Requests-Remaining": "9",
-	"Content-Type":                           "application/json",
+	contentTypeHeader:                        jsonMediaType,
 	"Openai-Organization":                    "org-fixture",
 	"Request-Id":                             "req_provider",
 	"Retry-After":                            "1",
@@ -64,8 +72,8 @@ type headerCall struct {
 // table. A new authority fails the record until it has its own.
 func headerCalls() map[string][]headerCall {
 	openAI := []headerCall{
-		{name: "chat completions", method: http.MethodPost, path: chatPath, body: chatBody, status: http.StatusOK, answer: chatSuccess},
-		{name: "chat completions, gateway-held key", method: http.MethodPost, path: chatPath, body: chatBody,
+		{name: chatCompletionsCall, method: http.MethodPost, path: chatPath, body: chatBody, status: http.StatusOK, answer: chatSuccess},
+		{name: chatCompletionsCall + ", gateway-held key", method: http.MethodPost, path: chatPath, body: chatBody,
 			status: http.StatusOK, answer: chatSuccess, apiKey: true},
 		{name: "non-2xx", method: http.MethodPost, path: chatPath, body: chatBody,
 			status: http.StatusTooManyRequests, answer: `{"error":{"message":"slow down"}}`},
@@ -80,7 +88,7 @@ func headerCalls() map[string][]headerCall {
 	}
 	copilot := []headerCall{
 		{name: "messages", method: http.MethodPost, path: testMessagesPath, body: messagesBody, status: http.StatusOK, answer: anthropicSuccess},
-		{name: "chat completions", method: http.MethodPost, path: "/chat/completions", body: chatBody, status: http.StatusOK, answer: chatSuccess},
+		{name: chatCompletionsCall, method: http.MethodPost, path: copilotChatPath, body: chatBody, status: http.StatusOK, answer: chatSuccess},
 	}
 	return map[string][]headerCall{
 		model.OpenAIAuthority: openAI,
@@ -96,7 +104,7 @@ func headerCalls() map[string][]headerCall {
 
 // headerList renders headers as sorted Name=value pairs.
 func headerList(header http.Header) string {
-	var pairs []string
+	pairs := make([]string, 0, len(header))
 	for name, values := range header {
 		pairs = append(pairs, http.CanonicalHeaderKey(name)+"="+strconv.Quote(strings.Join(values, ",")))
 	}
@@ -160,8 +168,9 @@ func recordHeaders(t *testing.T, provider string, route model.ModelRoute, call h
 	}
 	response := httptest.NewRecorder()
 	routes.ServeHTTP(response, req.WithContext(gateway.WithIdentity(req.Context(), testExecutionGrant())))
-	var services []string
-	for _, e := range events.taken() {
+	recorded := events.taken()
+	services := make([]string, 0, len(recorded))
+	for _, e := range recorded {
 		services = append(services, e.Service)
 	}
 	_, _ = io.Copy(io.Discard, response.Body)

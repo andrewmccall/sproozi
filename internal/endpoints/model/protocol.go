@@ -98,7 +98,9 @@ func (s *responsesStream) completion(limits api.EndpointBudget) (providerUsage, 
 	return providerUsage{usage: usage}, reason, nil
 }
 
-func (s *responsesStream) reported() (anthropicUsage, bool, bool) { return anthropicUsage{}, false, false }
+func (s *responsesStream) reported() (anthropicUsage, bool, bool) {
+	return anthropicUsage{}, false, false
+}
 
 func (s *responsesStream) cutEvent() string {
 	return `event: error` + "\n" + `data: {"type":"error","code":"budget_exhausted","message":"` + budgetCutMessage + `","param":null}` + "\n\n"
