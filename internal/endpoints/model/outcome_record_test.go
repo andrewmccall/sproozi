@@ -45,7 +45,7 @@ const (
 )
 
 var updateRecords = flag.Bool("update-records", false,
-	"rewrite testdata/outcomes.txt and testdata/relay-outcomes.txt from the current code")
+	"rewrite the recorded outcomes in testdata from the current code")
 
 // compareRecorded compares lines with the recorded file, or rewrites it under
 // -update-records.
@@ -962,6 +962,14 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 				send(run, anthropicEvents[0], anthropicEvents[7])
 				run.writer.waitFor(t, "I'll list it.")
 				run.clock.Advance(2 * time.Second)
+				run.cancel()
+			}},
+		{name: "row 26/anthropic stream after message_delta, workload left (exact output)", anthropic: true,
+			body: anthropicStreamRequest, client: pipeClient(eventStream, &pipe),
+			drive: func(run *caseRun) {
+				send(run, anthropicEvents[0], anthropicEvents[7], anthropicEvents[8], anthropicEvents[len(anthropicEvents)-2])
+				run.writer.waitFor(t, "message_delta")
+				run.clock.Advance(10 * time.Second)
 				run.cancel()
 			}},
 		{name: "row 26/anthropic whole JSON, workload left (provider usage)", anthropic: true, body: messagesBody,
