@@ -85,8 +85,15 @@ this.
 
 `privatefs`'s own tests do not, so they keep exercising real syncs.
 `SkipSync` panics outside a test binary. Tests in
-`internal/privatefs/privatefstest` fail if any non-test file imports it, or if
-any binary under `cmd/` or `hack/` depends on it or on `testing`.
+`internal/privatefs/privatefstest` fail if any non-test file imports it (the
+helper program under that package's `testdata`, which the panic test runs, is the
+only exception); if any non-test file other than privatefs's three files that
+read the switch and `privatefstest` imports the internal `durability` package,
+or names `Skip` in a file that imports it; if any non-test file has a
+`go:linkname` directive that names `internal/privatefs`, which would reach the
+switch without an import; or if any `main` package in the module depends on
+`privatefstest` or on `testing`. They read every Go file except hidden
+directories, `vendor` and the git-ignored top-level `bin/`.
 
 ## Investigation-to-PR demo guide
 

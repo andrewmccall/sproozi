@@ -34,6 +34,13 @@ These operations do not establish an independent hardware power-loss guarantee.
 The [Windows rename contract](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information)
 defines how open readers retain their file after replacement.
 
+Corrected 2026-11-24: test binaries can skip those syncs through
+`privatefstest.SkipSync`, which panics outside a test binary; production
+binaries cannot. The tests in `internal/privatefs/privatefstest` enforce it:
+`TestOnlyTestsImportPrivatefstest`, `TestNoLinknameReachesPrivatefs`,
+`TestNoBinaryDependsOnPrivatefstestOrTesting` and
+`TestSkipSyncPanicsOutsideATestBinary`.
+
 Local control keeps the shared request and terminal protocol. Windows uses a
 named pipe with an explicit current-user and SYSTEM DACL, remote-client
 rejection and first-instance protection. The client checks the connected server

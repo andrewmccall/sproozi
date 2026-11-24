@@ -56,14 +56,27 @@ func goCommand(t *testing.T) string {
 	return path
 }
 
-// No file that is not a test imports privatefstest, so no production
-// package can switch off privatefs's syncs; and no file but SkipSync's
-// calls durability.Skip. It reads every Go file in the repository,
-// whatever its build constraints, and checks import paths and calls, so an
-// alias, a dot import or a file built only on another platform is still
-// seen. Go's internal rule already limits durability's importers to
-// internal/privatefs and below.
-func TestOnlyTestsImportPrivatefstest(t *testing.T) {
+// durabilityImporters are the only non-test files that import durability:
+// privatefs's three files that read the switch, and the file that sets it.
+// Go's internal rule already limits the importers to internal/privatefs and
+// below; this limits them to these four files.
+var durabilityImporters = map[string]bool{
+	"internal/privatefs/privatefs.go":                   true,
+	"internal/privatefs/privatefs_unix.go":              true,
+	"internal/privatefs/privatefs_windows.go":           true,
+	"internal/privatefs/privatefstest/privatefstest.go": true,
+}
+
+// setter is the one file that may name durability.Skip.
+const setter = "internal/privatefs/privatefstest/privatefstest.go"
+
+// productionFiles parses every Go file in the repository that is not a
+// test, whatever its build constraints, and passes each to visit with its
+// slash-separated path from the module root. It skips directories whose
+// names begin with a dot, vendor, and the top-level bin, which .gitignore
+// lists as build output (bin/*); a bin directory anywhere else is source.
+func productionFiles(t *testing.T, visit func(rel string, fset *token.FileSet, file *ast.File)) {
+	t.Helper()
 	root := moduleRoot(t)
 	files := 0
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -71,8 +84,9 @@ func TestOnlyTestsImportPrivatefstest(t *testing.T) {
 			return err
 		}
 		rel, _ := filepath.Rel(root, path)
+		rel = filepath.ToSlash(rel)
 		if d.IsDir() {
-			if rel != "." && (strings.HasPrefix(d.Name(), ".") || d.Name() == "bin" || d.Name() == "vendor") {
+			if rel != "." && (strings.HasPrefix(d.Name(), ".") || rel == "bin" || d.Name() == "vendor") {
 				return filepath.SkipDir
 			}
 			return nil
@@ -82,34 +96,11 @@ func TestOnlyTestsImportPrivatefstest(t *testing.T) {
 		}
 		files++
 		fset := token.NewFileSet()
-		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution|parser.ParseComments)
 		if err != nil {
 			return err
 		}
-		durabilityName := ""
-		for _, spec := range file.Imports {
-			ip, _ := strconv.Unquote(spec.Path.Value)
-			if ip == privatefstestIP && filepath.ToSlash(rel) != helper {
-				t.Errorf("%s imports privatefstest; only tests may", rel)
-			}
-			if ip == durabilityIP {
-				durabilityName = "durability"
-				if spec.Name != nil {
-					durabilityName = spec.Name.Name
-				}
-			}
-		}
-		if durabilityName == "" || filepath.ToSlash(rel) == "internal/privatefs/privatefstest/privatefstest.go" {
-			return nil
-		}
-		ast.Inspect(file, func(n ast.Node) bool {
-			if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "Skip" {
-				if x, ok := sel.X.(*ast.Ident); ok && (x.Name == durabilityName || durabilityName == ".") {
-					t.Errorf("%s: %s refers to durability.Skip; only privatefstest.SkipSync may", fset.Position(sel.Pos()), rel)
-				}
-			}
-			return true
-		})
+		visit(rel, fset, file)
 		return nil
 	})
 	if err != nil {
@@ -120,12 +111,70 @@ func TestOnlyTestsImportPrivatefstest(t *testing.T) {
 	}
 }
 
-// No binary the repository builds, every main package under cmd and hack,
-// depends on privatefstest, or on the testing package by any route.
+// No file that is not a test imports privatefstest, so no production
+// package can switch off privatefs's syncs. Only the three privatefs files
+// that read the switch and privatefstest import durability, and of those
+// only privatefstest names Skip, in any spelling: durability.Skip, a
+// renamed or dot import's bare Skip, or a method value. It reads every Go
+// file in the repository, whatever its build constraints, and checks import
+// paths and identifiers, so an alias, a dot import or a file built only on
+// another platform is still seen. The one exception to the first rule is
+// the helper program TestSkipSyncPanicsOutsideATestBinary runs.
+func TestOnlyTestsImportPrivatefstest(t *testing.T) {
+	productionFiles(t, func(rel string, fset *token.FileSet, file *ast.File) {
+		importsDurability := false
+		for _, spec := range file.Imports {
+			ip, _ := strconv.Unquote(spec.Path.Value)
+			if ip == privatefstestIP && rel != helper {
+				t.Errorf("%s imports privatefstest; only tests may", rel)
+			}
+			if ip == durabilityIP {
+				importsDurability = true
+				if !durabilityImporters[rel] {
+					t.Errorf("%s imports durability; only privatefs's own files and privatefstest may", rel)
+				}
+			}
+		}
+		if !importsDurability || rel == setter {
+			return
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			if id, ok := n.(*ast.Ident); ok && id.Name == "Skip" {
+				t.Errorf("%s: %s names Skip; only privatefstest.SkipSync may", fset.Position(id.Pos()), rel)
+			}
+			return true
+		})
+	})
+}
+
+// No file that is not a test links to privatefs's switch by name. A
+// //go:linkname directive reaches a variable or function in a package that
+// Go's internal rule forbids importing, and needs no import, so neither the
+// import checks above nor the dependency check below sees it. No directive
+// in a file outside tests may mention internal/privatefs, which covers
+// durability's skipped, Skip and Skipped, and none may appear in privatefs
+// itself, where a one-argument directive would publish a symbol.
+func TestNoLinknameReachesPrivatefs(t *testing.T) {
+	productionFiles(t, func(rel string, fset *token.FileSet, file *ast.File) {
+		for _, group := range file.Comments {
+			for _, c := range group.List {
+				if strings.Contains(c.Text, "go:linkname") &&
+					(strings.Contains(c.Text, "internal/privatefs") || strings.HasPrefix(rel, "internal/privatefs/")) {
+					t.Errorf("%s: %s names privatefs in a go:linkname directive; only tests may link to it", fset.Position(c.Pos()), rel)
+				}
+			}
+		}
+	})
+}
+
+// No binary the repository builds, every main package in the module,
+// depends on privatefstest, or on the testing package by any route. The
+// helper program under testdata is not built by ./..., and is not a
+// binary the repository ships.
 func TestNoBinaryDependsOnPrivatefstestOrTesting(t *testing.T) {
 	root := moduleRoot(t)
 	goCmd := goCommand(t)
-	list := exec.Command(goCmd, "list", "-f", "{{if eq .Name \"main\"}}{{.ImportPath}}{{end}}", "./cmd/...", "./hack/...")
+	list := exec.Command(goCmd, "list", "-f", "{{if eq .Name \"main\"}}{{.ImportPath}}{{end}}", "./...")
 	list.Dir = root
 	out, err := list.Output()
 	if err != nil {
