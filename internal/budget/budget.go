@@ -4,12 +4,28 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
 
 // AccountKey combines the immutable Run UID and capability to partition usage.
 type AccountKey string
+
+// Account builds the account key that partitions usage: id, a slash, then the
+// capability, as in "3f2a.../model.inference". The id is an execution's UID or
+// a Docker allocation ID, which never contain a slash. Account does not check
+// that: an id with a slash, or an empty id or capability, gives a key that
+// SplitAccount reads differently, because SplitAccount cuts at the first
+// slash and leaves any later slash to the capability.
+func Account(id, capability string) string {
+	return id + "/" + capability
+}
+
+// SplitAccount is the inverse of Account. ok is false for a key with no slash.
+func SplitAccount(key string) (id, capability string, ok bool) {
+	return strings.Cut(key, "/")
+}
 
 // UsageReservation describes a conservative admission request. Limits are
 // supplied on every call so tightening a policy takes effect immediately.

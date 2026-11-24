@@ -164,5 +164,5 @@ func (g *ExecutionGrant) Meter(ctx context.Context, tracker *budget.Tracker, cap
 		}
 		return meter, nil
 	}
-	return tracker.Meter(g.Execution.UID+"/"+string(cap), limits), nil
+	return tracker.Meter(budget.Account(g.Execution.UID, string(cap)), limits), nil
 }

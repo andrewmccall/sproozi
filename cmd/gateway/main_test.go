@@ -423,7 +423,7 @@ func TestChatGPTStartupDoesNotRequireAPIKeyAndPinsPublicUpstream(t *testing.T) {
 func TestDisabledModulesDoNotRequireProviderCredentials(t *testing.T) {
 	validGatewayEnvironment(t)
 	t.Setenv("SPROOZI_ENABLED_CAPABILITIES", "kubernetes.read")
-	for _, key := range []string{"OPENAI_API_KEY",
+	for _, key := range []string{openAIKeyEnv,
 		"GITHUB_APP_ID",
 		"GITHUB_APP_INSTALLATION_ID",
 		"GITHUB_APP_PRIVATE_KEY_PATH",
@@ -453,7 +453,8 @@ func TestConfiguredDestinationRoutesAndSemanticPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := &startupConfig{enabled: map[api.CapabilityKind]bool{api.CapabilityNetworkEgress: true}, profiles: profiles}
+	cfg := &startupConfig{host: defaultHost,
+		enabled: map[api.CapabilityKind]bool{api.CapabilityNetworkEgress: true}, profiles: profiles}
 	routes := composeDispatcher(cfg,
 		map[api.CapabilityKind]http.Handler{api.CapabilityNetworkEgress: http.NotFoundHandler()}, nil, nil)
 	if !routes.Allows("registry.example:8443") || routes.Allows("registry.example:443") {

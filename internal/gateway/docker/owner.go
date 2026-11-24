@@ -260,7 +260,7 @@ func (o *Owner) validateAllocation(name string, a session.Allowance) error {
 }
 
 func account(allocation, capability string) budget.AccountKey {
-	return budget.AccountKey(allocation + "/" + capability)
+	return budget.AccountKey(budget.Account(allocation, capability))
 }
 
 func (o *Owner) bound(ctx context.Context, r record, running bool) error {

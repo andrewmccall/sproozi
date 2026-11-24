@@ -2,8 +2,10 @@ package work
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 )
 
@@ -49,7 +51,7 @@ func TestAdmissionFailsClosedForARecordItCannotRead(t *testing.T) {
 	}
 
 	// Not counted, and not an error: the record is there and is not a record.
-	if err = os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+	if err = privatefs.Replace(o.config.Directory, filepath.Base(path), []byte("{not json")); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := o.reserved(v.ID); n != 0 || err != nil {
@@ -81,7 +83,7 @@ func TestAdmissionFailsClosedForARecordItCannotRead(t *testing.T) {
 	if err = os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	if err = os.WriteFile(path, record, 0o600); err != nil {
+	if err = privatefs.Replace(o.config.Directory, filepath.Base(path), record); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := o.reserved(v.ID); n != 1 || err != nil {

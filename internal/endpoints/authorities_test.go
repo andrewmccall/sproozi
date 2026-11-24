@@ -1,6 +1,7 @@
 package endpoints_test
 
 import (
+	"net"
 	"testing"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -28,6 +29,20 @@ func TestEveryModelAuthorityBelongsToAProvider(t *testing.T) {
 		if capability == api.CapabilityModelInference && owned[authority] == "" {
 			t.Errorf("%s is a model.inference authority no provider in internal/endpoints/model/providers.go names",
 				authority)
+		}
+	}
+}
+
+// The gateway splits these keys into a host and a port without checking the
+// error (inspectionHosts and pruneModelHosts in cmd/gateway), and the model
+// provider table cuts its authorities at the last colon. Both rely on every
+// reserved authority being "host:port" with neither part empty.
+func TestEverySemanticAuthorityHasAHostAndAPort(t *testing.T) {
+	for authority := range endpoints.SemanticAuthorities {
+		host, port, err := net.SplitHostPort(authority)
+		if err != nil || host == "" || port == "" {
+			t.Errorf("semantic authority %q does not split into a host and a port: %q, %q, %v",
+				authority, host, port, err)
 		}
 	}
 }

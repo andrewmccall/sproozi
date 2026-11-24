@@ -27,6 +27,19 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+// Names the controller, the gateway and the install manifests share.
+// test/manifests checks the manifests against them.
+const (
+	// AuthoritySecretName and ServingSecretName are the precreated Secrets in
+	// the system namespace that config/certificates ships.
+	AuthoritySecretName = "sproozi-certificate-authority"
+	ServingSecretName   = "sproozi-gateway-tls"
+	// GatewayHost is the gateway's own name in the cluster, the default
+	// SPROOZI_GATEWAY_HOST. Its certificate must cover it and GatewayHost with
+	// ".cluster.local".
+	GatewayHost = "sproozi-gateway.sproozi-system.svc"
+)
+
 // Annotations on the authority Secret. RotationRequest is the operator's
 // explicit instruction; the others report status.
 const (

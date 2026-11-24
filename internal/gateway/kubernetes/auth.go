@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	authv1 "k8s.io/api/authentication/v1"
@@ -378,7 +379,7 @@ func (a *Authenticator) find(ctx context.Context, reader client.Client, serviceA
 		grant.Managed = true
 		grant.Allocations = make(map[sprooziv1alpha1.CapabilityKind]gateway.Allocation, len(record.Ceilings))
 		for capability, ceiling := range record.Ceilings {
-			grant.Allocations[capability] = gateway.Allocation{AccountKey: record.RunUID + "/" + string(capability), Ceiling: ceiling}
+			grant.Allocations[capability] = gateway.Allocation{AccountKey: budget.Account(record.RunUID, string(capability)), Ceiling: ceiling}
 		}
 	}
 	return grant, nil

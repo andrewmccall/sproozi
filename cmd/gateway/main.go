@@ -43,6 +43,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/budget"
 	budgetkubernetes "github.com/andrewmccall/sproozi/internal/budget/kubernetes"
+	"github.com/andrewmccall/sproozi/internal/certificates"
 	"github.com/andrewmccall/sproozi/internal/diagnose"
 	"github.com/andrewmccall/sproozi/internal/endpoints"
 	"github.com/andrewmccall/sproozi/internal/endpoints/destination"
@@ -58,7 +59,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/proxytransport"
 )
 
-const defaultHost = "sproozi-gateway.sproozi-system.svc"
+const defaultHost = certificates.GatewayHost
 
 // Startup errors name the installed object that supplies each value so an
 // administrator knows what to fix. ConfigMaps shipped by config/default carry
@@ -108,7 +109,22 @@ type startupConfig struct {
 	admission            connectionLimits
 	maxModelCall         time.Duration
 	ledgerRetention      time.Duration
+	// agentNamespace holds the AgentRuns and their sandboxes; credentialNamespace
+	// holds the ChatGPT sign-in Secret; budgetNamespace holds the budget ledgers.
+	agentNamespace, credentialNamespace, budgetNamespace string
+	// gitBaseURL and apiBaseURL are the GitHub upstream origins.
+	gitBaseURL, apiBaseURL string
+	// modelDiagnostics turns on provider-response diagnostics on stderr.
+	modelDiagnostics bool
 }
+
+// Defaults for the settings an empty or unset variable leaves open.
+const (
+	defaultAgentNamespace   = "sproozi-agents"
+	defaultSystemNamespace  = "sproozi-system"
+	defaultGitBaseURL       = "https://github.com"
+	defaultGitHubAPIBaseURL = "https://api.github.com"
+)
 
 // connectionLimits are the administrator-tunable gateway connection limits. They
 // must fit the gateway's memory limit; see proxytransport.DefaultMaxConnections.
@@ -196,7 +212,7 @@ func goMemoryLimit() (memoryLimit, error) {
 				"check limits.memory on the gateway Deployment", memoryLimitEnv, raw, minContainerMemoryLimit)
 		}
 	}
-	if explicit := os.Getenv("GOMEMLIMIT"); explicit != "" {
+	if explicit := os.Getenv(goMemLimitEnv); explicit != "" {
 		return memoryLimit{source: "GOMEMLIMIT=" + explicit}, nil
 	}
 	if raw == "" {
@@ -221,15 +237,15 @@ func boundedInteger(key string, fallback, upper int) (int, error) {
 // loadGitHubApp reads and checks the GitHub App identity the pull request
 // module signs in with.
 func loadGitHubApp() (appID, installationID int64, privateKey []byte, err error) {
-	appID, err = githubAppInteger("GITHUB_APP_ID", "app-id")
+	appID, err = githubAppInteger(githubAppIDEnv, "app-id")
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	installationID, err = githubAppInteger("GITHUB_APP_INSTALLATION_ID", "installation-id")
+	installationID, err = githubAppInteger(githubAppInstallationIDEnv, "installation-id")
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	privateKey, err = os.ReadFile(os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH"))
+	privateKey, err = os.ReadFile(os.Getenv(githubAppPrivateKeyPathEnv))
 	if errors.Is(err, os.ErrNotExist) {
 		return 0, 0, nil, fmt.Errorf("GitHub App private key is missing: create key private-key.pem in %s",
 			githubAppSource)
@@ -258,8 +274,8 @@ func loadStartupConfig() (*startupConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	host := strings.ToLower(envOrDefault("SPROOZI_GATEWAY_HOST", defaultHost))
-	certFile, keyFile := os.Getenv("SPROOZI_GATEWAY_CERT_FILE"), os.Getenv("SPROOZI_GATEWAY_KEY_FILE")
+	host := strings.ToLower(envOrDefault(gatewayHostEnv, defaultHost))
+	certFile, keyFile := os.Getenv(gatewayCertFileEnv), os.Getenv(gatewayKeyFileEnv)
 	if certFile == "" || keyFile == "" {
 		return nil, errors.New("gateway TLS certificate and key are required: " +
 			"set SPROOZI_GATEWAY_CERT_FILE and SPROOZI_GATEWAY_KEY_FILE to tls.crt and tls.key " +
@@ -271,7 +287,7 @@ func loadStartupConfig() (*startupConfig, error) {
 	}
 	profileData := []byte("{}")
 	if enabled[sprooziv1alpha1.CapabilityNetworkEgress] {
-		profileData, err = os.ReadFile(envOrDefault("EGRESS_PROFILES_PATH", "/etc/sproozi/egress/profiles.json"))
+		profileData, err = os.ReadFile(envOrDefault(egressProfilesPathEnv, "/etc/sproozi/egress/profiles.json"))
 		if err != nil {
 			return nil, fmt.Errorf("read egress profiles (key profiles.json in %s): %w", egressProfilesSource, err)
 		}
@@ -287,10 +303,10 @@ func loadStartupConfig() (*startupConfig, error) {
 	var pricing *modelgateway.PricingTable
 	openAIKey, anthropicKey, modelAuthMode := "", "", ""
 	openAIToken, anthropicToken, copilotToken := "", "", ""
-	openAIUpstreamURL := envOrDefault("OPENAI_UPSTREAM_URL", "https://api.openai.com")
-	anthropicUpstreamURL := envOrDefault("ANTHROPIC_UPSTREAM_URL", "https://api.anthropic.com")
+	openAIUpstreamURL := envOrDefault(openAIUpstreamURLEnv, modelgateway.OpenAIUpstreamURL)
+	anthropicUpstreamURL := envOrDefault(anthropicUpstreamURLEnv, modelgateway.AnthropicUpstreamURL)
 	if enabled[sprooziv1alpha1.CapabilityModelInference] {
-		pricingFile, err := os.Open(envOrDefault("MODEL_PRICING_PATH", "/etc/sproozi/model/pricing.json"))
+		pricingFile, err := os.Open(envOrDefault(modelPricingPathEnv, "/etc/sproozi/model/pricing.json"))
 		if err != nil {
 			return nil, fmt.Errorf("read model pricing (key pricing.json in %s): %w", modelPricingSource, err)
 		}
@@ -303,11 +319,12 @@ func loadStartupConfig() (*startupConfig, error) {
 		if closeErr != nil {
 			return nil, fmt.Errorf("close model pricing: %w", closeErr)
 		}
-		openAIKey, anthropicKey, modelAuthMode, err = loadModelCredentials(openAIUpstreamURL)
+		openAIToken, anthropicToken, copilotToken = readSignInTokens()
+		openAIKey, anthropicKey, modelAuthMode, err = loadModelCredentials(openAIUpstreamURL, openAIToken, anthropicToken)
 		if err != nil {
 			return nil, err
 		}
-		openAIToken, anthropicToken, copilotToken, err = loadSignInTokens(modelAuthMode, openAIKey, anthropicKey)
+		err = checkSignInTokens(modelAuthMode, openAIKey, anthropicKey, openAIToken, anthropicToken, copilotToken)
 		if err != nil {
 			return nil, err
 		}
@@ -326,7 +343,7 @@ func loadStartupConfig() (*startupConfig, error) {
 			return nil, err
 		}
 	}
-	certificates := map[string]tls.Certificate{}
+	perHost := map[string]tls.Certificate{}
 	leaf, err := x509.ParseCertificate(certificate.Certificate[0])
 	if err != nil {
 		return nil, err
@@ -347,17 +364,23 @@ func loadStartupConfig() (*startupConfig, error) {
 			return nil, fmt.Errorf("gateway certificate in %s does not cover configured host %q: "+
 				"reissue the certificate with %q in its subjectAltName", gatewayTLSSource, name, name)
 		}
-		certificates[name] = certificate
+		perHost[name] = certificate
 	}
 	return &startupConfig{
 		enabled: enabled,
-		host:    host, listenerCert: certificate, certificates: certificates, certFile: certFile, keyFile: keyFile,
+		host:    host, listenerCert: certificate, certificates: perHost, certFile: certFile, keyFile: keyFile,
 		profiles: profiles, pricing: pricing, openAIKey: openAIKey, anthropicKey: anthropicKey, modelAuthMode: modelAuthMode,
 		openAIToken: openAIToken, anthropicToken: anthropicToken, copilotToken: copilotToken,
 		openAIUpstreamURL: openAIUpstreamURL, anthropicUpstreamURL: anthropicUpstreamURL,
 		appID: appID, installationID: installationID, privateKey: privateKey,
 		mcpRegistry: mcpRegistry, admission: admission, maxModelCall: maxModelCall,
-		ledgerRetention: ledgerRetention,
+		ledgerRetention:     ledgerRetention,
+		agentNamespace:      envOrDefault(agentNamespaceEnv, defaultAgentNamespace),
+		credentialNamespace: envOrDefault(credentialNamespaceEnv, defaultSystemNamespace),
+		budgetNamespace:     envOrDefault(budgetNamespaceEnv, defaultSystemNamespace),
+		gitBaseURL:          envOrDefault(gitBaseURLEnv, defaultGitBaseURL),
+		apiBaseURL:          envOrDefault(apiBaseURLEnv, defaultGitHubAPIBaseURL),
+		modelDiagnostics:    os.Getenv(modelDiagnosticsEnv) == "true",
 	}, nil
 }
 
@@ -397,33 +420,41 @@ func pruneModelHosts(hosts, owned map[string]bool, modes map[string]string) {
 	}
 }
 
-// loadSignInTokens reads gateway-held sign-in tokens, such as one from claude
-// setup-token, which a provider without an API key attaches (ADR 0047).
-func loadSignInTokens(mode, openAIKey, anthropicKey string) (string, string, string, error) {
-	openAI := strings.TrimSpace(os.Getenv("OPENAI_SIGN_IN_TOKEN"))
-	anthropic := strings.TrimSpace(os.Getenv("ANTHROPIC_SIGN_IN_TOKEN"))
-	copilot := strings.TrimSpace(os.Getenv(copilotTokenEnv))
+// readSignInTokens reads gateway-held sign-in tokens, such as one from claude
+// setup-token, which a provider without an API key attaches (ADR 0047). Each
+// is read once and trimmed, so a blank value is no token wherever it is used.
+func readSignInTokens() (openAI, anthropic, copilot string) {
+	return strings.TrimSpace(os.Getenv(openAITokenEnv)), strings.TrimSpace(os.Getenv(anthropicTokenEnv)),
+		strings.TrimSpace(os.Getenv(copilotTokenEnv))
+}
+
+// checkSignInTokens rejects a token that is not one line or that competes with
+// the provider's API key or with chatgpt mode.
+func checkSignInTokens(mode, openAIKey, anthropicKey, openAI, anthropic, copilot string) error {
 	for _, token := range []struct{ env, key, value, apiKey string }{
 		{openAITokenEnv, "openai-sign-in-token", openAI, openAIKey},
 		{anthropicTokenEnv, "anthropic-sign-in-token", anthropic, anthropicKey},
 		{copilotTokenEnv, "copilot-sign-in-token", copilot, ""},
 	} {
 		if strings.ContainsAny(token.value, "\r\n") {
-			return "", "", "", errors.New(token.env + " is invalid: key " + token.key + " in " +
+			return errors.New(token.env + " is invalid: key " + token.key + " in " +
 				modelCredentialsSource + " must be a single line")
 		}
 		if token.value != "" && token.apiKey != "" {
-			return "", "", "", errors.New(token.env + " and the provider's API key are both set in " + modelCredentialsSource +
+			return errors.New(token.env + " and the provider's API key are both set in " + modelCredentialsSource +
 				": keep one")
 		}
 	}
 	if openAI != "" && mode == modelauth.ChatGPTMode {
-		return "", "", "", errors.New("OPENAI_SIGN_IN_TOKEN can't be used in chatgpt mode, which holds its own sign-in")
+		return errors.New("OPENAI_SIGN_IN_TOKEN can't be used in chatgpt mode, which holds its own sign-in")
 	}
-	return openAI, anthropic, copilot, nil
+	return nil
 }
 
-func loadModelCredentials(openAIUpstreamURL string) (string, string, string, error) {
+// loadModelCredentials reads the API keys and the authentication mode. A
+// sign-in token from readSignInTokens satisfies api_key mode's need for a
+// credential.
+func loadModelCredentials(openAIUpstreamURL, openAIToken, anthropicToken string) (string, string, string, error) {
 	openAIKey := strings.TrimSpace(os.Getenv(openAIKeyEnv))
 	anthropicKey := strings.TrimSpace(os.Getenv(anthropicKeyEnv))
 	for _, credential := range []struct{ env, key, value string }{
@@ -440,11 +471,11 @@ func loadModelCredentials(openAIUpstreamURL string) (string, string, string, err
 		return "", "", "", fmt.Errorf("MODEL_AUTH_MODE=%q must be api_key, chatgpt or workload: check key mode in %s",
 			mode, modelAuthSource)
 	}
-	if mode == modelauth.ChatGPTMode && openAIUpstreamURL != "https://api.openai.com" {
+	if mode == modelauth.ChatGPTMode && openAIUpstreamURL != modelgateway.OpenAIUpstreamURL {
 		return "", "", "", errors.New("ChatGPT plan usage requires the public OpenAI API upstream")
 	}
 	if mode == modelauth.APIKeyMode && openAIKey == "" && anthropicKey == "" &&
-		os.Getenv("OPENAI_SIGN_IN_TOKEN") == "" && os.Getenv("ANTHROPIC_SIGN_IN_TOKEN") == "" {
+		openAIToken == "" && anthropicToken == "" {
 		return "", "", "", errors.New("OPENAI_API_KEY or ANTHROPIC_API_KEY is required in api_key mode: " +
 			"set key openai-api-key or anthropic-api-key in " + modelCredentialsSource +
 			", or set key mode to chatgpt in " + modelAuthSource)
@@ -473,7 +504,7 @@ func inspectionHosts(host string, enabled map[sprooziv1alpha1.CapabilityKind]boo
 
 func loadMCPRegistry(gatewayHost string) (*mcpgateway.Registry, error) {
 	data := []byte(`{"servers":{}}`)
-	if registryPath := os.Getenv("MCP_SERVERS_PATH"); registryPath != "" {
+	if registryPath := os.Getenv(mcpServersPathEnv); registryPath != "" {
 		var err error
 		data, err = os.ReadFile(registryPath)
 		if err != nil {
@@ -502,7 +533,7 @@ func enabledCapabilities() (map[sprooziv1alpha1.CapabilityKind]bool, error) {
 		sprooziv1alpha1.CapabilityNetworkEgress,
 	}
 	enabled := map[sprooziv1alpha1.CapabilityKind]bool{}
-	for item := range strings.SplitSeq(envOrDefault("SPROOZI_ENABLED_CAPABILITIES", "kubernetes.read"), ",") {
+	for item := range strings.SplitSeq(envOrDefault(enabledCapabilitiesEnv, "kubernetes.read"), ",") {
 		cap := sprooziv1alpha1.CapabilityKind(strings.TrimSpace(item))
 		if !slices.Contains(supported, cap) {
 			return nil, fmt.Errorf("SPROOZI_ENABLED_CAPABILITIES lists unknown capability %q", cap)
@@ -599,7 +630,7 @@ func modelRoutes(cfg *startupConfig, auditLogger audit.Writer, modelClient *http
 		Upstreams: map[string]string{modelgateway.OpenAIAuthority: cfg.openAIUpstreamURL,
 			modelgateway.AnthropicAuthority: cfg.anthropicUpstreamURL},
 	}
-	if os.Getenv("MODEL_DIAGNOSTICS") == "true" {
+	if cfg.modelDiagnostics {
 		// Administrator opt-in: bounded provider errors only, separate from audit.
 		// Never log prompts, model text, reasoning, raw bodies or auth headers.
 		config.Handler.Diagnostics = func(d modelgateway.ResponseDiagnostic) { _ = json.NewEncoder(os.Stderr).Encode(d) }
@@ -620,9 +651,6 @@ func composeDispatcher(
 ) gateway.Dispatcher {
 	routes := gateway.Dispatcher{}
 	host := cfg.host
-	if host == "" {
-		host = defaultHost
-	}
 	// Named MCP capabilities and the Sproozi control connection share the
 	// gateway's own authority. The module chooses the exact account only after
 	// authenticating the requested path.
@@ -703,8 +731,8 @@ func composeGateway(cfg *startupConfig, deps gatewayDeps) (gateway.Dispatcher, e
 		handlers[sprooziv1alpha1.CapabilityGitHubPullRequest] = &githubgateway.Handler{Config: githubgateway.HandlerConfig{
 			TokenProvider: deps.githubTokens,
 			AuditLogger:   deps.journal,
-			GitBaseURL:    envOrDefault("GIT_BASE_URL", "https://github.com"),
-			APIBaseURL:    envOrDefault("API_BASE_URL", "https://api.github.com"),
+			GitBaseURL:    cfg.gitBaseURL,
+			APIBaseURL:    cfg.apiBaseURL,
 			HTTPClient:    deps.upstream}}
 	}
 	handlers[sprooziv1alpha1.CapabilityPackagesInstall] = &packagesgateway.Handler{Config: packagesgateway.HandlerConfig{
@@ -775,12 +803,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	agentNamespace := envOrDefault("AGENT_NAMESPACE", "sproozi-agents")
-	authorityClient, err := startAuthorityCache(context.Background(), config, agentNamespace)
+	authorityClient, err := startAuthorityCache(context.Background(), config, cfg.agentNamespace)
 	if err != nil {
 		log.Fatal(err)
 	}
-	authenticator := gatewaykubernetes.NewAuthenticator(clientset, "sproozi-gateway", runtimeClient, agentNamespace).
+	authenticator := gatewaykubernetes.NewAuthenticator(clientset, "sproozi-gateway", runtimeClient, cfg.agentNamespace).
 		WithWatchCache(authorityClient)
 	httpClient := newUpstreamClient(upstreamCallTimeout)
 	modelClient := newModelClient()
@@ -811,7 +838,7 @@ func main() {
 		// The ChatGPT credential stays in sproozi-system, where the gateway's
 		// access to it is limited to the one named Secret.
 		store := modelauthkube.SessionStore{Client: runtimeClient,
-			Namespace: envOrDefault("CREDENTIAL_NAMESPACE", "sproozi-system")}
+			Namespace: cfg.credentialNamespace}
 		if err := checkChatGPTSession(context.Background(), store); err != nil {
 			log.Fatal(err)
 		}
@@ -819,7 +846,7 @@ func main() {
 	}
 
 	// Unknown authorities are absent and are denied before an upstream call.
-	budgetNamespace := envOrDefault("BUDGET_NAMESPACE", "sproozi-system")
+	budgetNamespace := cfg.budgetNamespace
 	budgets := budget.NewTrackerWithLedger(budgetkubernetes.NewLedger(runtimeClient, budgetNamespace))
 	// Every current reservation carries a lease, so a pending reservation
 	// without one can only come from a gateway from before leases. Settle
@@ -981,7 +1008,7 @@ func pruneLedgers(ctx context.Context, c client.Client, namespace string, now ti
 // A period under an hour could delete a ledger before a run that was just
 // deleted is gone from every component's view.
 func loadLedgerRetention() (time.Duration, error) {
-	retention, err := durationEnv("BUDGET_LEDGER_RETENTION", budgetkubernetes.DefaultRetention)
+	retention, err := durationEnv(budgetLedgerRetentionEnv, budgetkubernetes.DefaultRetention)
 	if err != nil {
 		return 0, err
 	}
@@ -1190,7 +1217,8 @@ func validateModelUpstream(name, value string) error {
 // changes nothing; an administrator removes the binding.
 func warnSystemConfigWrites(ctx context.Context, clients authentication.Interface, out io.Writer) {
 	for _, verb := range []string{"create", "update", "patch", "delete"} {
-		attributes := &authorizationv1.ResourceAttributes{Namespace: "sproozi-system", Resource: "configmaps", Verb: verb}
+		attributes := &authorizationv1.ResourceAttributes{
+			Namespace: defaultSystemNamespace, Resource: "configmaps", Verb: verb}
 		review, err := clients.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx,
 			&authorizationv1.SelfSubjectAccessReview{
 				Spec: authorizationv1.SelfSubjectAccessReviewSpec{ResourceAttributes: attributes},

@@ -228,7 +228,7 @@ func inc(r registry.Record) session.Incarnation {
 	return session.Incarnation{ExecutionID: r.RunUID, ResourceUID: r.PodUID}
 }
 func account(r registry.Record, name api.CapabilityKind) budget.AccountKey {
-	return budget.AccountKey(r.RunUID + "/" + string(name))
+	return budget.AccountKey(budget.Account(r.RunUID, string(name)))
 }
 func (p *Placement) liveProfile(ctx context.Context, l session.Launch) (map[api.CapabilityKind]api.EndpointBudget, error) {
 	return p.liveProfileInput(ctx, l, false)

@@ -483,7 +483,7 @@ func spends(t *testing.T, name string, routes gateway.Dispatcher, authority stri
 		t.Errorf("%s: no budget tracker for %s", name, capability)
 		return
 	}
-	state, err := tracker.State(uid + "/" + string(capability))
+	state, err := tracker.State(budget.Account(uid, string(capability)))
 	if err != nil || state.UnitsUsed != 1 || state.ReservedUnits != 0 {
 		t.Errorf("%s: a served request left a one-unit %s budget at %+v (%v); it must spend it, or be listed as free",
 			name, capability, state, err)

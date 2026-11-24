@@ -13,6 +13,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/certificates"
 	"github.com/andrewmccall/sproozi/internal/proxytransport"
 )
 
@@ -65,7 +66,7 @@ func (r *certificateReloader) reload() (bool, error) {
 // published trust as ca.crt, as the certificate controller writes it, the leaf
 // must chain to that trust; otherwise only the names are checked.
 func (r *certificateReloader) verifyChain(leaf *x509.Certificate) error {
-	trust, err := os.ReadFile(filepath.Join(filepath.Dir(r.certFile), "ca.crt"))
+	trust, err := os.ReadFile(filepath.Join(filepath.Dir(r.certFile), certificates.CABundleKey))
 	if os.IsNotExist(err) {
 		for _, host := range r.hosts {
 			if err = leaf.VerifyHostname(host); err != nil {

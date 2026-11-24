@@ -59,11 +59,18 @@ const (
 	ProviderAnthropic = "anthropic"
 )
 
+// The public API origins, which an administrator may replace and which the
+// gateway checks against when a mode needs the public one.
+const (
+	OpenAIUpstreamURL    = "https://api.openai.com"
+	AnthropicUpstreamURL = "https://api.anthropic.com"
+)
+
 // providers is the table, in the order compositions build their routes.
 var providers = []Provider{
 	{Name: ProviderOpenAI,
 		Models: []ModelRoute{
-			{Authority: OpenAIAuthority, UpstreamURL: "https://api.openai.com",
+			{Authority: OpenAIAuthority, UpstreamURL: OpenAIUpstreamURL,
 				New: func(c HandlerConfig) http.Handler { return &Handler{Config: c} }},
 			{Authority: ChatGPTBackendAuthority, UpstreamURL: "https://chatgpt.com", SignedIn: true,
 				New: NewChatGPTBackendHandler},
@@ -77,7 +84,7 @@ var providers = []Provider{
 		APIKey: func(key string) modelauth.Authenticator { return modelauth.APIKey{Key: key} }},
 	{Name: ProviderAnthropic,
 		Models: []ModelRoute{
-			{Authority: AnthropicAuthority, UpstreamURL: "https://api.anthropic.com",
+			{Authority: AnthropicAuthority, UpstreamURL: AnthropicUpstreamURL,
 				New: func(c HandlerConfig) http.Handler { return NewAnthropicHandler(c) }},
 		},
 		SignInAuthority: AnthropicSignInAuthority,

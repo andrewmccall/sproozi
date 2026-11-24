@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 )
 
@@ -63,7 +64,7 @@ func TestAdmissionAdmitsPastAnInvalidJournal(t *testing.T) {
 	t.Parallel()
 	o, id, journal := journalOf(t)
 	for _, content := range []string{"{bad", `{"id":"x"} trailing`, "{}"} {
-		if err := os.WriteFile(journal, []byte(content), 0o600); err != nil {
+		if err := privatefs.Replace(filepath.Dir(journal), filepath.Base(journal), []byte(content)); err != nil {
 			t.Fatal(err)
 		}
 		if n, err := o.reserved(id); n != 0 || err != nil {
@@ -85,7 +86,7 @@ func TestReservedIsZeroForAJournalRemovedMidRead(t *testing.T) {
 	o.config.interleave = func(step, got string) {
 		if step == stepEntry && got == id {
 			_ = os.Remove(journal)
-			_ = os.WriteFile(o.path(id, removedSuffix), []byte(`{"version":1,"id":"`+id+`"}`), 0o600)
+			_ = privatefs.Replace(o.config.Directory, id+removedSuffix, []byte(`{"version":1,"id":"`+id+`"}`))
 		}
 	}
 	n, err := o.reserved(id)

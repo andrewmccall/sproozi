@@ -131,6 +131,47 @@ it. Each refresh step is bounded at 30 seconds, and no model request waits
 past its own deadline.
 See [ChatGPT sign-in failures](../guides/model-provider-auth.md#chatgpt-sign-in-failures).
 
+## Gateway environment
+
+The gateway has no flags. Every setting is an environment variable, and this
+table lists all of them. It is an index: the pages in the last column explain
+a setting where one does. A variable the install does not set takes the
+default shown. An empty value counts as unset. `cmd/gateway`'s tests keep this
+table and the code's list of variables in step.
+
+| Variable | Sets | Default | Release install | More |
+| --- | --- | --- | --- | --- |
+| `SPROOZI_ENABLED_CAPABILITIES` | The modules the gateway serves, comma-separated | `kubernetes.read` | Literal in `config/manager/gateway.yaml`: all five modules | [Objects](#objects) |
+| `SPROOZI_GATEWAY_HOST` | The gateway's own name, lower-cased; its certificate must cover it | `sproozi-gateway.sproozi-system.svc` | Literal, the default | [Objects](#objects) |
+| `SPROOZI_GATEWAY_CERT_FILE` | Path of the serving certificate | None; required | Literal `/var/run/sproozi-gateway/tls.crt`, from Secret `sproozi-gateway-tls` | [Objects](#objects) |
+| `SPROOZI_GATEWAY_KEY_FILE` | Path of the serving certificate's key | None; required | Literal `/var/run/sproozi-gateway/tls.key`, from Secret `sproozi-gateway-tls` | [Objects](#objects) |
+| `SPROOZI_GATEWAY_MAX_CONNECTIONS` | Connection limit | 2048 | Literal `2048` | [Objects](#objects) |
+| `SPROOZI_GATEWAY_MAX_SESSIONS_PER_EXECUTION` | Inspected connections one execution may hold | 16, or the connection limit if lower | Not set by the install | [Objects](#objects) |
+| `SPROOZI_GATEWAY_MAX_MODEL_CALL_SECONDS` | Longest one model call may stream, in seconds | 1200 | Not set by the install | [Objects](#objects), [Model call deadline](agentpolicy.md#model-call-deadline) |
+| `SPROOZI_GATEWAY_MEMORY_LIMIT` | The container memory limit in bytes, from which the Go memory limit is derived | None | Container `limits.memory` through `resourceFieldRef` | [Objects](#objects) |
+| `GOMEMLIMIT` | An explicit Go memory limit that takes precedence over the derived one | None | Not set by the install | [Objects](#objects) |
+| `BUDGET_LEDGER_RETENTION` | How long a settled ledger of a deleted run is kept, as a Go duration | `168h` | Not set by the install | [State and deployment controls](#state-and-deployment-controls), [BudgetLedger](budgetledger.md) |
+| `BUDGET_NAMESPACE` | Namespace of the budget ledgers | `sproozi-system` | Literal, the default | [State and deployment controls](#state-and-deployment-controls), [BudgetLedger](budgetledger.md) |
+| `CREDENTIAL_NAMESPACE` | Namespace of the ChatGPT sign-in Secret, read in `chatgpt` mode | `sproozi-system` | Not set by the install | [State and deployment controls](#state-and-deployment-controls) |
+| `AGENT_NAMESPACE` | Namespace of the AgentRuns the gateway authenticates | `sproozi-agents` | Literal, the default | [Objects](#objects) |
+| `EGRESS_PROFILES_PATH` | Path of the egress profiles, read only with `network.egress` | `/etc/sproozi/egress/profiles.json` | Literal, the default, from ConfigMap `sproozi-egress-gateway-profiles` key `profiles.json` | [Egress profile format](#egress-profile-format) |
+| `MCP_SERVERS_PATH` | Path of the remote MCP registry | None, which gives an empty registry | Literal `/etc/sproozi/mcp/servers.json`, from ConfigMap `sproozi-mcp-servers` key `servers.json` | [Remote MCP registration](#remote-mcp-registration), [Configured MCP](configured-mcp.md) |
+| `MODEL_PRICING_PATH` | Path of the model pricing table, read only with `model.inference` | `/etc/sproozi/model/pricing.json` | Literal, the default, from ConfigMap `sproozi-model-gateway-pricing` key `pricing.json` | [Model pricing format](#model-pricing-format) |
+| `MODEL_AUTH_MODE` | How the model module authenticates: `api_key`, `chatgpt` or `workload` | `api_key` | ConfigMap `model-gateway-auth` key `mode`, optional | [Model provider authentication](../guides/model-provider-auth.md) |
+| `OPENAI_API_KEY` | The gateway-held OpenAI API key | None | Secret `model-gateway-credentials` key `openai-api-key`, optional | [Model provider authentication](../guides/model-provider-auth.md) |
+| `ANTHROPIC_API_KEY` | The gateway-held Anthropic API key | None | Secret `model-gateway-credentials` key `anthropic-api-key`, optional | [Model provider authentication](../guides/model-provider-auth.md) |
+| `OPENAI_SIGN_IN_TOKEN` | A gateway-held OpenAI sign-in token | None | Secret `model-gateway-credentials` key `openai-sign-in-token`, optional | [Objects](#objects) |
+| `ANTHROPIC_SIGN_IN_TOKEN` | A gateway-held Anthropic sign-in token | None | Secret `model-gateway-credentials` key `anthropic-sign-in-token`, optional | [Objects](#objects) |
+| `COPILOT_SIGN_IN_TOKEN` | A gateway-held GitHub token for Copilot's hosts | None | Secret `model-gateway-credentials` key `copilot-sign-in-token`, optional | [Objects](#objects) |
+| `OPENAI_UPSTREAM_URL` | Origin the OpenAI routes forward to, a bare `https` origin; read only with `model.inference` | `https://api.openai.com` | Not set by the install | [Security hardening](security-hardening.md#model-budgets-are-not-hard-spending-ceilings) |
+| `ANTHROPIC_UPSTREAM_URL` | Origin the Anthropic routes forward to, a bare `https` origin; read only with `model.inference` | `https://api.anthropic.com` | Not set by the install | [Security hardening](security-hardening.md#model-budgets-are-not-hard-spending-ceilings) |
+| `GITHUB_APP_ID` | The GitHub App's ID; required with `github.pull_request` | None | Secret `capability-proxy-github-app` key `app-id`, optional | [Objects](#objects) |
+| `GITHUB_APP_INSTALLATION_ID` | The GitHub App's installation ID; required with `github.pull_request` | None | Secret `capability-proxy-github-app` key `installation-id`, optional | [Objects](#objects) |
+| `GITHUB_APP_PRIVATE_KEY_PATH` | Path of the GitHub App's private key; required with `github.pull_request` | None | Literal `/var/run/secrets/sproozi/github-app/private-key.pem`, from Secret `capability-proxy-github-app` key `private-key.pem` | [Objects](#objects) |
+| `GIT_BASE_URL` | Upstream for git smart HTTP in the pull request module | `https://github.com` | Not set by the install | None |
+| `API_BASE_URL` | Upstream for the GitHub REST and GraphQL API in the pull request module | `https://api.github.com` | Not set by the install | None |
+| `MODEL_DIAGNOSTICS` | When exactly `true`, writes bounded provider-error records to stderr, apart from the audit stream | Off | Not set by the install | None |
+
 ## Gateway name lookups
 
 The Kubernetes gateway looks up a provider's host name itself, with Go's
