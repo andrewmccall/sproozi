@@ -82,8 +82,8 @@ func TestAModelAuthorityOutsideTheProviderTableIsNotServed(t *testing.T) {
 			name string
 			auth modelauth.Authenticator
 		}{
-			{mechanismKey, modelauth.APIKey{Key: "sk-fixture"}},
-			{mechanismToken, modelauth.Token{Value: "fixture-token"}},
+			{mechanismKey, modelauth.APIKey{Key: keyFixture}},
+			{mechanismToken, modelauth.Token{Value: tokenFixture}},
 			{modelauth.ChatGPTMode, &modelauth.ChatGPT{}},
 			{mechanismSignIn, modelauth.Workload{}},
 		} {

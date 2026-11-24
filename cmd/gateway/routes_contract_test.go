@@ -200,7 +200,8 @@ func TestAModelAuthorityOutsideTheProviderTableIsNotServed(t *testing.T) {
 			}
 			cfg.mcpRegistry = routetest.MCPRegistry(t)
 			routes, _ := composeServing(t, cfg, &routetest.Recorder{})
-			if route, reserved := routes[strayModelAuthority]; !reserved || route.Handler != nil || routes.Allows(strayModelAuthority) {
+			route, reserved := routes[strayModelAuthority]
+			if !reserved || route.Handler != nil || routes.Allows(strayModelAuthority) {
 				t.Errorf("%s is not reserved and closed: %+v", strayModelAuthority, route)
 			}
 			if strays := routetest.ModelAuthorities(routes); len(strays) != 0 {

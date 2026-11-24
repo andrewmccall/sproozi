@@ -24,6 +24,9 @@ import (
 // not name, added to endpoints.SemanticAuthorities by a test.
 const strayModelAuthority = "api.newmodel.example:443"
 
+// sweepCopilot selects a gateway-held Copilot token in a record's sweep.
+const sweepCopilot = "copilot"
+
 // certifiedModelHosts are the names among every provider's hosts and every
 // model.inference semantic authority's host that cfg's certificate must
 // cover.
@@ -87,7 +90,7 @@ func TestModelRoutesAreRecorded(t *testing.T) {
 	nothing := func() {}
 	for _, mode := range []string{modelauth.APIKeyMode, modelauth.ChatGPTMode, modelauth.WorkloadMode} {
 		for _, keys := range []string{"", sweepOpenAI, sweepAnthropic, sweepBoth} {
-			for _, tokens := range []string{"", sweepOpenAI, sweepAnthropic, "copilot", sweepAll} {
+			for _, tokens := range []string{"", sweepOpenAI, sweepAnthropic, sweepCopilot, sweepAll} {
 				for _, modules := range append(moduleSelections, "network.egress", "kubernetes.read,model.inference") {
 					name := fmt.Sprintf("%s/keys=%s/tokens=%s/%s", mode, keys, tokens, modules)
 					compose(name, func() {
@@ -97,7 +100,7 @@ func TestModelRoutesAreRecorded(t *testing.T) {
 						t.Setenv("OPENAI_SIGN_IN_TOKEN", set(tokens == sweepOpenAI || tokens == sweepAll, "openai-token-fixture"))
 						t.Setenv("ANTHROPIC_SIGN_IN_TOKEN",
 							set(tokens == sweepAnthropic || tokens == sweepAll, "anthropic-token-fixture"))
-						t.Setenv(copilotTokenEnv, set(tokens == "copilot" || tokens == sweepAll, copilotFixtureToken))
+						t.Setenv(copilotTokenEnv, set(tokens == sweepCopilot || tokens == sweepAll, copilotFixtureToken))
 						t.Setenv("SPROOZI_ENABLED_CAPABILITIES", modules)
 					}, nothing)
 				}
@@ -106,10 +109,11 @@ func TestModelRoutesAreRecorded(t *testing.T) {
 	}
 	reset := func(mode string) {
 		t.Setenv(modelAuthModeEnv, mode)
-		for _, key := range []string{openAIKeyEnv, anthropicKeyEnv, "OPENAI_SIGN_IN_TOKEN", "ANTHROPIC_SIGN_IN_TOKEN",
-			copilotTokenEnv} {
-			t.Setenv(key, "")
-		}
+		t.Setenv(openAIKeyEnv, "")
+		t.Setenv(anthropicKeyEnv, "")
+		t.Setenv("OPENAI_SIGN_IN_TOKEN", "")
+		t.Setenv("ANTHROPIC_SIGN_IN_TOKEN", "")
+		t.Setenv(copilotTokenEnv, "")
 		t.Setenv("SPROOZI_ENABLED_CAPABILITIES", allModules)
 	}
 	for _, tc := range []struct {

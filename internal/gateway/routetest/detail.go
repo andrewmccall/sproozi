@@ -49,8 +49,8 @@ func HandlerDetail(h http.Handler) string {
 				credential(v.FieldByName("Auth")), v.FieldByName("Routes").Len()))
 			return
 		}
-		for i := range v.NumField() {
-			walk(v.Field(i), depth+1)
+		for _, field := range v.Fields() {
+			walk(field, depth+1)
 		}
 	}
 	walk(reflect.ValueOf(h), 0)

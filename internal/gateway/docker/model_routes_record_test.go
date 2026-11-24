@@ -22,6 +22,14 @@ import (
 	"github.com/andrewmccall/sproozi/internal/modelauth"
 )
 
+// Fixture credentials and the GitHub API origin of the model route records.
+const (
+	keyFixture      = "sk-fixture"
+	tokenFixture    = "fixture-token"
+	githubAPIOrigin = "https://api.github.com"
+	githubGitOrigin = "https://github.com"
+)
+
 // TestDockerModelRoutesAreRecorded records what the Docker composition serves
 // on each model.inference authority, with what each handler was built with,
 // for every managed harness and credential mechanism, each provider's public
@@ -44,7 +52,7 @@ func TestDockerModelRoutesAreRecorded(t *testing.T) {
 				api.CapabilityGitHubPullRequest, api.CapabilityKubernetesRead)
 			owner.nativeCapabilities = []api.CapabilityKind{api.CapabilityGitHubPullRequest, api.CapabilityKubernetesRead}
 			config.GitHub = &githubgateway.HandlerConfig{TokenProvider: fixtureTokens{}, HTTPClient: http.DefaultClient,
-				GitBaseURL: "https://github.com", APIBaseURL: "https://api.github.com"}
+				GitBaseURL: githubGitOrigin, APIBaseURL: githubAPIOrigin}
 			config.Kubernetes = &kubernetesgateway.HandlerConfig{Upstream: kube, Client: http.DefaultClient}
 		}
 		if signIn {
@@ -68,9 +76,9 @@ func TestDockerModelRoutesAreRecorded(t *testing.T) {
 			name string
 			auth modelauth.Authenticator
 		}{
-			{mechanismKey, modelauth.APIKey{Key: "sk-fixture"}},
+			{mechanismKey, modelauth.APIKey{Key: keyFixture}},
 			{"anthropic-key", modelauth.AnthropicAPIKey{Key: "sk-ant-fixture"}},
-			{mechanismToken, modelauth.Token{Value: "fixture-token", Headers: provider.TokenHeaders}},
+			{mechanismToken, modelauth.Token{Value: tokenFixture, Headers: provider.TokenHeaders}},
 			{"chatgpt", &modelauth.ChatGPT{}},
 			{mechanismSignIn, modelauth.Workload{}},
 		} {
@@ -94,7 +102,7 @@ func TestDockerModelRoutesAreRecorded(t *testing.T) {
 	endpoints.SemanticAuthorities[stray] = api.CapabilityModelInference
 	t.Cleanup(func() { delete(endpoints.SemanticAuthorities, stray) })
 	for _, kind := range harness.ManagedKinds() {
-		compose("stray/"+string(kind)+"/"+mechanismKey, kind, modelauth.APIKey{Key: "sk-fixture"}, openAIOrigin, true, false)
+		compose("stray/"+string(kind)+"/"+mechanismKey, kind, modelauth.APIKey{Key: keyFixture}, openAIOrigin, true, false)
 		compose("stray/"+string(kind)+"/"+mechanismSignIn, kind, modelauth.Workload{}, openAIOrigin, true, false)
 	}
 	compareRecorded(t, filepath.Join("testdata", "model_routes.txt"), record.Lines())
