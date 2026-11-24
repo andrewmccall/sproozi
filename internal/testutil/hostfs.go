@@ -1,4 +1,6 @@
-// Package testutil creates host fixtures with the same privacy as production state.
+// Package testutil holds helpers shared by tests: host fixtures with the same
+// privacy as production state, real deadlines that set-up cannot outrun, and
+// a real-time watch on synctest bubbles.
 package testutil
 
 import (

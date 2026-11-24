@@ -531,6 +531,20 @@ held in a Kubernetes Secret. One active gateway owns it. It is not a
 [model provider authentication](docs/guides/model-provider-auth.md).
 Also seen as: ChatGPT session.
 
+### Refresh hold
+
+The 10 seconds after a transient failure to refresh the
+[ChatGPT credential](#chatgpt-credential) during which the gateway sends no
+further refresh for it; the first model request after the hold tries again,
+and until 30 seconds before the access token expires requests still use
+it. A refused refresh
+(`invalid_grant`: the provider rejected the refresh token) is not held but
+remembered until an administrator signs in again or the gateway restarts.
+Neither waits on time: a new sign-in ends both within the 10-second reload
+interval. See
+[ADR 0069](docs/adr/0069-a-failed-chatgpt-refresh-is-remembered.md). Also
+seen as: refresh backoff, failed-until state.
+
 ### Execution
 
 One approved period of work on a session, with its own permissions, allowance
@@ -703,6 +717,17 @@ installation root.
 One certificate authority in the gateway's certificate store. A worker trusts
 the generations in the bundle it received at launch; rotation adds a new
 generation and retires the old one only after every consumer has the new one.
+
+### Rotation phase
+
+Where the gateway certificate store's rotation is: `single` (one trust
+generation, which serves), `prepared` (the old and new generations trusted,
+the old one serving) or `switched` (both trusted, the new one serving). It is
+derived from which generations are trusted and which serves, and a store whose
+record no phase describes is refused rather than repaired; only an explicit
+replace moves it on, to a new authority. The certificate
+controller's `sproozi.com/rotation-stage` annotation reports it as `none`,
+`prepared N to M` or `switched N to M`. Also seen as: rotation stage.
 
 ### Certificate controller
 

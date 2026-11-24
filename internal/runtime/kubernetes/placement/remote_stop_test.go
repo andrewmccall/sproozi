@@ -266,6 +266,20 @@ func TestRemoteStopInterruptedAtEachStageKeepsTheVisitsCheckpoint(t *testing.T) 
 // stays unproven: nothing is fenced, sealed or captured. A retry waits for the
 // container again, and once it ends the stop completes. Not parallel: it
 // shortens podStopWait for the package.
+//
+// waitPod's bound (200ms here) ends the wait through deadline.Context, which
+// reads the wall clock when the wait begins and then once a second, so the
+// wait ends at the first read past the bound: about a second after it began
+// (1.01s measured). What the test can see is therefore coarse: a bound
+// already over at the first read (waited under podStopWait), and a bound
+// longer than its ceiling, or none, when the caller's 30s ends the stop
+// instead. It cannot tell bounds apart that end at the same read, such as
+// half of podStopWait, nor one up to the slack too long.
+//
+// The ceiling is podStopWait, the second of read granularity and two
+// seconds of slack for the stop's own work around the wait, fake-client
+// reads and writes that take about 10ms on a quiet machine. It is
+// load-sensitive only if that work takes 200 times longer.
 func TestStopWhoseContainerNeverEndsIsUnprovenAtTheBound(t *testing.T) {
 	previous := podStopWait
 	podStopWait = 200 * time.Millisecond
@@ -284,15 +298,17 @@ func TestStopWhoseContainerNeverEndsIsUnprovenAtTheBound(t *testing.T) {
 	sealed := 0
 	p.ledger = &observedLedger{Ledger: p.ledger, beforeSeal: func(context.Context, budget.AccountKey) error { sealed++; return nil }}
 	for attempt := range 2 {
-		// The caller would wait 3 seconds; the bound must end it first.
-		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		// The caller would wait 30 seconds; the bound must end it first.
+		const callerWait, granularity, slack = 30 * time.Second, time.Second, 2 * time.Second
+		ctx, cancel := context.WithTimeout(t.Context(), callerWait)
 		started := time.Now()
 		_, err = p.Stop(ctx, l, i)
+		callerEnded := ctx.Err()
 		cancel()
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("attempt %d: stop of a container that never ends: %v", attempt, err)
+		if !errors.Is(err, context.DeadlineExceeded) || callerEnded != nil {
+			t.Fatalf("attempt %d: stop of a container that never ends: %v, caller's context %v", attempt, err, callerEnded)
 		}
-		if waited := time.Since(started); waited < podStopWait || waited > 2*time.Second {
+		if waited := time.Since(started); waited < podStopWait || waited > podStopWait+granularity+slack {
 			t.Fatalf("attempt %d waited %s for a bound of %s", attempt, waited, podStopWait)
 		}
 		local, err := p.load(l)

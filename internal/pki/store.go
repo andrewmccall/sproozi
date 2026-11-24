@@ -63,6 +63,11 @@ type Store struct {
 	dir    string
 	policy Policy
 	now    func() time.Time
+	// beforeWrite, when set, runs before every change to the directory's
+	// authority, leaf, trust and state files. A test returns an error from it
+	// to stop the store at one write, as a crash would. It is nil in
+	// production.
+	beforeWrite func(op, name string) error
 }
 
 const (
@@ -103,8 +108,28 @@ func (s *Store) Policy() Policy { return s.policy }
 // TrustPath is the certificate-only worker bundle.
 func (s *Store) TrustPath() string { return filepath.Join(s.dir, trustFile) }
 
-// State reads the committed state.
+// State reads the committed state. It refuses a record no phase describes,
+// and one whose trusted generations' files are not the ones it names.
 func (s *Store) State() (State, error) {
+	st, err := s.load()
+	if err != nil {
+		return st, err
+	}
+	return st, s.checkFiles(st)
+}
+
+// load reads the committed record and refuses one no phase describes. It
+// does not read the authority files: Initialize uses it.
+func (s *Store) load() (State, error) {
+	st, err := s.decode()
+	if err != nil {
+		return st, err
+	}
+	return st, check(st)
+}
+
+// decode reads the committed record without checking what it describes.
+func (s *Store) decode() (State, error) {
 	var st State
 	data, err := privatefs.ReadFile(filepath.Join(s.dir, stateFile), maxState)
 	if os.IsNotExist(err) {
@@ -117,9 +142,6 @@ func (s *Store) State() (State, error) {
 	d.DisallowUnknownFields()
 	if err = d.Decode(&st); err != nil {
 		return st, fmt.Errorf("pki: corrupt state: %w", err)
-	}
-	if st.Version != 1 || st.generation(st.Serving) == nil || len(st.Trusted) == 0 {
-		return st, errors.New("pki: corrupt state")
 	}
 	return st, nil
 }
@@ -180,21 +202,23 @@ func (s *Store) Initialize(names Names) error {
 		return err
 	}
 	return s.locked(func() error {
-		if _, err := s.State(); !errors.Is(err, ErrNotInitialized) {
-			if err == nil {
-				return errors.New("pki: certificate authority already initialized")
-			}
+		st, err := s.load()
+		if err == nil {
+			return st.admit(evInitialize)
+		}
+		if !errors.Is(err, ErrNotInitialized) {
 			return err
 		}
-		if err := s.requireEmpty(); err != nil {
+		if err = s.requireEmpty(); err != nil {
 			return err
 		}
+		st = State{Names: names}
 		now := s.now()
-		if err := s.createGeneration(1, now); err != nil {
+		first, err := s.createNext(st, now)
+		if err != nil {
 			return err
 		}
-		st := State{Version: 1, Serving: 1, Trusted: []int{1}, Names: names}
-		if st.Generations, err = s.generations(st, 1); err != nil {
+		if err = st.apply(evInitialize, &first, now); err != nil {
 			return err
 		}
 		return s.issue(&st, now)
@@ -219,7 +243,10 @@ func (s *Store) requireEmpty() error {
 // Ensure issues a new leaf when the current one is missing, invalid, due for
 // renewal, issued by a CA other than the serving one, or does not cover
 // names. It never creates or replaces a CA; an uninitialized store fails.
-// It reports whether the serving leaf changed.
+// It then destroys any retired key or stray file an interrupted operation
+// left behind. A removal that fails does not stop the leaf and trust work:
+// Ensure completes it, then returns the failure marked ErrOutstanding, and
+// the next Ensure tries again. It reports whether the serving leaf changed.
 func (s *Store) Ensure(names Names) (bool, error) {
 	names, err := names.normalized()
 	if err != nil {
@@ -236,14 +263,44 @@ func (s *Store) Ensure(names Names) (bool, error) {
 			return err
 		}
 		same := slices.Equal(st.Names.DNS, names.DNS) && slices.Equal(st.Names.IPs, names.IPs)
-		st.Names = names
-		if leaf, err := s.loadLeaf(st); same && err == nil && s.leafCurrent(st, leaf.Leaf, now) {
-			return s.publishTrust(st)
+		if !same {
+			if err = namesFit(st, names); err != nil {
+				return err
+			}
 		}
-		changed = true
-		return s.issue(&st, now)
+		st.Names = names
+		if leaf, loadErr := s.loadLeaf(st); same && loadErr == nil && s.leafCurrent(st, leaf.Leaf, now) {
+			err = s.publishTrust(st)
+		} else {
+			changed = true
+			err = s.issue(&st, now)
+		}
+		cleanup := errors.Join(s.destroyRetired(st), s.checkKeys(st))
+		if err != nil {
+			return errors.Join(err, cleanup)
+		}
+		return outstanding(cleanup)
 	})
 	return changed, err
+}
+
+// ErrOutstanding marks an error Ensure returns only when it completed its
+// leaf and trust work: something it found could not be cleaned up, such as
+// a retired key it could not remove. The serving leaf and trust bundle are
+// current and committed; the error must still be reported, and the next
+// Ensure retries.
+var ErrOutstanding = errors.New("pki: outstanding certificate store cleanup")
+
+type outstandingError struct{ err error }
+
+func (e outstandingError) Error() string   { return e.err.Error() }
+func (e outstandingError) Unwrap() []error { return []error{ErrOutstanding, e.err} }
+
+func outstanding(err error) error {
+	if err == nil {
+		return nil
+	}
+	return outstandingError{err}
 }
 
 func (s *Store) leafCurrent(st State, leaf *x509.Certificate, now time.Time) bool {
@@ -277,21 +334,18 @@ func (s *Store) PrepareRotation() error {
 		if err != nil {
 			return err
 		}
-		if st.Rotation != nil {
-			return fmt.Errorf("pki: rotation already %s", st.Rotation.Stage)
-		}
-		next := 0
-		for _, g := range st.Generations {
-			next = max(next, g.ID)
-		}
-		next++
-		now := s.now()
-		if err = s.createGeneration(next, now); err != nil {
+		if err = st.admit(evPrepare); err != nil {
 			return err
 		}
-		st.Trusted = []int{st.Serving, next}
-		st.Rotation = &Rotation{Stage: StagePrepared, From: st.Serving, To: next, PreparedAt: now.UTC()}
-		if st.Generations, err = s.generations(st, next); err != nil {
+		if err = startsWithin(st, string(evPrepare)); err != nil {
+			return err
+		}
+		now := s.now()
+		next, err := s.createNext(st, now)
+		if err != nil {
+			return err
+		}
+		if err = st.apply(evPrepare, &next, now); err != nil {
 			return err
 		}
 		return s.commit(st)
@@ -306,15 +360,17 @@ func (s *Store) SwitchRotation(distributed bool) error {
 		if err != nil {
 			return err
 		}
-		if st.Rotation == nil || st.Rotation.Stage != StagePrepared {
-			return errors.New("pki: no prepared rotation to switch")
+		if err = st.admit(evSwitch); err != nil {
+			return err
 		}
 		if !distributed {
 			return errors.New("pki: combined trust is not yet distributed to every current consumer")
 		}
-		st.Serving = st.Rotation.To
-		st.Rotation.Stage = StageSwitched
-		return s.issue(&st, s.now())
+		now := s.now()
+		if err = st.apply(evSwitch, nil, now); err != nil {
+			return err
+		}
+		return s.issue(&st, now)
 	})
 }
 
@@ -325,12 +381,11 @@ func (s *Store) RollbackRotation() error {
 		if err != nil {
 			return err
 		}
-		if st.Rotation == nil || st.Rotation.Stage != StageSwitched {
-			return errors.New("pki: no switched rotation to roll back")
+		now := s.now()
+		if err = st.apply(evRollback, nil, now); err != nil {
+			return err
 		}
-		st.Serving = st.Rotation.From
-		st.Rotation.Stage = StagePrepared
-		return s.issue(&st, s.now())
+		return s.issue(&st, now)
 	})
 }
 
@@ -342,61 +397,66 @@ func (s *Store) RetireRotation(drained bool) error {
 		if err != nil {
 			return err
 		}
-		if st.Rotation == nil || st.Rotation.Stage != StageSwitched {
-			return errors.New("pki: rotation must switch before retirement")
+		if err = st.admit(evRetire); err != nil {
+			return err
 		}
 		if !drained {
 			return errors.New("pki: a consumer may still require the retiring CA")
 		}
-		old := st.Rotation.From
-		st.Trusted = []int{st.Rotation.To}
-		st.Rotation = nil
-		if g := st.generation(old); g != nil {
-			g.Retired = true
+		// Retiring destroys the outgoing key; first prove the serving key,
+		// which will then be the only one, works for its certificate.
+		if _, err = s.servingPair(st); err != nil {
+			return fmt.Errorf("pki: refusing to retire generation %d: %w", st.Rotation.From, err)
+		}
+		if err = st.apply(evRetire, nil, s.now()); err != nil {
+			return err
 		}
 		if err = s.commit(st); err != nil {
 			return err
 		}
-		return s.destroyKey(old)
+		return s.destroyRetired(st)
 	})
 }
 
 // ReplaceCA is the emergency path for a lost or compromised CA. It trusts only
 // a new generation, issues a new leaf and destroys every older private key.
 // Existing workers lose trust and must be cancelled or drained by the caller.
+// It is also the way out of a record no phase describes, or whose
+// certificates are not the ones it names: it reads the record without that
+// check, and builds on such a record as replaceable does. It refuses only a
+// record it cannot read, or one of another version.
 func (s *Store) ReplaceCA() error {
 	return s.locked(func() error {
-		st, err := s.State()
+		st, err := s.decode()
 		if err != nil {
 			return err
 		}
-		next := 0
-		for _, g := range st.Generations {
-			next = max(next, g.ID)
+		if st.Version != 1 {
+			return check(st)
 		}
-		next++
-		now := s.now()
-		if err = s.createGeneration(next, now); err != nil {
+		if check(st) != nil || s.checkFiles(st) != nil {
+			if st, err = s.replaceable(st); err != nil {
+				return err
+			}
+		}
+		if err = st.admit(evReplace); err != nil {
 			return err
 		}
-		for i := range st.Generations {
-			st.Generations[i].Retired = true
+		if err = startsWithin(st, string(evReplace)); err != nil {
+			return err
 		}
-		st.Serving, st.Trusted, st.Rotation = next, []int{next}, nil
-		if st.Generations, err = s.generations(st, next); err != nil {
+		now := s.now()
+		next, err := s.createNext(st, now)
+		if err != nil {
+			return err
+		}
+		if err = st.apply(evReplace, &next, now); err != nil {
 			return err
 		}
 		if err = s.issue(&st, now); err != nil {
 			return err
 		}
-		for _, g := range st.Generations {
-			if g.ID != next {
-				if err = s.destroyKey(g.ID); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
+		return s.destroyRetired(st)
 	})
 }
 
@@ -406,10 +466,26 @@ func (s *Store) RotationDue(st State) bool {
 	return st.Rotation == nil && g != nil && !s.now().Before(g.NotAfter.Add(-s.policy.RotateBefore))
 }
 
-func (s *Store) issue(st *State, now time.Time) error {
-	ca, err := s.readPair(caName(st.Serving))
+// servingPair reads the serving generation's certificate and key and proves
+// the key matches the certificate, naming the generation, the file and the
+// cause otherwise.
+func (s *Store) servingPair(st State) (Pair, error) {
+	name := caName(st.Serving)
+	pair, err := s.readPair(name)
+	if err == nil {
+		_, _, err = Parse(pair)
+	}
 	if err != nil {
-		return fmt.Errorf("pki: serving CA key unavailable; recover it or replace the CA: %w", err)
+		return Pair{}, fmt.Errorf("pki: serving CA key unavailable; recover it or replace the CA: generation %d key %s.key: %w",
+			st.Serving, name, err)
+	}
+	return pair, nil
+}
+
+func (s *Store) issue(st *State, now time.Time) error {
+	ca, err := s.servingPair(*st)
+	if err != nil {
+		return err
 	}
 	leaf, err := IssueLeaf(ca, st.Names, now, s.policy.LeafValidity)
 	if err != nil {
@@ -423,24 +499,29 @@ func (s *Store) issue(st *State, now time.Time) error {
 	if err = s.writePair(name, leaf); err != nil {
 		return err
 	}
-	previous := st.Leaf
 	st.Leaf = name
 	if err = s.commit(*st); err != nil {
 		return err
 	}
-	if previous != "" && previous != name {
-		_ = os.Remove(filepath.Join(s.dir, previous+".key"))
-		_ = os.Remove(filepath.Join(s.dir, previous+".pem"))
-	}
+	// The leaf is committed; a removal that fails here is retried by the
+	// next Ensure.
+	_ = s.destroyRetired(*st)
 	return nil
 }
 
 func (s *Store) commit(st State) error {
+	if err := errors.Join(check(st), s.checkFiles(st)); err != nil {
+		return fmt.Errorf("refusing to save: %w", err)
+	}
 	data, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err = privatefs.Replace(s.dir, stateFile, append(data, '\n')); err != nil {
+	if len(data)+1 > maxState {
+		return fmt.Errorf("refusing to save: the record would be %d bytes, more than the %d bytes load reads",
+			len(data)+1, maxState)
+	}
+	if err = s.replace(stateFile, append(data, '\n')); err != nil {
 		return err
 	}
 	return s.publishTrust(st)
@@ -456,7 +537,7 @@ func (s *Store) publishTrust(st State) error {
 	if err == nil && bytes.Equal(current, trust) {
 		return nil
 	}
-	return privatefs.Replace(s.dir, trustFile, trust)
+	return s.replace(trustFile, trust)
 }
 
 func (s *Store) trustBundle(st State) ([]byte, error) {
@@ -484,8 +565,8 @@ func (s *Store) caCertificate(id int) (*x509.Certificate, error) {
 // attempt and may be replaced.
 func (s *Store) createGeneration(id int, now time.Time) error {
 	if _, err := os.Lstat(filepath.Join(s.dir, caName(id)+".pem")); err == nil {
-		_ = os.Remove(filepath.Join(s.dir, caName(id)+".pem"))
-		_ = os.Remove(filepath.Join(s.dir, caName(id)+".key"))
+		_ = s.remove(caName(id) + ".pem")
+		_ = s.remove(caName(id) + ".key")
 	}
 	ca, err := NewCA(fmt.Sprintf("Sproozi local inspection CA %d", id), now, s.policy.CAValidity)
 	if err != nil {
@@ -494,17 +575,71 @@ func (s *Store) createGeneration(id int, now time.Time) error {
 	return s.writePair(caName(id), ca)
 }
 
-func (s *Store) generations(st State, added int) ([]Generation, error) {
-	cert, err := s.caCertificate(added)
-	if err != nil {
-		return nil, err
+// createNext writes the files of the generation after every recorded one
+// and returns its record entry.
+func (s *Store) createNext(st State, now time.Time) (Generation, error) {
+	id := len(st.Generations) + 1
+	if err := s.createGeneration(id, now); err != nil {
+		return Generation{}, err
 	}
-	out := slices.Clone(st.Generations)
-	return append(out, Generation{ID: added, Fingerprint: Fingerprint(cert), NotAfter: cert.NotAfter}), nil
+	cert, err := s.caCertificate(id)
+	if err != nil {
+		return Generation{}, err
+	}
+	return Generation{ID: id, Fingerprint: Fingerprint(cert), NotAfter: cert.NotAfter}, nil
+}
+
+// destroyRetired removes the private key of every retired generation; the
+// certificate and key of every generation numbered after the record's last,
+// which an interrupted prepare or replace wrote and never committed; and
+// every leaf file other than the leaf the record names: superseded leaves,
+// and an uncommitted one an interrupted issue wrote. It is idempotent: Ensure
+// runs it on every reconcile of the certificate controller and at every start
+// and maintenance pass of the local service, retire and replace run it after
+// their commit, and every issue after its own, so a destruction that a crash
+// or a failed removal left undone always finishes. It never removes the key
+// of a trusted generation, which every phase still needs, nor the named
+// leaf. It removes only names the store writes: ca-<N>.key for a recorded N,
+// ca-<N>.pem and ca-<N>.key matching caFilePattern, and leaf-<16 hex>.pem
+// and .key. It runs under the store's lock, which every operation that
+// writes a generation or a leaf holds from its first file to its commit, so
+// it never sees another operation's files before their commit.
+func (s *Store) destroyRetired(st State) error {
+	var errs []error
+	for _, g := range st.Generations {
+		if g.Retired {
+			errs = append(errs, s.destroyKey(g.ID))
+		}
+	}
+	entries, err := os.ReadDir(s.dir)
+	errs = append(errs, err)
+	for _, entry := range entries {
+		name := entry.Name()
+		if caFileGeneration(name) > len(st.Generations) {
+			if err = s.remove(name); !os.IsNotExist(err) {
+				errs = append(errs, err)
+			}
+			continue
+		}
+		base, ok := strings.CutSuffix(name, filepath.Ext(name))
+		if ok && leafNamePattern.MatchString(base) && (filepath.Ext(name) == ".key" || filepath.Ext(name) == ".pem") &&
+			base != st.Leaf {
+			if err = s.remove(name); !os.IsNotExist(err) {
+				errs = append(errs, err)
+			}
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		return fmt.Errorf("pki: destroy retired keys: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) destroyKey(id int) error {
-	err := os.Remove(filepath.Join(s.dir, caName(id)+".key"))
+	if _, err := os.Lstat(filepath.Join(s.dir, caName(id)+".key")); os.IsNotExist(err) {
+		return nil
+	}
+	err := s.remove(caName(id) + ".key")
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -524,7 +659,27 @@ func (s *Store) readPair(name string) (Pair, error) {
 }
 
 func (s *Store) writePair(name string, p Pair) error {
-	return errors.Join(privatefs.Replace(s.dir, name+".key", p.Key), privatefs.Replace(s.dir, name+".pem", p.Certificate))
+	return errors.Join(s.replace(name+".key", p.Key), s.replace(name+".pem", p.Certificate))
+}
+
+// replace writes one file in the store's directory.
+func (s *Store) replace(name string, data []byte) error {
+	if s.beforeWrite != nil {
+		if err := s.beforeWrite("write", name); err != nil {
+			return err
+		}
+	}
+	return privatefs.Replace(s.dir, name, data)
+}
+
+// remove deletes one file in the store's directory.
+func (s *Store) remove(name string) error {
+	if s.beforeWrite != nil {
+		if err := s.beforeWrite("remove", name); err != nil {
+			return err
+		}
+	}
+	return os.Remove(filepath.Join(s.dir, name))
 }
 
 func (s *Store) locked(fn func() error) error {

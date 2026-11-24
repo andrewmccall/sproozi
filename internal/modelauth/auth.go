@@ -181,31 +181,77 @@ const SessionReloadInterval = 10 * time.Second
 // refreshWindow is how close to expiry the access token is refreshed.
 const refreshWindow = time.Minute
 
+// refreshTimeout bounds each step of a reload or refresh once started: the
+// store read, the save of an unsaved refresh, the refresh and its save. It
+// matches the refresh client's timeout (NewRefreshClient).
+const refreshTimeout = 30 * time.Second
+
+// expiryMargin is how long before its computed expiry a held refresh stops
+// serving the stored access token. SavedAt is stamped when the refresh reply
+// arrives, which the refresh client's timeout puts at most refreshTimeout
+// after the provider issued the token, so the computed expiry can be up to
+// that much later than the provider's.
+const expiryMargin = refreshTimeout
+
+// step returns the context for one step of a reload or refresh. It derives
+// from no model request: the provider spends the refresh token when it
+// answers, so neither the refresh nor the save of what it returned may end
+// because the request that started it ended.
+func step() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), refreshTimeout)
+}
+
 type ChatGPT struct {
 	store  SessionStore
 	client *http.Client
 	// current is the last session read from or written to the store, with the
-	// time it was read. Requests use it without the lock while it is younger
-	// than reloadInterval and its access token is outside the refresh window.
+	// time it was read and the refresh record as the read left it. Requests
+	// use it without the lock while it is younger than reloadInterval, and
+	// its access token is outside the refresh window or a remembered failure
+	// answers for it.
 	current        atomic.Pointer[loadedSession]
 	reloadInterval time.Duration
-	// mu serializes reloads and refreshes: this process is the session's one
-	// refresh owner (ADR 0026).
-	mu sync.Mutex
+	// mu guards inflight, the one reload or refresh running for this
+	// credential: this process is the session's one refresh owner (ADR
+	// 0026). It is never held across a store call or the refresh.
+	mu       sync.Mutex
+	inflight *attempt
+	// The fields below belong to the running attempt; attempts run one at a
+	// time, each started under mu after the last has ended.
+	//
 	// Keep an unsaved replacement so persistence retries never rotate the same
 	// refresh token twice. Do not expose it to inference until durably saved.
 	pending       *Session
 	pendingBefore Session
+	// refresh remembers a failed refresh of the stored session, so a provider
+	// outage or a refused sign-in does not send a refresh with every request.
+	refresh       refreshRecord
 	tokenEndpoint string
+	// now is the clock every expiry, reload and hold is measured against.
+	now func() time.Time
+}
+
+// attempt is one reload, and refresh when due, run by the authenticator in
+// its own goroutine. Every caller waits for done or its own context.
+type attempt struct {
+	done    chan struct{}
+	session Session
+	err     error
 }
 
 type loadedSession struct {
 	session  Session
 	loadedAt time.Time
+	refresh  refreshRecord
 }
 
+// NewChatGPT returns the authenticator for a stored sign-in. It never follows
+// a redirect from the token endpoint, whatever client it is given.
 func NewChatGPT(store SessionStore, client *http.Client) *ChatGPT {
-	return &ChatGPT{store: store, client: client, tokenEndpoint: TokenEndpoint, reloadInterval: SessionReloadInterval}
+	refreshing := *client
+	refreshing.CheckRedirect = refuseRedirect
+	return &ChatGPT{store: store, client: &refreshing, tokenEndpoint: TokenEndpoint, reloadInterval: SessionReloadInterval,
+		now: time.Now}
 }
 
 func (*ChatGPT) Mode() string { return ChatGPTMode }
@@ -214,42 +260,101 @@ func (a *ChatGPT) Authorize(r *http.Request) error {
 	// The administrator's OAuth session selects the account, not a workload.
 	r.Header.Del("Authorization")
 	removeOpenAIAccountHeaders(r.Header)
-	s, ok := a.usable()
+	s, ok, err := a.usable()
 	if !ok {
-		var err error
-		if s, err = a.reloadOrRefresh(r.Context()); err != nil {
-			return err
-		}
+		s, err = a.reloadOrRefresh(r.Context())
+	}
+	if err != nil {
+		return err
 	}
 	r.Header.Set("Authorization", "Bearer "+s.AccessToken)
 	return nil
 }
 
-// usable returns the in-memory session when no Secret read or refresh is due.
-func (a *ChatGPT) usable() (Session, bool) {
+// usable answers from memory when no Secret read or refresh is due: with the
+// session, or with a remembered failure while it holds the refresh back.
+func (a *ChatGPT) usable() (Session, bool, error) {
 	current := a.current.Load()
-	if current == nil || time.Since(current.loadedAt) >= a.reloadInterval ||
-		time.Until(current.session.SavedAt.Add(time.Duration(current.session.ExpiresIn)*time.Second)) <= refreshWindow {
-		return Session{}, false
+	now := a.now()
+	if current == nil || now.Sub(current.loadedAt) >= a.reloadInterval {
+		return Session{}, false, nil
 	}
-	return current.session, true
+	return current.answer(now)
 }
 
-// reloadOrRefresh reads the stored session and refreshes it when due. It holds
-// the lock throughout, and always refreshes from the stored tokens, never the
-// in-memory copy, so the store's compare-before-write check sees what it read.
-func (a *ChatGPT) reloadOrRefresh(ctx context.Context) (Session, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	// Another request may have reloaded or refreshed while this one waited.
-	if s, ok := a.usable(); ok {
+// answer is what a request sees for a session read at loadedAt: the session
+// while its access token is outside the refresh window, what served says
+// while a remembered failure holds a due refresh back, and nothing (a
+// refresh is due and may be sent) otherwise.
+func (l *loadedSession) answer(now time.Time) (Session, bool, error) {
+	if l.session.expiry().Sub(now) > refreshWindow {
+		return l.session, true, nil
+	}
+	if held := l.refresh.admit(now); held != nil {
+		s, err := served(l.session, held, now)
+		return s, true, err
+	}
+	return Session{}, false, nil
+}
+
+// served is what a request sees while failure holds the refresh of s back:
+// s itself while the failure is transient and its access token is more than
+// expiryMargin from its computed expiry, and the failure otherwise. A refusal
+// is never served: the grant is dead.
+func served(s Session, failure *RefreshError, now time.Time) (Session, error) {
+	if !failure.Refused && now.Before(s.expiry().Add(-expiryMargin)) {
 		return s, nil
 	}
+	return Session{}, failure
+}
+
+// reloadOrRefresh joins the reload or refresh in flight, or starts one, and
+// waits for its result or for ctx, whichever comes first. A caller that
+// leaves does not stop it: it finishes on its own bounds and saves what the
+// provider issued.
+func (a *ChatGPT) reloadOrRefresh(ctx context.Context) (Session, error) {
+	a.mu.Lock()
+	// Another request may have reloaded or refreshed while this one waited.
+	if s, ok, err := a.usable(); ok {
+		a.mu.Unlock()
+		return s, err
+	}
+	at := a.inflight
+	if at == nil {
+		at = &attempt{done: make(chan struct{})}
+		a.inflight = at
+		go a.run(at)
+	}
+	a.mu.Unlock()
+	select {
+	case <-at.done:
+		return at.session, at.err
+	case <-ctx.Done():
+		return Session{}, ctx.Err()
+	}
+}
+
+// run carries out one attempt and publishes its result.
+func (a *ChatGPT) run(at *attempt) {
+	s, err := a.reload()
+	a.mu.Lock()
+	at.session, at.err = s, err
+	a.inflight = nil
+	a.mu.Unlock()
+	close(at.done)
+}
+
+// reload reads the stored session and refreshes it when due. It always
+// refreshes from the stored tokens, never the in-memory copy, so the store's
+// compare-before-write check sees what it read.
+func (a *ChatGPT) reload() (Session, error) {
 	a.current.Store(nil)
 	// The reload interval runs from the start of the read, so a slow Secret
 	// read does not extend how long an older stored session is served.
-	loadedAt := time.Now()
+	loadedAt := a.now()
+	ctx, cancel := step()
 	s, err := a.store.Load(ctx)
+	cancel()
 	if err != nil {
 		return Session{}, errors.New("ChatGPT credentials are unavailable")
 	}
@@ -258,24 +363,39 @@ func (a *ChatGPT) reloadOrRefresh(ctx context.Context) (Session, error) {
 	}
 	if a.pending != nil {
 		if s.SameCredentials(a.pendingBefore) {
-			if err = a.store.Replace(ctx, s, *a.pending); err != nil {
+			ctx, cancel := step()
+			err = a.store.Replace(ctx, s, *a.pending)
+			cancel()
+			if err != nil {
 				return Session{}, errors.New("could not persist renewed ChatGPT credentials")
 			}
 			s = *a.pending
 		}
 		a.pending = nil
 	}
-	if time.Until(s.SavedAt.Add(time.Duration(s.ExpiresIn)*time.Second)) <= refreshWindow {
+	now := a.now()
+	if a.refresh.current() != refreshReady && !s.SameCredentials(a.refresh.of) {
+		if err = a.refresh.apply(eventSignedIn, s, nil, now); err != nil {
+			return Session{}, err
+		}
+	}
+	if s.expiry().Sub(now) <= refreshWindow {
+		if held := a.refresh.admit(now); held != nil {
+			a.publish(s, loadedAt)
+			return served(s, held, now)
+		}
+		ctx, cancel := step()
 		next, refreshErr := Exchange(ctx, a.client, a.tokenEndpoint, url.Values{
 			"grant_type": {refreshTokenField}, clientIDField: {s.ClientID},
 			refreshTokenField: {s.RefreshToken}, resourceField: {Resource},
 		})
+		cancel()
 		if refreshErr != nil {
-			return Session{}, refreshErr
+			return a.failed(s, loadedAt, classify(refreshErr))
 		}
 		renewed := s
 		renewed.AccessToken, renewed.RefreshToken = next.AccessToken, next.RefreshToken
-		renewed.TokenType, renewed.ExpiresIn, renewed.SavedAt = next.TokenType, next.ExpiresIn, time.Now().UTC()
+		renewed.TokenType, renewed.ExpiresIn, renewed.SavedAt = next.TokenType, next.ExpiresIn, a.now().UTC()
 		if next.IDToken != "" {
 			renewed.IDToken = next.IDToken
 		}
@@ -283,17 +403,49 @@ func (a *ChatGPT) reloadOrRefresh(ctx context.Context) (Session, error) {
 			renewed.Scopes = strings.Fields(next.Scope)
 		}
 		if err = renewed.Validate(); err != nil {
+			return a.failed(s, loadedAt, classify(err))
+		}
+		if err = a.refresh.apply(eventRefreshed, s, nil, a.now()); err != nil {
 			return Session{}, err
 		}
 		a.pending, a.pendingBefore = &renewed, s
-		if err = a.store.Replace(ctx, s, renewed); err != nil {
+		ctx, cancel = step()
+		err = a.store.Replace(ctx, s, renewed)
+		cancel()
+		if err != nil {
 			return Session{}, errors.New("could not persist renewed ChatGPT credentials")
 		}
 		a.pending = nil
 		s = renewed
 	}
-	a.current.Store(&loadedSession{session: s, loadedAt: loadedAt})
+	a.publish(s, loadedAt)
 	return s, nil
+}
+
+// publish makes s, read at loadedAt, and the refresh record what requests
+// answer from until the next read.
+func (a *ChatGPT) publish(s Session, loadedAt time.Time) {
+	a.current.Store(&loadedSession{session: s, loadedAt: loadedAt, refresh: a.refresh})
+}
+
+// failed remembers a refresh of s, read at loadedAt, that failed and returns
+// what the requests waiting for it see.
+func (a *ChatGPT) failed(s Session, loadedAt time.Time, failure *RefreshError) (Session, error) {
+	event := eventFailed
+	if failure.Refused {
+		event = eventRefused
+	}
+	now := a.now()
+	if err := a.refresh.apply(event, s, failure, now); err != nil {
+		return Session{}, err
+	}
+	a.publish(s, loadedAt)
+	return served(s, failure, now)
+}
+
+// expiry is when the session's access token expires.
+func (s Session) expiry() time.Time {
+	return s.SavedAt.Add(time.Duration(s.ExpiresIn) * time.Second)
 }
 
 // SameCredentials compares the rotating credential identity used by store CAS.
@@ -323,15 +475,17 @@ func Exchange(ctx context.Context, client *http.Client, endpoint string, form ur
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := client.Do(req)
 	if err != nil {
-		return result, errors.New("ChatGPT token exchange was unavailable")
+		return result, &tokenEndpointError{message: "ChatGPT token exchange was unavailable"}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return result, fmt.Errorf("ChatGPT token exchange failed (HTTP %d); sign in again if access was revoked", resp.StatusCode)
+		return result, &tokenEndpointError{status: resp.StatusCode, grantError: grantError(resp),
+			message: fmt.Sprintf("ChatGPT token exchange failed (HTTP %d); sign in again if access was revoked", resp.StatusCode)}
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
 	if err != nil || len(data) > 1<<20 || json.Unmarshal(data, &result) != nil {
-		return TokenResponse{}, errors.New("ChatGPT token exchange returned invalid credentials")
+		return TokenResponse{}, &tokenEndpointError{status: http.StatusOK,
+			message: "ChatGPT token exchange returned invalid credentials"}
 	}
 	return result, nil
 }

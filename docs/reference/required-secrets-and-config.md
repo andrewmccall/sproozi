@@ -120,6 +120,78 @@ seconds, so an administrator's replacement or removal of the Secret reaches
 every model request that authorizes 10 seconds or more after it, without a
 restart.
 
+When a refresh of that sign-in fails, model requests that the stored access
+token can no longer serve get a 503 `provider_auth_unavailable` whose message
+names the cause. A refusal, a 400 or 401 whose `error` is `invalid_grant`, is
+not tried again: an administrator must sign in again and load the new
+credential into the Secret, which model requests use within 10 seconds. Any
+other failure (no reply, a timeout, a redirect, any other status or an
+unusable reply) is tried again by the first model request 10 seconds after
+it. Each refresh step is bounded at 30 seconds, and no model request waits
+past its own deadline.
+See [ChatGPT sign-in failures](../guides/model-provider-auth.md#chatgpt-sign-in-failures).
+
+## Gateway name lookups
+
+The Kubernetes gateway looks up a provider's host name itself, with Go's
+resolver and its Pod's `resolv.conf`, whenever it opens a new connection to
+that provider. A connection left idle is kept for up to 90 seconds, and a call
+that finds one free needs no lookup. A provider that speaks HTTP/2 carries
+concurrent calls on one connection; without HTTP/2 the gateway keeps at most
+two idle connections per host, so a call beyond those opens a new connection
+and looks the name up.
+
+The install sets these resolver options on the `sproozi-gateway` Pod's
+`dnsConfig` and leaves `ndots`, the search list and the nameserver to the
+cluster:
+
+| Option | Install value | Kubernetes default | Effect |
+| --- | --- | --- | --- |
+| `timeout` | `1` | 5 | How long one query waits for its reply. A lost query or reply delays the call by this much. |
+| `attempts` | `3` | 2 | How many queries the resolver sends for each name before it gives up on that name. |
+
+Each attempt is a new query with its own deadline, so a reply later than a
+second is never read. Each name the resolver asks therefore takes at most 3
+seconds. With the default `ndots:5` and three search domains, a lookup of a
+name with fewer than five dots, such as `api.anthropic.com`, asks up to four
+names in turn and fails after at most 12 seconds. When every attempt for the
+name that would have answered is lost, the resolver goes on to the name as
+written, which the cluster's DNS forwards to public DNS, and the call fails
+with `no such host` rather than a timeout.
+
+The cost: a cluster DNS that steadily answers more slowly than a second now
+fails lookups that the default five seconds let succeed. A DNS server without
+a cache that answers every name after 1.2 seconds failed a lookup after 12
+seconds, where the defaults succeeded in 3.6 seconds; one that answers only
+forwarded names after 1.2 seconds failed `api.anthropic.com` after 3 seconds.
+A CoreDNS that caches the late answer may answer a later attempt in time; that
+was not measured. If model calls fail with lookup timeouts on your cluster,
+raise `timeout` with a patch of the gateway Deployment in your kustomize
+overlay over `config/install`. The patch replaces the whole option list, so
+list both options:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sproozi-gateway
+  namespace: sproozi-system
+spec:
+  template:
+    spec:
+      dnsConfig:
+        options:
+        - name: timeout
+          value: "3"
+        - name: attempts
+          value: "3"
+```
+
+Don't lower `ndots`; see
+[security hardening](security-hardening.md#protect-transport-and-identities).
+The Docker gateway's model connections have no bound of their own on the dial
+or the lookup and use the host's resolver, which Sproozi doesn't configure.
+
 ## Controller flags
 
 | Flag | Default | Effect |

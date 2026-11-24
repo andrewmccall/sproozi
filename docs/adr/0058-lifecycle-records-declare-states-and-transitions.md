@@ -134,6 +134,14 @@ registration on every read and every save once the registration exists. What a
 contradicted record does to the operations that read it is
 [ADR 0066](0066-a-contradicted-retained-record-refuses-work-and-never-blocks-an-end.md).
 
+The gateway's record of a failed ChatGPT refresh
+(`internal/modelauth/refresh.go`,
+[ADR 0069](0069-a-failed-chatgpt-refresh-is-remembered.md)) adopts rules 1, 3
+and 4: a typed state, a `(from, event) → to` table and one `apply` function.
+It is held in memory only, so rule 2's check runs on every move rather than
+on load and save, and it has no deadline column because no execution deadline
+applies to it.
+
 > **Correction, 2026-11-15.** Two statements in this paragraph were not
 > true. Which records have a declared table today:
 >
@@ -417,6 +425,131 @@ overtakes a graceful end leaves the supervisor's exit code nonzero. A
 Claude Code and Copilot, ended by a kill after their completed turn, still
 reply `stopped`.
 
+Corrected 2026-11-17: the gateway certificate store's rotation record
+(`internal/pki`, [ADR 0029](0029-local-provisioning-and-lifecycle.md) and
+[ADR 0030](0030-kubernetes-release-assets-and-certificates.md)) adopts rules 1
+to 4. The local service and the certificate controller share it. Before, its
+stage was an untyped string beside the record, load checked only the version,
+the serving generation and that something was trusted, and each mutator
+assigned the serving generation, trust and stage inline.
+
+- **Rule 1.** The [rotation phase](../../GLOSSARY.md#rotation-phase) is typed,
+  with a closed vocabulary: `single`, `prepared` and `switched`.
+- **Rule 2.** The record stores the phase as its rotation's stage, with no
+  rotation meaning `single`. One function, `describe` in
+  `internal/pki/record.go`, derives it from the record's structure: which
+  generations exist, which are retired, which are trusted and in what order,
+  which serves, and the leaf's file name. Load and save require the stored
+  stage to equal the derived phase, and refuse with an error naming what is
+  wrong. They also require each trusted generation's certificate, and each
+  retired generation's kept certificate, to have the recorded fingerprint and
+  expiry. They read no key: a key is checked by the step that uses it, and
+  by `Ensure` after its leaf and trust work, which reports an unreadable or
+  mismatched trusted key with its true cause. A missing key is the lost-key
+  state ADR 0029 describes. `Initialize` reads the record without the files,
+  and `ReplaceCA` without validating it, so replace
+  still recovers an authority whose files were lost or changed. An explicit
+  replace is also the way out of a record no phase describes, or whose
+  certificates are not the ones it records, as it was before: it rebuilds the history as generations 1 to N, all retired, N the
+  highest the record lists or a `ca-N` file belongs to, and moves from the
+  `refused` pseudo-phase to `single` on generation N+1. Every other event
+  refuses such a record and writes nothing. Replace refuses only a record it
+  cannot parse, or one of another version.
+- **Rules 3 and 4.** The table, in `internal/pki/transitions.go`, is below.
+  Each mutator admits its event before its side effect (creating a
+  generation's files) and one `apply` is the only place the record's
+  generations, trust, serving generation and rotation change. Two tests guard
+  it: one observes every `apply` and requires each operation to apply its own
+  event once, and one reads the package's source and refuses an assignment to
+  a structure field outside `apply`. Issuing a leaf
+  is not an event: it changes only the leaf, in every phase.
+- **Rule 5** does not apply: the record has no deadline, and no event is
+  refused because time passed. `RotationDue` only starts a rotation.
+
+| Event | From → to |
+| --- | --- |
+| `initialize` | none → `single` |
+| `prepare` | `single` → `prepared` |
+| `switch` | `prepared` → `switched` |
+| `rollback` | `switched` → `prepared` |
+| `retire` | `switched` → `single` |
+| `replace` | `single`, `prepared`, `switched`, refused → `single` |
+
+One idempotent pass destroys the key of every retired generation, both files
+of a generation numbered after the record's last (an interrupted prepare's),
+and every leaf file the record does not name. It removes only names the store
+writes: `ca-<N>.pem`, `ca-<N>.key` and `leaf-<16 hex>` files. `Ensure`
+runs it, so the certificate controller runs it on every reconcile and the local service at start and every
+minute; `retire`, `replace` and every leaf issuance run it after their commit.
+Before, a crash or failed removal between committing a retirement and removing
+the key left the key for good, and the controller committed it to the
+authority Secret. The pass never removes a trusted generation's key or the
+named leaf. It runs under the store's lock, which every operation that writes
+a generation or leaf holds until its commit. A removal that fails does not
+stop `Ensure`: it renews the leaf and writes the trust bundle, then returns
+the failure, as it returns a broken trusted key, marked `ErrOutstanding`.
+The certificate controller commits and publishes that reconcile's work and
+then fails it, so the log reports it every interval. The local service logs
+it at start and on every check and carries on: it starts, reloads the renewed
+leaf and advances a rotation.
+
+Validation finds damage and mistakes; it cannot authenticate the record.
+Whoever can write `state.json` can write every file beside it, and on
+Kubernetes a one-key edit needs write access to the whole authority Secret,
+so the store directory's permissions and the Secret's RBAC are what protect
+it. An edit of `state.json` alone can, from a replaced store, un-retire
+generation 1 and record `switched 1 to 2` with both trusted, after which
+`Ensure` puts the retired certificate back in the trust bundle (its missing
+key is the accepted lost-key state); and marking a generation retired makes
+the next `Ensure` destroy its key without a `retire` and its drained check.
+A blank retired entry (no fingerprint, no expiry), which replace writes only
+for history it cannot recover, is accepted only while that generation's
+certificate is gone or unreadable.
+
+Every step that destroys a key, or stops trusting a generation, first proves
+what it will depend on:
+
+| Step | Destroys or stops trusting | Proves first |
+| --- | --- | --- |
+| `retire` | the outgoing generation: trust and key | the phase is `switched`, the caller asserted drainage, and the serving key reads and matches its recorded certificate |
+| `replace` | trust in every earlier generation, every earlier key | it created the new authority, issued and committed a leaf signed by it; keys are destroyed only after that commit |
+| destroy pass (`Ensure`, after every commit) | keys of retired generations, files of a generation numbered after the record's last, leaf files the record does not name | only the committed record: it never touches a trusted generation's key or the named leaf |
+| issuing a leaf | the previous leaf | the new leaf was issued from the checked serving key and committed |
+
+`commit` refuses a record larger than the 64 KiB load reads. A move that
+starts something (`prepare`, `replace`, a change of serving names) is
+refused, before it writes anything, unless the record leaves a fixed reserve
+of 1024 bytes below that; everything that can follow before the store is
+`single` again adds at most about 360 bytes (294 measured), so `switch`,
+`rollback`, `retire` and renewal with unchanged names always commit. A
+history that has grown too long therefore refuses the next rotation instead
+of being written and then unreadable, or starting a rotation it cannot
+finish. Replace on a refused record refuses, naming the stray `ca-N` file
+or the generation id, when the history it would rebuild leaves less than
+the reserve. Open follow-up: at that bound, no local command starts a fresh
+authority; `sproozi init` refuses an installation whose authority state is
+missing. An
+interrupted replace of a refused record, run again, ends in a valid
+`single` store with every earlier key destroyed, but numbered one higher
+than an uninterrupted run, the interrupted attempt's certificate kept as a
+retired generation; on Kubernetes the scratch store is discarded, so a
+retried request gives the same number.
+
+`testdata/store-outcomes.txt` and `testdata/reconcile-outcomes.txt`, recorded
+from the code before this change, hold the outcome of every operation and
+rotation request from every written state, every state an interruption leaves
+and 45 corrupted records. The only differences are the changes above:
+undescribed records and mismatched files are refused by everything but
+replace; retired CA keys, uncommitted generations and unnamed leaf files are
+destroyed; and replace of seven corrupted records changed, each a fix (three
+it refused, two where it overwrote an existing CA's files, one where it left
+a key, and one where it removed files outside the store; commit `3396e12`'s
+message says six). A broken trusted key no longer refuses load: those rows
+are again those recorded before the change, except that `Ensure` reports the
+key. `Ensure` with the serving key lost now reports it, and five rows where a
+broken serving key fails a renewal or switch now name the generation and
+file. Records the code wrote before still load.
+
 ## Alternatives
 
 - **Check transitions in `save` by rereading the journal.** This catches an
@@ -472,7 +605,9 @@ reply `stopped`.
   `internal/runtime/kubernetes/registry/transitions.go`,
   `cmd/native-session/lifecycle.go`, `cmd/native-session/deadline.go`,
   `cmd/native-session/main.go`,
-  `internal/runtime/kubernetes/placement/storage.go`
+  `internal/runtime/kubernetes/placement/storage.go`,
+  `internal/pki/record.go`, `internal/pki/transitions.go`,
+  `internal/pki/store.go`
 - Tests: `internal/session/phase_test.go`, `internal/session/rules_test.go`,
   `cmd/sproozi/deadline_test.go`, `internal/runtime/docker/transitions_test.go`,
   `internal/gateway/docker/transitions_test.go`,
@@ -481,10 +616,14 @@ reply `stopped`.
   `internal/session/home/phase_test.go`, `internal/session/home/reconcile_test.go`,
   `cmd/native-session/lifecycle_test.go`, `cmd/native-session/lifecycle_record_test.go`,
   `cmd/native-session/lifecycle_paths_test.go`,
-  `internal/runtime/kubernetes/placement/retained_record_test.go`
+  `internal/runtime/kubernetes/placement/retained_record_test.go`,
+  `internal/pki/record_test.go`, `internal/pki/transitions_test.go`,
+  `internal/pki/destroy_test.go`, `internal/pki/interrupt_test.go`,
+  `internal/pki/outcomes_test.go`, `internal/certificates/outcomes_test.go`,
+  `internal/certificates/interrupt_test.go`
   (Corrected 2026-11-16: the home catalogue entry's files added; the
   supervisor's files added. 2026-11-17: the Kubernetes retained record's
-  files added)
+  files added; the certificate store's files added)
 - Reference: [status and listing output](../reference/session-commands.md#status-and-listing-output)
 - Related: [ADR 0018](0018-coordinator-owns-every-visit.md),
   [ADR 0038](0038-exited-agents-and-one-recovery-path.md),

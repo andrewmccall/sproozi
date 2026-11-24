@@ -1,6 +1,7 @@
 package session
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -58,11 +59,23 @@ func TestRemoveRunsBesideOtherOperationsAndKeepsTheirNewContent(t *testing.T) {
 		unlock()
 		t.Fatal(err)
 	}
-	began := time.Now()
-	err = c.Remove([]string{s.Source.ExecutionID}, func() ([]string, error) { return nil, nil })
-	if err != nil || time.Since(began) > 2*time.Second {
+	// Remove returns at once; one that waited for the other execution's lock
+	// would give up after a few seconds with ErrBusy, and one that waited on
+	// a lock the operation holds would never return. hangLimit only bounds
+	// how long that takes to report: a removal that waits for something
+	// else and returns late, by less than hangLimit, is no longer caught.
+	removed := make(chan error, 1)
+	go func() {
+		removed <- c.Remove([]string{s.Source.ExecutionID}, func() ([]string, error) { return nil, nil })
+	}()
+	select {
+	case err = <-removed:
+	case <-time.After(hangLimit):
+		err = errors.New("did not return")
+	}
+	if err != nil {
 		unlock()
-		t.Fatalf("remove beside another operation: %v after %s", err, time.Since(began))
+		t.Fatalf("remove beside another operation: %v", err)
 	}
 	if _, err = os.Stat(filepath.Join(dir, s.Source.ExecutionID+".json")); !os.IsNotExist(err) {
 		unlock()

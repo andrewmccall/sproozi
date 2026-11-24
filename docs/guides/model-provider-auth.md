@@ -86,11 +86,14 @@ the `model-gateway-auth` ConfigMap selecting `chatgpt`. Only the trusted gateway
 has get/update permission on that exact Secret. It serializes refreshes and
 persists rotating access/refresh tokens together before using them. A failed
 credential read or refresh fails closed; an unsaved refresh replacement is
-retried without performing a second rotation in the same process.
+retried without performing a second rotation in the same process. A refresh
+that has started finishes, and its result is saved, even if every model
+request waiting for it ends first. What a failed refresh does is in
+[ChatGPT sign-in failures](#chatgpt-sign-in-failures).
 
 Model requests use the gateway's in-memory copy of the ChatGPT credential. The gateway
 reads the Secret again at most every 10 seconds, and sooner when the access
-token is within a minute of expiry. If you replace or remove the Secret, every
+token is within a minute of expiry and no refresh failure is remembered. If you replace or remove the Secret, every
 model request that authorizes 10 seconds or more after the change uses it,
 without a gateway restart. Only a
 reload or refresh takes the gateway's lock, so concurrent model requests don't
@@ -106,6 +109,59 @@ another cluster. A crash after provider rotation but before persistence can
 require reauthorization. Coordinated multi-replica refresh is not implemented.
 Do not let a GitOps reconciler restore an old bootstrap credential record over
 the rotating live Secret.
+
+### ChatGPT sign-in failures
+
+The gateway refreshes the access token when a model request finds it within a
+minute of expiry. One refresh runs at a time; model requests that arrive
+meanwhile wait for its result, each for no longer than its own deadline. A
+request that gives up gets a 503 `provider authentication is unavailable`,
+and the refresh still finishes and is saved. Each step (reading the stored
+sign-in, the refresh, saving its result) is bounded at 30 seconds.
+
+If the refresh fails, the gateway remembers the failure. Until 30 seconds
+before the access token's computed expiry, a transient failure doesn't fail
+model requests: they use the token they already have. Otherwise each model request gets a 503 with
+type `server_error`, code `provider_auth_unavailable` and a message that names
+the cause. The same message is the audit record's `denyReason`. It never
+contains a token, a URL or the provider's reply.
+
+| Refresh outcome | Message after `provider authentication is unavailable: ` | What happens next | What to do |
+| --- | --- | --- | --- |
+| A 400 or 401 whose `error` is `invalid_grant`: the refresh token was revoked, expired or already spent | `the provider refused to renew the ChatGPT sign-in (token endpoint HTTP STATUS invalid_grant); an administrator must sign in again` | No refresh is sent again for this sign-in, and every model request gets this 503, even while the access token has not expired | Sign in again (below) |
+| Anything else from `auth.openai.com`: no reply, a timeout, a redirect, any other status (such as a proxy's 403 or 407, or a 400 with another error), or a 200 the gateway can't use | `the ChatGPT sign-in could not be renewed (CAUSE); the gateway tries again 10s after the failure` | No refresh is sent for 10 seconds; the first model request after that tries again. Until 30 seconds before the access token expires, model requests still succeed | Usually nothing. If it lasts, check the gateway's route to `auth.openai.com` and the provider's status |
+
+`CAUSE` is `the token endpoint was unreachable or did not answer in time`,
+`token endpoint HTTP STATUS`, `the token endpoint returned an unreadable
+reply` or `the renewed credential was incomplete`. The gateway never follows a
+redirect from the token endpoint, so a redirect is reported as its status.
+
+A 200 that the gateway can't use (`the token endpoint returned an unreadable
+reply` or `the renewed credential was incomplete`, for example with no new
+refresh token) may already have spent the old refresh token at the provider.
+The gateway keeps the old one, so its next refresh may be refused, and then an
+administrator must sign in again.
+
+To sign in again, run `bash hack/demo/chatgpt-login.sh --reauthorize` and load
+the new `.local/chatgpt-session.json` into key `session.json` of the
+`model-gateway-chatgpt` Secret, or on a local installation run `sproozi init
+--chatgpt`. No restart is needed: the gateway reads the stored sign-in at most
+every 10 seconds, as it does when healthy, so model requests use the new
+sign-in within 10 seconds. A gateway restart also forgets the failure and
+tries one refresh.
+
+That 10-second interval covers a remembered refresh failure, not a failed
+read of the stored sign-in itself. While the Secret or file can't be read,
+every model request reads it again and gets `provider authentication is
+unavailable`.
+
+While a refresh is in flight, model requests wait for it, up to their own
+deadline, even if the stored access token still works.
+
+The gateway keeps the failure in memory only and does not raise an alert;
+watch the audit log for `denyReason` values containing `an administrator must
+sign in again`. See
+[ADR 0069](../adr/0069-a-failed-chatgpt-refresh-is-remembered.md).
 These constraints follow the provider's
 [rotating-session requirements](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions).
 
@@ -173,7 +229,8 @@ in this mode; model discovery is allowed. Account-selection headers supplied by
 the workload are discarded. If the saved ChatGPT credential can't be used, for
 example because it lacks the `chatgpt.tokens.use.direct` scope, each call gets
 a 503 with code `provider_auth_unavailable` and `provider authentication is
-unavailable`; sign in again.
+unavailable`; sign in again. A failed refresh adds its cause to that message;
+see [ChatGPT sign-in failures](#chatgpt-sign-in-failures).
 See the provider's
 [inference contract](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)
 and [preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).

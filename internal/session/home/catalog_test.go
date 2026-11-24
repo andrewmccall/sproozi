@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -338,37 +339,92 @@ func TestUnknownSessionRepliesWithoutJournalPath(t *testing.T) {
 	}
 }
 
+// searchArg is the harness argument the resume tests pass through.
+const searchArg = "--search"
+
 // A session created by start resumes where it stopped: a new execution from
 // its last checkpoint, with the same conversation, fresh limits and a new
 // deadline, even after the first execution's deadline.
+//
+// The deadline is real and short. Start, a refused resume and the stop must
+// finish before it; set-up that it overtakes starts again with a deadline
+// twice as far ahead (testutil.PassDeadline). Resume then runs once the
+// deadline has passed for every clock: the coordinator's, home's and the
+// placement's.
 func TestResumeContinuesAStartedSessionAfterItsDeadline(t *testing.T) {
 	t.Parallel()
-	s, local, _, repo := testService(t)
+	var s *Service
+	var local *placementFixture
 	id := uuid.NewString()
-	// Long enough for start, a refused resume and the stop to finish before the
-	// deadline on a loaded machine; the test then waits for it to pass.
-	s.duration = 15 * time.Second
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	r := exchange(t, s, Request{Action: ActionResume, ID: id, OperationID: uuid.NewString()})
-	if !r.Rejected || !strings.Contains(r.Error, `is running; attach to it with "sproozi attach `+id+`"`) {
-		t.Fatalf("resume of a running session replied %+v", r)
-	}
-	stopped, err := s.Stop(t.Context(), id, uuid.NewString())
-	if err != nil || stopped.Phase != string(PhaseRetained) || stopped.ThreadID != testNativeUUID {
-		t.Fatalf("stop of a started session: %+v %v", stopped, err)
-	}
-	time.Sleep(time.Until(stopped.Deadline) + 100*time.Millisecond)
+	testutil.PassDeadline(t, time.Second, func(ahead time.Duration) (time.Time, error) {
+		var repo string
+		s, local, _, repo = testService(t)
+		s.duration = ahead
+		// The execution's deadline is set during Start, no earlier than this.
+		earliest := time.Now().Add(ahead)
+		if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
+			return earliest, err
+		}
+		r := exchange(t, s, Request{Action: ActionResume, ID: id, OperationID: uuid.NewString()})
+		if !r.Rejected || !strings.Contains(r.Error, `is running; attach to it with "sproozi attach `+id+`"`) {
+			return earliest, fmt.Errorf("resume of a running session replied %+v", r)
+		}
+		stopped, err := s.Stop(t.Context(), id, uuid.NewString())
+		if err != nil || stopped.Phase != string(PhaseRetained) || stopped.ThreadID != testNativeUUID {
+			return earliest, fmt.Errorf("stop of a started session: %+v %w", stopped, err)
+		}
+		return stopped.Deadline, nil
+	})
 	s.duration = time.Hour
-	resumed, err := s.Resume(t.Context(), id, uuid.NewString(), []string{"--search"})
+	resumed, err := s.Resume(t.Context(), id, uuid.NewString(), []string{searchArg})
 	if err != nil {
 		t.Fatal(err)
 	}
 	active := resumed.Session.Active
 	if resumed.ID != id || resumed.ExecutionID == id || active == nil || active.Launch.ThreadID != testNativeUUID ||
 		active.Launch.CheckpointDigest != local.digest || !active.Launch.Deadline.After(time.Now().Add(time.Minute)) ||
-		!slices.Equal(active.Launch.HarnessArgs, []string{"--search"}) {
+		!slices.Equal(active.Launch.HarnessArgs, []string{searchArg}) {
+		t.Fatalf("resumed session: %+v", resumed)
+	}
+	if again, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil || again.ThreadID != testNativeUUID {
+		t.Fatalf("stop of the resumed execution: %+v %v", again, err)
+	}
+}
+
+// Home decides whether a stopped session may resume from its state as the
+// coordinator judges it, by the coordinator's clock (derive with
+// Coordinator.PastDeadline). Here only the coordinator's clock is past the
+// first execution's deadline, reopened on a clock a minute after it, while
+// home's own clock, which sets the new deadline, and the placement fixture
+// stay on the machine's: production, where every reader shares one clock,
+// never reaches that state. The test covers only home's use of the
+// coordinator's judgement, quickly; TestResumeContinuesAStartedSessionAfterItsDeadline
+// covers the deadline passing for every reader.
+func TestResumeFollowsTheCoordinatorsJudgementOfTheDeadline(t *testing.T) {
+	t.Parallel()
+	s, local, _, repo := testService(t)
+	id := uuid.NewString()
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	stopped, err := s.Stop(t.Context(), id, uuid.NewString())
+	if err != nil || stopped.Phase != string(PhaseRetained) || stopped.ThreadID != testNativeUUID {
+		t.Fatalf("stop of a started session: %+v %v", stopped, err)
+	}
+	late := stopped.Deadline.Add(time.Minute)
+	reopenWithClock(t, s, func() time.Time { return late })
+	if first, err := s.coordinator.Inspect(id); err != nil || !s.coordinator.PastDeadline(first) {
+		t.Fatalf("the first execution is not past its deadline at %s: %+v %v", late, first, err)
+	}
+	s.duration = 3 * time.Hour
+	resumed, err := s.Resume(t.Context(), id, uuid.NewString(), []string{searchArg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := resumed.Session.Active
+	if resumed.ID != id || resumed.ExecutionID == id || active == nil || active.Launch.ThreadID != testNativeUUID ||
+		active.Launch.CheckpointDigest != local.digest || !active.Launch.Deadline.After(late.Add(time.Minute)) ||
+		!slices.Equal(active.Launch.HarnessArgs, []string{searchArg}) {
 		t.Fatalf("resumed session: %+v", resumed)
 	}
 	if again, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil || again.ThreadID != testNativeUUID {

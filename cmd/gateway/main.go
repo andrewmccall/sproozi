@@ -589,7 +589,7 @@ func modelHandlers(cfg *startupConfig, auditLogger audit.Writer, modelClient *ht
 		if err := checkChatGPTSession(context.Background(), store); err != nil {
 			log.Fatal(err)
 		}
-		auth, ok = modelauth.NewChatGPT(store, newUpstreamClient(30*time.Second)), true
+		auth, ok = modelauth.NewChatGPT(store, modelauth.NewRefreshClient()), true
 	}
 	if ok {
 		openAIHandler = &modelgateway.Handler{Config: config(cfg.openAIUpstreamURL, auth)}

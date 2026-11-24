@@ -109,7 +109,12 @@ Claude Code in.
 | `submittedAt`, `firstModelRequestAt` | The two instants behind that figure. | Milliseconds. |
 | `runSeconds` | The task's `AgentRun`, from `status.startedAt` (admitted) to `status.completedAt` (terminal phase). | Whole seconds, so good to about a second. |
 | `runAdmittedAt`, `runCompletedAt` | The two instants behind that figure. | Whole seconds. |
-| `serverTimingNote`, `runTimingNote` | Present instead of a figure that could not be had. | |
+| `serverTimingNote`, `runTimingNote` | Present instead of a figure that could not be had, saying which input was missing: no deadline, no provider request time, no such `AgentRun`, one without `startedAt` or `completedAt`, or a failed list call. | |
+
+The executor reports the task `retained` about two seconds before the
+controller records the `AgentRun` as `Succeeded`, so the proof reads the run
+again for up to 30 seconds (`RUN_COMPLETION_WAIT_SECONDS`) until `completedAt`
+is set.
 
 Compare `secondsToFirstModelRequest` between runs, and `runSeconds` when the
 whole task matters. Neither includes a polling interval, so a difference

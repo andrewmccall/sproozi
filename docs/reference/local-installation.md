@@ -150,6 +150,10 @@ key, `token` for a sign-in token the gateway sends as a bearer (with
 Anthropic's OAuth beta header for Claude Code), or `chatgpt` for a ChatGPT plan
 sign-in the gateway refreshes
 ([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)).
+The gateway refreshes a ChatGPT sign-in directly with `auth.openai.com`: it
+ignores `HTTPS_PROXY` and `HTTP_PROXY`, as its model calls do, never follows
+a redirect, and doesn't use `--provider-ca-file`
+([ADR 0069](../adr/0069-a-failed-chatgpt-refresh-is-remembered.md)).
 
 With `--sign-in` the configuration has no `providerTokenFile`, and the agent
 receives no placeholder key. Its sign-in lives in a persistent Docker volume,
@@ -196,9 +200,89 @@ verifies upstream providers.
 
 A missing or unreadable authority key, or a lost `pki/state.json`, stops
 renewal and new launches; it never creates a replacement automatically. After a
-switch, the service checks its own listeners against the new trust before
-it retires the previous authority. `certificates replace-ca` creates a new
-authority, trusts only it and destroys every older key.
+switch, the service checks its own listeners against the new trust before it
+retires the previous authority. `certificates replace-ca` creates a new
+authority, trusts only it and destroys every older key. It refuses while a
+session is active or a container still runs on the installation's network,
+because those would lose trust in the gateway. A retired authority's key, a
+superseded serving certificate's key, or the files of an authority an
+interrupted command created but never recorded, are destroyed at the
+service's next start or check.
+
+A `pki/state.json` that no [rotation phase](../../GLOSSARY.md#rotation-phase)
+describes, or an authority certificate, trusted or kept as history, that is
+not the one it records, is refused with an error that names what is wrong and
+begins `pki: corrupt state:` or `pki: certificate authority files do not match
+state:`. `sproozi certificates status` and `sproozi doctor` print it; the
+service will not start, and a running service logs `Failed to maintain
+gateway certificate` with it every minute, keeps serving its current
+certificate until it expires without renewing it, and refuses new launches.
+Every certificate command but `replace-ca` refuses the store and changes
+nothing. Restore `pki` from a backup, or run `sproozi certificates
+replace-ca`: it numbers the new authority after every generation in the record
+or the directory, retires all of them, destroys every earlier authority and
+serving key and keeps earlier certificates as history. It refuses only a
+`state.json` it cannot parse, or one written by a different record version.
+
+A trusted authority's key is read only by the step that uses it. The service's
+check also reports, after renewing the certificate and writing the trust
+bundle, a trusted key that is unreadable (`pki: certificate authority key:
+generation N key ca-N.key is unreadable: <cause>`, for example a key other
+users can read) or does not match its certificate (`… does not match its
+certificate: <cause>`), and a retired key or stray file it could not remove
+(`pki: destroy retired keys: <cause>`). Neither stops the service: it starts,
+or carries on, serving the renewed certificate and advancing a rotation as
+usual, and logs, at start and on every check until the cause is gone:
+
+```text
+Failed to finish gateway certificate store cleanup err="<report>"
+```
+
+For a key report, fix the key file's owner and mode (owned by you, mode
+`0600`); if the key is lost or is not the authority's, run `sproozi
+certificates replace-ca`. For a removal report, remove the entry it names; it
+is not a file Sproozi wrote in that form, such as a directory with a key's
+name. A missing serving key is reported the same way (`… key ca-N.key is
+missing; the next renewal will fail: recover it, or replace the CA`), so you
+hear while the certificate is still valid. A trusted key that is broken
+still fails the step that needs it: renewing from it, switching to it, or
+retiring the authority before it, which would otherwise destroy the last key
+that works. Each fails with `pki: serving CA key unavailable; recover it or
+replace the CA: generation N key ca-N.key: <cause>`, where the cause is that
+it cannot be read, `pki: one PKCS#8 private key required`, or `pki: private
+key does not match certificate`. `sproozi certificates status` and `sproozi
+doctor` do not show these reports yet; they appear only in the service log.
+
+`pki/state.json` is read only up to 64 KiB. A rotation or `replace-ca` starts
+only while the record leaves 1024 bytes below that, so a rotation it starts
+can always finish or be undone. After several hundred generations one is
+refused, before anything is written, with `pki: refusing to prepare: the
+record is N bytes, and starting it needs 1024 bytes below the 65536 bytes
+load reads` (or `replace`). The store then keeps working with its current
+authority until that authority expires, renewing the certificate as usual,
+but cannot rotate. A change of harnesses or inspected hosts that would grow
+the record into those 1024 bytes is refused the same way, before a
+certificate is issued (`pki: refusing to change the serving names: … the
+serving names list does not fit`): the service keeps its current certificate,
+which is not renewed until the names list shrinks again. The history cannot be shortened in
+place, and no command starts a new local authority yet: `sproozi init`
+refuses an installation whose authority state is missing. `replace-ca` on a
+refused record also refuses, naming
+the cause, when a stray `ca-N` file or a generation id in `state.json` would
+number the new authority beyond that size: remove the stray file, or correct
+or restore `state.json`, and run it again. An interrupted `replace-ca` on a
+refused record, run again, ends with a valid store and every earlier key
+destroyed, but numbered one higher than an uninterrupted run, keeping the
+interrupted attempt's certificate as a retired generation.
+
+These checks find damage and mistakes. They cannot authenticate the record:
+whoever can write `pki/state.json` can write every file beside it, and the
+directory's private permissions are what protect it. Two consequences of an
+edit to `state.json` alone: from a replaced store (generation 1 retired, 2
+serving), un-retiring generation 1 and recording a switched rotation from 1 to
+2 loads, and the next check puts the retired authority's certificate back in
+the trust bundle; and marking a generation retired makes the next check
+destroy its key, without a retirement or the service's consumer check.
 
 ## Supported platforms
 

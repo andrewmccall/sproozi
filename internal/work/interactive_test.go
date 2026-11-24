@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -284,9 +285,18 @@ func TestResumeStartsAFreshExecutionOfTheSession(t *testing.T) {
 // A resumed execution that has not started when its deadline passes is ended,
 // not cancelled: the session stays stopped with the checkpoint its earlier
 // execution committed, says why, and resumes (ADR 0060).
+//
+// The resumed execution's deadline is a minute ahead, so its refused
+// preparation is seen before it however slow the machine; the coordinator,
+// whose clock the driver judges deadlines by, then moves two minutes on.
+// The owner's own deadline cap is an hour, so the last resume's deadline
+// lies past that clock.
 func TestResumeThatMissedItsDeadlineLeavesTheSessionResumable(t *testing.T) {
 	t.Parallel()
 	c, p := fixture(t)
+	c.MaxDuration = time.Hour
+	var offset atomic.Int64
+	c.Coordinator = reopenCoordinator(t, c, p, func() time.Time { return time.Now().Add(time.Duration(offset.Load())) })
 	o := openOwner(t, c)
 	v := startInteractive(t, o, interactiveRequest())
 	if _, err := o.Stop(t.Context(), v.ID, uuid.NewString()); err != nil {
@@ -295,7 +305,7 @@ func TestResumeThatMissedItsDeadlineLeavesTheSessionResumable(t *testing.T) {
 	p.mu.Lock()
 	p.refusePrepare = errors.New("node unavailable")
 	p.mu.Unlock()
-	late, err := o.Resume(t.Context(), v.ID, uuid.NewString(), "2s")
+	late, err := o.Resume(t.Context(), v.ID, uuid.NewString(), "1m")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +315,7 @@ func TestResumeThatMissedItsDeadlineLeavesTheSessionResumable(t *testing.T) {
 	p.mu.Lock()
 	p.refusePrepare = nil
 	p.mu.Unlock()
-	time.Sleep(time.Until(late.Deadline) + 10*time.Millisecond)
+	offset.Store(int64(2 * time.Minute))
 	if _, err = o.Recover(t.Context(), v.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -322,6 +332,23 @@ func TestResumeThatMissedItsDeadlineLeavesTheSessionResumable(t *testing.T) {
 		t.Fatalf("resume after the deadline: %+v %v", resumed, err)
 	}
 	waitPhase(t, o, v.ID, phaseActive)
+}
+
+// reopenCoordinator replaces the coordinator fixtureConfig opened for c,
+// whose only placement is p, with one on the same journal that judges
+// deadlines by now. Call it before the owner opens.
+func reopenCoordinator(t *testing.T, c Config, p *fixturePlacement, now func() time.Time) *session.Coordinator {
+	t.Helper()
+	if err := c.Coordinator.Close(); err != nil {
+		t.Fatal(err)
+	}
+	coordinator, err := session.Open(filepath.Join(filepath.Dir(c.Directory), "sessions"),
+		map[string]session.Placement{executorKubernetes: p}, testLimit, session.WithClock(now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = coordinator.Close() })
+	return coordinator
 }
 
 // Resume takes a new deadline choice within the executor's cap; the owner's

@@ -56,7 +56,8 @@ func openCertificates(c Config, names pki.Names, log io.Writer) (*certificates, 
 		// Never create a CA implicitly at service start; setup owns creation.
 		return nil, err
 	}
-	if _, err = store.Ensure(names); err != nil {
+	managed := &certificates{store: store, names: names, log: log}
+	if _, err = managed.ensure(); err != nil {
 		return nil, err
 	}
 	cert, trust, _, err := store.Serving()
@@ -66,7 +67,21 @@ func openCertificates(c Config, names pki.Names, log io.Writer) (*certificates, 
 	if err = pki.VerifyServing(cert.Leaf, trust, names, time.Now()); err != nil {
 		return nil, err
 	}
-	return &certificates{store: store, names: names, serving: proxytransport.NewCertificate(cert), log: log}, nil
+	managed.serving = proxytransport.NewCertificate(cert)
+	return managed, nil
+}
+
+// ensure renews the leaf and writes the trust bundle. Cleanup the store
+// could not finish, such as a retired key it could not remove or a trusted
+// key it cannot read, leaves both current: it is logged on every pass until
+// it is fixed and does not fail the caller. Every other error does.
+func (c *certificates) ensure() (bool, error) {
+	changed, err := c.store.Ensure(c.names)
+	if errors.Is(err, pki.ErrOutstanding) {
+		c.logf("Failed to finish gateway certificate store cleanup err=%q", err)
+		return changed, nil
+	}
+	return changed, err
 }
 
 func staticCertificate(g GatewayConfig, names pki.Names) (tls.Certificate, []byte, error) {
@@ -149,7 +164,7 @@ func (c *certificates) maintain() error {
 	if c.store == nil {
 		return nil
 	}
-	changed, err := c.store.Ensure(c.names)
+	changed, err := c.ensure()
 	if err != nil {
 		return err
 	}
@@ -172,13 +187,13 @@ func (c *certificates) maintain() error {
 			return err
 		}
 		switch {
-		case distributed && st.Rotation.Stage == pki.StagePrepared:
+		case distributed && st.Phase() == pki.PhasePrepared:
 			if err = c.store.SwitchRotation(true); err != nil {
 				return err
 			}
 			changed = true
 			c.logf("Switched gateway certificate to the new authority")
-		case distributed && st.Rotation.Stage == pki.StageSwitched:
+		case distributed && st.Phase() == pki.PhaseSwitched:
 			// Retire only after the gateway serves a leaf the new trust accepts.
 			if err = c.selfCheck(); err != nil {
 				return fmt.Errorf("switched gateway certificate failed its check; the previous authority stays trusted: %w", err)

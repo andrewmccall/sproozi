@@ -371,7 +371,13 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 	h.copyProviderHeaders(upstreamReq.Header, r.Header, providerAuth.Mode() == modelauth.WorkloadMode)
 	if err = providerAuth.Authorize(upstreamReq); err != nil {
 		release()
-		h.deny(w, e, http.StatusServiceUnavailable, "provider authentication is unavailable", "server_error", "provider_auth_unavailable")
+		message := "provider authentication is unavailable"
+		// A failed refresh of the gateway's ChatGPT sign-in names its cause
+		// and what to do; its text carries no provider body or token.
+		if refreshErr := (*modelauth.RefreshError)(nil); errors.As(err, &refreshErr) {
+			message += ": " + refreshErr.Error()
+		}
+		h.deny(w, e, http.StatusServiceUnavailable, message, "server_error", "provider_auth_unavailable")
 		return
 	}
 	// Let the trusted Go transport negotiate and decode compression. Forwarding

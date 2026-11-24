@@ -133,6 +133,17 @@ the home configuration's `gateway.maxModelCallSeconds` sets. See
 [concurrency and gateway capacity](#concurrency-and-gateway-capacity) before
 changing them.
 
+Don't lower `ndots` on the Kubernetes gateway Pod. The gateway looks up
+provider names with its Pod's resolver, and a name with at least `ndots` dots
+is asked as written before the cluster's search list, so CoreDNS forwards it
+to public DNS first. At `ndots:2`, any two-dot in-cluster name, a Service
+name, its namespace and `svc`, leaves the cluster that way, and at 3 or 4 so
+does any in-cluster name with that many dots. At
+`ndots:1`, a partly qualified name such as `models.ai`, meant as Service
+`models` in namespace `ai`, can resolve to a public host of that name instead.
+The install's resolver settings are in
+[gateway name lookups](required-secrets-and-config.md#gateway-name-lookups).
+
 The projected token lifetime is two hours, and the kubelet refreshes the file
 before it expires. The controller mounts the token volume's directory,
 `/var/run/sproozi/tokens/gateway`, which holds only the token, at

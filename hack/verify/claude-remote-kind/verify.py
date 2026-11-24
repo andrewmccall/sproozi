@@ -380,18 +380,16 @@ class Proof:
     def task_timing(self, started, done, request, waited):
         """The task's timing from recorded timestamps (timing.py). It is
         reported, never checked: a missing figure is not a failure."""
-        fields = {}
         try:
-            duration = T.parse_duration(json.loads(PROFILE.read_text())["maxDuration"])
-            fields.update(T.server_timing(started["deadline"], duration, request["at"], waited))
+            cap = T.parse_duration(json.loads(PROFILE.read_text())["maxDuration"])
         except (KeyError, ValueError, OSError) as error:
-            fields["serverTimingNote"] = "No submission-to-first-request figure: " + str(error)
-        try:
-            runs = json.loads(self.kubectl("-n", self.args.namespace, "get", "agentruns", "-o", "json"))
-            fields.update(T.run_timing(runs, done["incarnation"]["executionId"]))
-        except (KeyError, ValueError, OSError, subprocess.SubprocessError) as error:
-            fields["runTimingNote"] = "No AgentRun times: " + type(error).__name__
-        return fields
+            cap = "the profile's maxDuration is unreadable: %s: %s" % (type(error).__name__, error)
+        fields = T.server_timing_from(started, request, cap, waited)
+        uid = (done.get("incarnation") or {}).get("executionId")
+        if not uid:
+            return {**fields, "runTimingNote": "The retained status view has no incarnation.executionId"}
+        read = lambda: json.loads(self.kubectl("-n", self.args.namespace, "get", "agentruns", "-o", "json"))
+        return {**fields, **T.await_run_timing(read, uid)}
 
     def tools(self):
         view = self.start("tools-run")

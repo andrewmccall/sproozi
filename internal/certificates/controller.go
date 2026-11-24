@@ -45,6 +45,18 @@ const (
 	// CABundleKey holds the published trust in the serving Secret.
 	CABundleKey      = "ca.crt"
 	maxAuthorityKeys = 64
+	// noRotation is the RotationStage annotation outside a rotation.
+	noRotation = "none"
+)
+
+// Values of the RotationRequest annotation.
+const (
+	requestRenew    = "renew"
+	requestPrepare  = "prepare"
+	requestSwitch   = "switch"
+	requestRetire   = "retire"
+	requestRollback = "rollback"
+	requestReplace  = "replace"
 )
 
 // Config names the objects and identities the controller owns.
@@ -120,8 +132,11 @@ func (c *Controller) Reconcile(ctx context.Context) (Status, error) {
 	}
 	request := authority.Annotations[RotationRequest]
 	requestErr := c.apply(store, request)
-	if _, err = store.Ensure(cfg.Names); err != nil {
-		return Status{}, err
+	// Outstanding cleanup leaves a current leaf and trust bundle: commit and
+	// publish them, then report it, so the next reconcile retries it.
+	_, outstanding := store.Ensure(cfg.Names)
+	if outstanding != nil && !errors.Is(outstanding, pki.ErrOutstanding) {
+		return Status{}, outstanding
 	}
 	data, err := readStore(dir)
 	if err != nil {
@@ -151,7 +166,7 @@ func (c *Controller) Reconcile(ctx context.Context) (Status, error) {
 	}
 	annotations[LeafNotAfter] = certificate.Leaf.NotAfter.UTC().Format(time.RFC3339)
 	annotations[RenewAt] = cfg.Policy.RenewAt(certificate.Leaf).UTC().Format(time.RFC3339)
-	annotations[RotationStage] = "none"
+	annotations[RotationStage] = noRotation
 	if st.Rotation != nil {
 		annotations[RotationStage] = fmt.Sprintf("%s %d to %d", st.Rotation.Stage, st.Rotation.From, st.Rotation.To)
 	}
@@ -171,7 +186,7 @@ func (c *Controller) Reconcile(ctx context.Context) (Status, error) {
 	if err = c.publishServing(ctx, store, st, trust); err != nil {
 		return status, err
 	}
-	return status, requestErr
+	return status, errors.Join(requestErr, outstanding)
 }
 
 func (c *Controller) apply(store *pki.Store, request string) error {
@@ -184,19 +199,19 @@ func (c *Controller) apply(store *pki.Store, request string) error {
 	switch request {
 	case "":
 		return nil
-	case "renew":
+	case requestRenew:
 		return store.Renew()
-	case "prepare":
+	case requestPrepare:
 		return store.PrepareRotation()
-	case "switch":
+	case requestSwitch:
 		// The operator asserts every runtime now references the combined
 		// trust and every older Pod has stopped; see the rotation guide.
 		return store.SwitchRotation(true)
-	case "retire":
+	case requestRetire:
 		return store.RetireRotation(true)
-	case "rollback":
+	case requestRollback:
 		return store.RollbackRotation()
-	case "replace":
+	case requestReplace:
 		return store.ReplaceCA()
 	}
 	return fmt.Errorf("unknown request; use renew, prepare, switch, retire, rollback or replace")

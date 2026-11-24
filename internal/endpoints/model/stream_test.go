@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -20,6 +21,7 @@ import (
 	model "github.com/andrewmccall/sproozi/internal/endpoints/model"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 	"github.com/andrewmccall/sproozi/internal/modelauth"
+	"github.com/andrewmccall/sproozi/internal/testutil"
 )
 
 const (
@@ -103,6 +105,29 @@ func (r *streamRecorder) waitFor(t *testing.T, want string) {
 		case <-r.flushed:
 		case <-deadline:
 			t.Fatalf("relayed body %q never contained %q", r.String(), want)
+		}
+	}
+}
+
+// waitForHeaders waits until the relay has taken the provider's response
+// and written its status, so an interrupt after it ends a relayed call, not
+// one still waiting for headers. The relay writes the status as soon as it
+// has the response, or never; the limit only bounds how long a relay that
+// never does takes to report.
+func (r *streamRecorder) waitForHeaders(t *testing.T) {
+	t.Helper()
+	limit := time.After(30 * time.Second)
+	for {
+		r.mu.Lock()
+		status := r.status
+		r.mu.Unlock()
+		if status != 0 {
+			return
+		}
+		select {
+		case <-r.flushed:
+		case <-limit:
+			t.Fatal("the relay never wrote the provider's response headers")
 		}
 	}
 }
@@ -281,9 +306,11 @@ func TestAnthropicStreamCutBeforeMessageStartChargesRequestBytes(t *testing.T) {
 	provider, client := newPipeProvider()
 	clock := newManualClock()
 	g := anthropicGateway(t, api.EndpointBudget{MaxUnits: 10_000}, client, clock.Now)
-	_, cancel, done := g.start("/v1/messages", anthropicStreamRequest)
+	recorder, cancel, done := g.start("/v1/messages", anthropicStreamRequest)
 	<-provider.requests
-	time.Sleep(20 * time.Millisecond) // let the relay take the response headers
+	// The relay starts timing the call when it takes the headers; the second
+	// passes after that.
+	recorder.waitForHeaders(t)
 	clock.Advance(time.Second)
 	cancel()
 	finished(t, done)
@@ -429,9 +456,9 @@ func TestStreamIsCutAtItsReservation(t *testing.T) {
 func TestUnsizableReferenceChargesTheReservationOnInterrupt(t *testing.T) {
 	provider, client := newPipeProvider()
 	g := responsesGateway(t, api.EndpointBudget{MaxUnits: 10_000}, client, fixedClock())
-	_, cancel, done := g.start(testResponsesPath, `{"model":"test","stream":true,"previous_response_id":"resp_1","max_output_tokens":50}`)
+	recorder, cancel, done := g.start(testResponsesPath, `{"model":"test","stream":true,"previous_response_id":"resp_1","max_output_tokens":50}`)
 	<-provider.requests
-	time.Sleep(20 * time.Millisecond)
+	recorder.waitForHeaders(t)
 	cancel()
 	finished(t, done)
 	g.settled(t, "reservation", "client_cancelled", 10_000)
@@ -481,28 +508,38 @@ func TestProviderFailureBeforeHeadersReleasesTheReservation(t *testing.T) {
 
 // Elapsed time alone never cuts a stream: a long unbounded call with few
 // visible bytes runs on, and only an interrupt is priced by the time floor.
+//
+// The relay runs in a synctest bubble, so each 1.1s sleep is known to
+// include the relay's one-second check; on real time a slow machine could
+// run it late and the test pass without it. A relay that spins or blocks
+// on a lock stops the bubble's clock; the watch reports it on real time
+// (testutil.WatchBubble).
 func TestLongQuietStreamIsNotCut(t *testing.T) {
-	provider, client := newPipeProvider()
-	clock := newManualClock()
-	g := responsesGateway(t, api.EndpointBudget{MaxUnits: 1000}, client, clock.Now)
-	recorder, cancel, done := g.start(testResponsesPath, responsesStreamRequest)
-	defer cancel()
 	events := fixtureEvents(t, "responses-reasoning.sse")
-	provider.send(t, events[0], events[1], events[2])
-	recorder.waitFor(t, "response.output_item.added")
-	for _, event := range []string{events[3], events[4]} {
-		clock.Advance(time.Hour)            // far past (1000 units) ÷ 250 tokens a second
-		time.Sleep(1100 * time.Millisecond) // let the relay's one-second check run
-		provider.send(t, event)
-	}
-	recorder.waitFor(t, "response.output_item.done")
-	provider.send(t, events[5], strings.Replace(events[6], `"total_tokens":1250`, `"total_tokens":900`, 1))
-	_ = provider.body.Close()
-	finished(t, done)
-	if strings.Contains(recorder.String(), "budget_exhausted") {
-		t.Fatalf("a quiet stream was cut by elapsed time: %q", recorder.String())
-	}
-	g.settled(t, "provider", "completed", 900)
+	watch := testutil.WatchBubble(t, "the quiet stream was not relayed to its end")
+	defer watch.End()
+	synctest.Test(t, func(t *testing.T) {
+		provider, client := newPipeProvider()
+		clock := newManualClock()
+		g := responsesGateway(t, api.EndpointBudget{MaxUnits: 1000}, client, clock.Now)
+		recorder, cancel, done := g.start(testResponsesPath, responsesStreamRequest)
+		defer cancel()
+		provider.send(t, events[0], events[1], events[2])
+		recorder.waitFor(t, "response.output_item.added")
+		for _, event := range []string{events[3], events[4]} {
+			clock.Advance(time.Hour)            // far past (1000 units) ÷ 250 tokens a second
+			time.Sleep(1100 * time.Millisecond) // let the relay's one-second check run
+			provider.send(t, event)
+		}
+		recorder.waitFor(t, "response.output_item.done")
+		provider.send(t, events[5], strings.Replace(events[6], `"total_tokens":1250`, `"total_tokens":900`, 1))
+		_ = provider.body.Close()
+		finished(t, done)
+		if strings.Contains(recorder.String(), "budget_exhausted") {
+			t.Fatalf("a quiet stream was cut by elapsed time: %q", recorder.String())
+		}
+		g.settled(t, "provider", "completed", 900)
+	})
 }
 
 // A bounded call is never cut: Claude Code writing a large file relays far
