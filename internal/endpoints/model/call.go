@@ -289,7 +289,6 @@ type modelCall struct {
 	anthropic   *anthropicStream
 	responses   *responsesStream
 	phase       callPhase
-	settled     bool
 	passthrough bool
 }
 
@@ -762,19 +761,15 @@ func ceilDiv(value, divisor, multiplier int64) int64 {
 
 // settleProvider settles the provider's reported usage. Usage above the
 // reservation was already relayed: it is charged up to the reservation and
-// the allowance, and audited as exceeded.
+// the allowance, and audited as exceeded. Usage that cannot be priced under
+// a cost cap is charged the whole reservation instead.
 func (c *modelCall) settleProvider(usage responseUsage, anthropic anthropicUsage, reason string) {
-	if c.settled {
-		return
-	}
-	c.settled = true
 	tokens := *usage.Usage.TotalTokens
 	c.e.InputTokens, c.e.OutputTokens = splitTokens(usage.Usage)
 	var cost int64
 	if c.limits.MaxCostMicros > 0 {
 		var err error
 		if cost, err = c.h.providerCost(c.body, usage, anthropic); err != nil {
-			c.settled = false
 			c.chargeReservation(reason, reasonUnpriced)
 			return
 		}
@@ -795,9 +790,6 @@ func (c *modelCall) settleProvider(usage responseUsage, anthropic anthropicUsage
 // reservation, or the whole reservation when the request's input cannot be
 // sized or an event outgrew the parser.
 func (c *modelCall) settleInterrupted(reason string) {
-	if c.settled {
-		return
-	}
 	if c.passthrough {
 		c.chargeReservation(endParseLimit, reasonParseLimit)
 		return
@@ -806,7 +798,6 @@ func (c *modelCall) settleInterrupted(reason string) {
 		c.chargeReservation(reason, reasonUnsizable)
 		return
 	}
-	c.settled = true
 	units, cost, inputSource := c.estimate()
 	heldUnits, heldCost := c.reservation.Held()
 	if heldUnits > 0 {
@@ -829,10 +820,6 @@ func (c *modelCall) settleInterrupted(reason string) {
 }
 
 func (c *modelCall) chargeReservation(reason, why string) {
-	if c.settled {
-		return
-	}
-	c.settled = true
 	c.e.UsageSource, c.e.EndReason = usageReservation, reason
 	c.h.forfeit(&c.e, c.reservation, why)
 }

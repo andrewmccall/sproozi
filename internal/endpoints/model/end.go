@@ -243,8 +243,12 @@ func (c *modelCall) endOnce(x ending) error {
 	return nil
 }
 
-// charge releases, settles or forfeits the reservation. It is reached only
-// through settle and end, whose phase checks admit one charge per call.
+// charge releases, settles or forfeits the reservation, and is the only
+// place that does. It is reached only through settle and end. Both look
+// the ending up in callEndings for the call's phase, which admits a charge
+// only before callSettled, and move the call to callSettled as soon as it
+// returns; nothing moves a call back. So a reservation is charged at most
+// once, with no flag to check or reset.
 func (c *modelCall) charge(rule chargeRule, x ending) {
 	switch rule {
 	case chargeRelease:
