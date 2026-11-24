@@ -40,6 +40,10 @@ would have to be repeated for each new harness.
   on `api.github.com` use this beside the GitHub pull-request capability, and
   the leak check treats each path route as its own owner, so Copilot's GitHub
   token is refused in a pull request on the same host.
+
+  Corrected 2026-11-24: Copilot's account requests are GET requests under two
+  prefixes, `/copilot_internal/` and `/copilot/`
+  ([ADR 0048](0048-github-copilot-cli-is-a-managed-harness.md#account-namespaces-and-policy-verification)).
 - **Compressed requests are decoded.** A model request with a gzip or zstd
   `Content-Encoding` is decoded before inspection and forwarded uncompressed,
   so every mechanism inspects the same JSON.
@@ -126,18 +130,8 @@ All with deterministic providers unless stated:
   falls back to HTTPS; it refreshes at `auth.openai.com/oauth/token` and
   writes a mounted `auth.json` in place; its terminal offers device-code
   sign-in. Account routing fields must be `NO_CONSTRAINT` in the fixture.
-- Copilot 1.0.102 signed in to GitHub (free plan), through a recording proxy
-  on the user's machine and in a Linux container with the GitHub CLI's token
-  (method, path and status; the account response's policy flags and endpoint
-  hosts): model calls go to `api.individual.githubcopilot.com` `/responses`,
-  `/v1/messages` or `/chat/completions` by model, with `/models` and `/auto`
-  beside them; Copilot completes with `api.github.com` limited to
-  `copilot_internal/user`, `managed_settings` and `team_customizations`, and
-  with GitHub's built-in MCP server, agents, experiments and telemetry
-  refused. Without a keychain, Copilot must fetch `copilot_internal/user`,
-  whose `is_mcp_enabled` flag decides whether it loads any MCP server. `make
-  verify-harness-process` runs Copilot with a fixture GitHub sign-in through
-  the gateway's Copilot routes: a tool call, a refusal and `diagnose` pass.
+- Copilot's recorded sign-in evidence: moved 2026-11-24 to
+  [ADR 0048](0048-github-copilot-cli-is-a-managed-harness.md#evidence).
 - `make verify-local-onboarding` passed both ways with the stock clients:
   gateway-held keys for Codex and Claude Code, and with `SIGN_IN=1` each
   harness's own seeded sign-in, every model request carrying it. That run
@@ -179,9 +173,9 @@ All with deterministic providers unless stated:
   tokens rotate; a long-lived token avoids it.
 - Codex tries WebSockets first and falls back after the gateway refuses each
   upgrade; see [WebSocket model traffic](../explanations/future-architecture/websocket-model-traffic.md).
-- Copilot models on `/chat/completions` (Gemini, Kimi and similar) stream,
-  which the gateway's chat-completions route refuses; Copilot's OpenAI and
-  Claude models work. Business and Enterprise hosts are routed but unverified.
+- Copilot's `/chat/completions` models and unverified Business and Enterprise
+  hosts: moved 2026-11-24 to
+  [ADR 0048](0048-github-copilot-cli-is-a-managed-harness.md#consequences-and-limits).
 - On Kubernetes, a managed session's refreshed login is saved only when the
   harness exits; a supervisor killed without that loses the refresh, and the
   person signs in again.

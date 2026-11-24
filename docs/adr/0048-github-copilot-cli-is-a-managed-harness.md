@@ -6,7 +6,11 @@ Date: 2026-10-24
 Copilot first ran only as an AgentRun harness in bring-your-own-key mode, in
 a Kind client image (ADR 0046, removed). This record makes it a managed harness
 in the released image. What the earlier record decided and still holds is under
-"AgentRun harness and bring-your-own-key mode" below.
+"AgentRun harness and bring-your-own-key mode" below. This record is also the
+one place for Copilot's account namespaces and their verification
+("Account namespaces and policy verification", moved from ADR 0053, which was
+removed) and for dropping `--no-remote` ("Removing `--no-remote`", moved from
+ADR 0050).
 
 ## Problem and constraints
 
@@ -112,9 +116,107 @@ adapter is `cmd/native-session/copilot.go`.
 Revisit the instructions rule if Copilot adds a system prompt flag or a way to
 disable workspace instructions alone.
 
+Corrected 2026-11-24: the example writes the instructions file with one group of
+six `cat` and `printf` commands (`examples/harnesses/agentruntime-copilot.yaml`),
+not four lines.
+
 Corrected 2026-11-16: the example `exec`s Copilot directly, but Claude Code's
 does not, as this section first said. Claude Code AgentRuns launch through a
 helper (ADR 0054; `examples/harnesses/agentruntime-claude-code.yaml`).
+
+## Account namespaces and policy verification
+
+Moved 2026-11-24 from ADR 0053, which was removed (it had absorbed ADR 0052,
+also removed). The text is unchanged but for its headings.
+
+### Problem and constraints
+
+GitHub-backed Copilot reads account metadata under both `/copilot_internal/`
+and `/copilot/` on `api.github.com`. The gateway mounted only the former.
+In particular, `GET /copilot/mcp_registry` could not reach GitHub.
+ADR 0052 (removed) had allowed a query only on the separate managed-settings
+endpoint, without proving this registry-policy route.
+
+Hosted Copilot E2E used OpenAI bring-your-own-key mode. The manual GitHub
+process fixture represented an individual account, which could complete a
+model/tool turn without requesting the registry policy. Its positive
+managed-settings counter did not prove registry routing.
+
+### Decision
+
+For GitHub-backed Copilot, relay GET requests under both account namespaces,
+including queries. Keep the fixed `api.github.com` origin, existing credential
+mechanism, request/response bounds, no redirects and no-store responses.
+Other methods, unrelated GitHub API paths and noncanonical paths are refused.
+Other providers retain exact method/path rules. OpenAI-key Copilot does not
+gain GitHub account routes.
+
+GitHub continues to decide account permissions and MCP policy. Forward its
+successes and refusals unchanged. The gateway does not invent a permissive
+policy or log queries, credentials or policy bodies.
+
+Docker and Kubernetes mount the same two prefixes from the provider table.
+Tests use literal request paths independently of that table and verify that
+the selected relay forwards the request and preserves the provider response.
+
+PR/main CI and the latest-client canary run the GitHub-authenticated process
+verifier with the relevant lockfile client. A separate explicit request to
+`/copilot/mcp_registry` traverses the same authenticated TLS proxy and must
+return the fixture policy. This probe is recorded separately from the stock
+client's tool turn. It cannot be replaced by a model-completion result or a
+counter for another endpoint. The fixture also rejects unmodeled account
+requests so a newly exercised client path needs review.
+
+Corrected 2026-11-15: moved here from ADR 0052, which was removed. Relay
+refusals report the request's shape and never its content. The denial
+reason reads "the gateway relays only the provider's sign-in and account
+requests (method GET; query parameters present: true)", naming a recognized
+HTTP method or "unrecognized" for any other, because an unrecognized method
+can contain arbitrary text, and whether a query is present. It never records
+query names, query values, headers or bodies, which can carry credentials
+(`internal/endpoints/model/signin.go`). Presence diagnoses a refused route
+without exposing content, but cannot identify a new parameter: capture new
+request shapes with an isolated fixture client before extending a route.
+Forwarding
+queries only on fixed, named routes, rather than on every account route or by
+validating today's three client metadata keys, keeps the relay from breaking
+whenever the provider adds a parameter and from extending access without an
+observed need.
+
+### Alternatives and tradeoffs
+
+Adding only one exact endpoint would fix this report but retain a fragile
+inventory of Copilot's changing read-only account APIs. The administrator
+approved both account namespaces. Allowing the whole GitHub API or arbitrary
+write methods would cross that scope and is rejected.
+
+The individual fixture does not reproduce an organization's live policy
+selection. The explicit probe proves gateway routing and response fidelity;
+the stock process proves the exercised signed-in model/MCP flow. Neither
+claims a real subscription or every enterprise setting. Handler tests also
+preserve upstream 403 and 404 responses.
+
+### Verification and revisit conditions
+
+Revisit if Copilot needs another host, a write method or a namespace outside
+these two roots. Such a change needs a new boundary review. A real-account
+failure after successful routing must be investigated separately from a
+gateway refusal.
+
+## Removing `--no-remote`
+
+Moved 2026-11-24 from ADR 0050, whose other decisions stay there. The text is
+unchanged but for its heading and two cross-references.
+
+Remove Copilot's obsolete `--no-remote` launch argument and pin 1.0.103. The
+original offline grouping (ADR 0046, removed; now in the AgentRun section above) did not establish a separate requirement
+for suppressing remote sessions. No replacement setting is introduced. Keep
+explicit MCP configuration, disabled built-in MCPs, disabled updates and the
+existing sandbox/gateway enforcement. This resolves the removal noted in this
+record's consequences without treating `--no-remote` as a network isolation control.
+
+Corrected 2026-11-24: the pin is no longer 1.0.103. The pinned version is in
+`hack/clients/copilot/package.json`.
 
 ## Evidence
 
@@ -144,6 +246,25 @@ With 1.0.102, against scripted providers:
 - Journal fixtures in `internal/harness/testdata/copilot` come from stock
   1.0.102 in a Linux container at `/workspace/session/workspace`.
 
+Moved 2026-11-24 from ADR 0047's Evidence, unchanged:
+
+- Copilot 1.0.102 signed in to GitHub (free plan), through a recording proxy
+  on the user's machine and in a Linux container with the GitHub CLI's token
+  (method, path and status; the account response's policy flags and endpoint
+  hosts): model calls go to `api.individual.githubcopilot.com` `/responses`,
+  `/v1/messages` or `/chat/completions` by model, with `/models` and `/auto`
+  beside them; Copilot completes with `api.github.com` limited to
+  `copilot_internal/user`, `managed_settings` and `team_customizations`, and
+  with GitHub's built-in MCP server, agents, experiments and telemetry
+  refused. Without a keychain, Copilot must fetch `copilot_internal/user`,
+  whose `is_mcp_enabled` flag decides whether it loads any MCP server. `make
+  verify-harness-process` runs Copilot with a fixture GitHub sign-in through
+  the gateway's Copilot routes: a tool call, a refusal and `diagnose` pass.
+
+Corrected 2026-11-24: that recording saw only `copilot_internal/` paths on
+`api.github.com`. Copilot also reads `/copilot/` there, as "Account
+namespaces and policy verification" above records.
+
 ## Alternatives
 
 - **Keep Copilot an AgentRun harness.** No local sessions or movement, which
@@ -167,17 +288,29 @@ With 1.0.102, against scripted providers:
   GitHub account. Copilot's plan hosts are routed as ADR 0047 recorded.
 - Copilot releases often. 1.0.103 removed `--no-remote`; the pinned version
   (`hack/clients/copilot/package.json`) is past it, so the supervisor and the
-  AgentRun example drop the flag
-  ([ADR 0050](0050-prebuilt-cli-and-explicit-image-builds.md)).
+  AgentRun example drop the flag ("Removing `--no-remote`" above).
 
-Corrected 2026-11-16: the bullet above named the release that pinned 1.0.103 and
-that pin. It now points at the pinned version rather than a number.
-- Copilot models on `/chat/completions` stream, which the gateway refuses
-  (ADR 0047).
+  Corrected 2026-11-16: the bullet above named the release that pinned 1.0.103 and
+  that pin. It now points at the pinned version rather than a number.
+- Copilot models on `/chat/completions` (Gemini, Kimi and similar) stream,
+  which the gateway's chat-completions route refuses; Copilot's OpenAI and
+  Claude models work. Business and Enterprise hosts are routed but unverified.
+  (Moved 2026-11-24 from ADR 0047's consequences, replacing this record's
+  pointer to it.)
 
 Revisit when Copilot's journal format or `--session-id` changes, when Copilot
 can trust a folder in interactive mode without `config.json`, or when it
 gains a setting to ignore `GH_TOKEN` and `gh`.
+
+Open question, undecided: the checkpoint code treats Copilot's journal as
+carrying no evidence of the approved instructions
+(`CopilotState.ValidateContinuity` compares none, and `conversationContracts`
+in `internal/checkpoint/conformance_test.go` says why), yet this record says
+Copilot adds `copilot-instructions.md` to its system prompt, and the journal
+records the system message at the first turn. Does that message carry the
+approved instructions, so that the "no instruction evidence" rule is wrong? The
+checkpoint fixture comes from a launch with no instructions file, so it cannot
+show it.
 
 ## Implementation
 
@@ -187,5 +320,8 @@ gains a setting to ignore `GH_TOKEN` and `gh`.
 [local gateway routes](../../internal/gateway/docker/gateway.go),
 [provider table](../../internal/endpoints/model/providers.go),
 [local setup](../../internal/localsetup/install.go),
+[account relay](../../internal/endpoints/model/signin.go),
+[stock process verifier](../../hack/verify/harness-process/main.go),
+[CI checks](../../.github/workflows/test.yml),
 [client install](../../hack/clients/install.sh) and the
 [harness reference](../reference/harnesses.md#managed-interactive-sessions).

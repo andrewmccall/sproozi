@@ -37,12 +37,9 @@ registry credentials, outside agent execution. It changes no installation or
 cluster. The existing setup `--build DIR` continues to build and select the
 native image.
 
-Remove Copilot's obsolete `--no-remote` launch argument and pin 1.0.103. The
-original offline grouping (ADR 0046, removed; now in ADR 0048) did not establish a separate requirement
-for suppressing remote sessions. No replacement setting is introduced. Keep
-explicit MCP configuration, disabled built-in MCPs, disabled updates and the
-existing sandbox/gateway enforcement. This resolves the removal noted in ADR
-0048 without treating `--no-remote` as a network isolation control.
+Moved 2026-11-24: the decision to remove Copilot's obsolete `--no-remote`
+launch argument is now in
+[ADR 0048](0048-github-copilot-cli-is-a-managed-harness.md#removing---no-remote).
 
 ## Alternatives and consequences
 
