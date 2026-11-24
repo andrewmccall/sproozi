@@ -198,10 +198,18 @@ step that derives the charge, end reason and audit fields from the call's
 phase. That rewrite changes no outcome and is not part of this decision.
 
 Corrected 2026-11-24: the rewrite was done. `end`, in
-`internal/endpoints/model/end.go`, charges, records and answers each model
-call once from the phase it reached and how it ended, and keeps as explicit
-rules the three outcomes the records pin that look inconsistent. No recorded
-outcome changed.
+`internal/endpoints/model/end.go`, derives each model call's charge, end
+reason and audit fields from the phase it reached and how it ended, and
+keeps as explicit rules the outcomes the records pin that look
+inconsistent. A table declares which endings each phase accepts and how
+each is charged; the reservation is charged only through it and only
+before the call is settled, and nothing leaves the ended phase, so a call
+is charged and recorded at most once. An ending the table does not declare
+is logged and replaced by its phase's most conservative declared ending,
+so every call that ends is charged and recorded. Both hold while one
+goroutine owns the call, which every test in the package checks. No
+recorded outcome, and no order of writes, ledger calls, log lines and
+audit events, changed.
 
 ## Alternatives
 
