@@ -188,7 +188,9 @@ To add a route:
 3. Record every reply with `gateway.Record` and the outcome of its cause, or
    mark a deliberate omission with `gateway.Unrecorded`.
 4. Serve a `model.inference` authority only from the provider table
-   (`internal/endpoints/model/providers.go`).
+   (`internal/endpoints/model/providers.go`): both compositions take their
+   model routes from `Provider.Routes`, and a model authority the table does
+   not name stays reserved and closed.
 5. Add the handler's served request to `internal/gateway/routetest/routetest.go`,
    which both enumeration tests use; a handler it does not know fails them.
    The contract proves one served request spends; add outcome record rows for

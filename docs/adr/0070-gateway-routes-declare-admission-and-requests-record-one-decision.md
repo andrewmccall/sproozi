@@ -252,6 +252,15 @@ phase. That rewrite changes no outcome and is not part of this decision.
 - The model authority default in `cmd/gateway` remains until that
   composition is built from the provider table; until then the enumeration
   test is the guard, and it records the default as a known exception.
+  Corrected 2026-11-24: the default is gone. Both compositions build their
+  model routes with `Provider.Routes` in
+  `internal/endpoints/model/providers.go`, from each provider's one
+  credential, and `cmd/gateway` reserves every `model.inference` semantic
+  authority with no handler, so one outside the provider table is closed and
+  needs no certificate name. The known-exception test is replaced by
+  `TestAModelAuthorityOutsideTheProviderTableIsNotServed` in both
+  compositions, and `testdata/model_routes.txt` beside each records every
+  model route with the credential and upstream its handler holds.
 - A handler can still record the wrong outcome. The recorded test data is
   the check.
 
