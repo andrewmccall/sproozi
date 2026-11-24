@@ -17,9 +17,7 @@ import (
 func startedOn(t *testing.T, s *Service, repo, destination string) string {
 	t.Helper()
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	if destination != testLocal {
 		if _, err := s.Move(t.Context(), id, uuid.NewString(), destination); err != nil {
 			t.Fatal(err)

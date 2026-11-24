@@ -404,9 +404,7 @@ func TestResumeFollowsTheCoordinatorsJudgementOfTheDeadline(t *testing.T) {
 	t.Parallel()
 	s, local, _, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	stopped, err := s.Stop(t.Context(), id, uuid.NewString())
 	if err != nil || stopped.Phase != string(PhaseRetained) || stopped.ThreadID != testNativeUUID {
 		t.Fatalf("stop of a started session: %+v %v", stopped, err)
@@ -439,9 +437,7 @@ func TestResumeOfTurnlessSessionStartsFromItsWorkspace(t *testing.T) {
 	s, local, _, repo := testService(t)
 	local.turnless = true
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	stopped, err := s.Stop(t.Context(), id, uuid.NewString())
 	if err != nil || stopped.Phase != string(PhaseRetained) || stopped.ThreadID != "" {
 		t.Fatalf("turnless stop: %+v %v", stopped, err)
@@ -476,9 +472,7 @@ func TestMoveNamesUnconfiguredDestination(t *testing.T) {
 	t.Parallel()
 	s, _, _, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	for _, tc := range []struct{ operation, destination, want string }{
 		{uuid.NewString(), "docker", `home: this service cannot move a session to "docker"; run ` +
 			`"sproozi move ID --local" to bring it to this machine, or "sproozi move ID --remote" ` +
@@ -497,9 +491,7 @@ func TestRemoveDeletesAStoppedSessionAndItsFiles(t *testing.T) {
 	t.Parallel()
 	s, _, _, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	r := exchange(t, s, Request{Action: ActionRemove, ID: id})
 	if !r.Rejected || !strings.Contains(r.Error, `stop it with "sproozi stop `+id+`"`) {
 		t.Fatalf("remove of a running session replied %+v", r)
@@ -550,9 +542,7 @@ func TestMoveToLocalAliasReturnsToThisMachine(t *testing.T) {
 	t.Parallel()
 	s, _, _, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	if _, err := s.Move(t.Context(), id, uuid.NewString(), testRemote); err != nil {
 		t.Fatal(err)
 	}

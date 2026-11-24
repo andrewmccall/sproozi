@@ -70,9 +70,7 @@ func TestExitWatcherStopsAnExitedRemoteVisitOverTheProtocol(t *testing.T) {
 	t.Parallel()
 	s, _, remote, repo := wireService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	if _, err := s.Move(t.Context(), id, uuid.NewString(), testRemote); err != nil {
 		t.Fatal(err)
 	}

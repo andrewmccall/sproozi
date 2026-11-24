@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -254,6 +255,9 @@ var template struct {
 	repo   string
 	data   []byte
 	digest string
+	// captured is the workspace archive Start would capture from the
+	// template repository (see startSetup).
+	captured []byte
 }
 
 // fixturePrefix begins the template directory's name, followed by the process
@@ -285,6 +289,11 @@ func testWorkspace(t *testing.T) (string, []byte, string) {
 		template.repo = filepath.Join(root, "repository")
 		createWorkspace(t, template.repo)
 		template.data, template.digest = testArtifact(t, template.repo)
+		captured, err := workspace.CaptureLocal(t.Context(), template.repo, nil, testLimit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		template.captured = captured
 		template.built = true
 	})
 	if !template.built {
@@ -312,6 +321,39 @@ func testWorkspace(t *testing.T) (string, []byte, string) {
 		t.Fatal(err)
 	}
 	return repo, bytes.Clone(template.data), template.digest
+}
+
+// startSetup is Start for a test whose subject is not the capture. Capturing
+// a workspace runs about nineteen Git processes, and every such test starts
+// from the same template, so the retained first execution is created from the
+// template's capture (taken once by testWorkspace) instead. Start then finds
+// that retained intent, the same path it takes when it recovers an
+// interrupted start, and carries out everything after the capture itself:
+// the intent checks, cataloguing and the first visit. Tests of the capture
+// (ignored-file selection, unusable workspaces, harness arguments, retried
+// starts) call Start directly.
+func startSetup(t *testing.T, s *Service, id, operationID, repo string) {
+	t.Helper()
+	if template.captured == nil {
+		t.Fatal("startSetup needs testWorkspace to have built the template")
+	}
+	until, err := s.executionDeadline("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	local, err := s.localFor(s.config.Local.Harness)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := session.Launch{Harness: local.Harness, ExecutionID: id, OperationID: operationID,
+		AllocationID: uuid.NewString(), Epoch: 1, Placement: local.Name,
+		InstructionDigest: local.InstructionDigest, Deadline: until, Allowances: maps.Clone(s.config.Allowances)}
+	if _, err = s.createExecution(first, "", func() ([]byte, error) { return bytes.Clone(template.captured), nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Start(t.Context(), id, operationID, repo, "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func createWorkspace(t *testing.T, repo string) {
@@ -476,9 +518,7 @@ func TestInitialSessionImportRoundTripAndLostReplies(t *testing.T) {
 func TestRecoverFirstMoveRetainedBeforeRestart(t *testing.T) {
 	s, local, remote, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	local.lostStop = true
 	if _, err := s.Move(t.Context(), id, uuid.NewString(), testRemote); err == nil {
 		t.Fatal("lost stop reply succeeded")
@@ -572,9 +612,7 @@ func TestUnknownInitialUsageNeverStartsRemoteAndCanCancel(t *testing.T) {
 	t.Parallel()
 	s, local, remote, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	local.unknownUsage = true
 	if _, err := s.Move(t.Context(), id, uuid.NewString(), testRemote); err == nil {
 		t.Fatal("unknown initial usage admitted move")
@@ -808,9 +846,7 @@ func TestExitedHarnessFailsTheSessionWithItsOutput(t *testing.T) {
 	t.Parallel()
 	s, local, _, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	if settled, err := s.settleExit(t.Context(), id); err != nil || settled {
 		t.Fatalf("running harness settled as exited: %v %v", settled, err)
 	}
@@ -840,9 +876,7 @@ func TestDeadlineStopRetainsTheSession(t *testing.T) {
 	t.Parallel()
 	s, local, _, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	local.exited = &session.Exit{Code: 1, Deadline: true}
 	if settled, err := s.settleExit(t.Context(), id); err != nil || !settled {
 		t.Fatalf("deadline stop not settled: %v %v", settled, err)
@@ -861,9 +895,7 @@ func TestCancelledSessionPointsToRemove(t *testing.T) {
 	t.Parallel()
 	s, _, _, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	if _, err := s.Cancel(t.Context(), id, uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}

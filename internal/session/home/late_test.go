@@ -106,9 +106,7 @@ func resumeInterruptedThenLate(t *testing.T, interruption, late string) {
 	t.Helper()
 	s, local, _, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	if _, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
@@ -174,9 +172,7 @@ func TestUnprovenLateStartNamesRetryAndCancel(t *testing.T) {
 	t.Parallel()
 	s, local, _, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	if _, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
@@ -219,9 +215,7 @@ func TestMoveLocalAfterTheDeadlineStopsTheRemoteVisit(t *testing.T) {
 	t.Parallel()
 	s, local, remote, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	startSetup(t, s, id, uuid.NewString(), repo)
 	if status, err := s.Move(t.Context(), id, uuid.NewString(), testRemote); err != nil || status.Placement != testRemote {
 		t.Fatalf("move to the cluster: %+v %v", status, err)
 	}
