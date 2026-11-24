@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -332,6 +333,12 @@ func testWorkspace(t *testing.T) (string, []byte, string) {
 // the intent checks, cataloguing and the first visit. Tests of the capture
 // (ignored-file selection, unusable workspaces, harness arguments, retried
 // starts) call Start directly.
+//
+// The launch is rebuilt here from createWorkspaceExecution's. Start itself
+// compares only Harness, OperationID, IncludeIgnored, HarnessArgs, Login,
+// CheckpointDigest and Session of it, so a drift in any other field would go
+// unnoticed by the starts. TestStartSetupLaunchMatchesStart covers the rest:
+// it compares every field of the two launches.
 func startSetup(t *testing.T, s *Service, id, operationID, repo string) {
 	t.Helper()
 	if template.captured == nil {
@@ -908,5 +915,41 @@ func TestCancelledSessionPointsToRemove(t *testing.T) {
 		if !strings.Contains(r.Error, "cancelled") || !strings.Contains(r.Error, "sproozi rm "+id) {
 			t.Errorf("%s of a cancelled session replied %+v", q.Action, r)
 		}
+	}
+}
+
+// TestStartSetupLaunchMatchesStart requires the launch startSetup retains to
+// equal, field by field, the launch a direct Start retains. Fields are
+// compared by reflection, so one added to session.Launch later is compared
+// unless it is excluded here. Only what necessarily differs is excluded: the
+// IDs (random) and the
+// deadline (taken from the clock, so checked to be near instead).
+func TestStartSetupLaunchMatchesStart(t *testing.T) {
+	t.Parallel()
+	s, _, _, repo := testService(t)
+	direct, viaSetup := uuid.NewString(), uuid.NewString()
+	if _, err := s.Start(t.Context(), direct, uuid.NewString(), repo, "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	startSetup(t, s, viaSetup, uuid.NewString(), repo)
+	launch := func(id string) session.Launch {
+		r, err := s.coordinator.Inspect(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return *r.Operations[0].Launch
+	}
+	want, got := launch(direct), launch(viaSetup)
+	if want.Deadline.IsZero() || got.Deadline.Sub(want.Deadline).Abs() > time.Minute {
+		t.Fatalf("deadlines differ: Start %v, startSetup %v", want.Deadline, got.Deadline)
+	}
+	for _, name := range []string{"ExecutionID", "OperationID", "AllocationID", "Deadline"} {
+		for _, l := range []*session.Launch{&want, &got} {
+			f := reflect.ValueOf(l).Elem().FieldByName(name)
+			f.Set(reflect.Zero(f.Type()))
+		}
+	}
+	if !reflect.DeepEqual(want, got) {
+		t.Fatalf("startSetup retains a different launch than Start:\nStart:      %+v\nstartSetup: %+v", want, got)
 	}
 }
