@@ -34,39 +34,77 @@ func storeHolds(t *testing.T, store, want string) {
 	}
 }
 
+// withoutPeriodicSyncs runs the fixture's helper with no sync between the
+// one before launch and the save at exit, as the supervisor's kill tests do
+// (quietInterval in cmd/native-session). A periodic sync rightly saves a
+// refresh it reads while Claude Code runs, so with one due every second the
+// store after a kill would depend on whether the machine reached the kill
+// before the next sync.
+func withoutPeriodicSyncs(f claudeFixture) {
+	const run = `
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("launch", sys.argv[1])
+launch = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(launch)
+assert isinstance(launch.LOGIN_INTERVAL, float)
+launch.LOGIN_INTERVAL = 24 * 3600.0
+sys.argv = sys.argv[1:]
+sys.exit(launch.main())
+`
+	f.cmd.Args = append([]string{f.cmd.Args[0], "-c", run}, f.cmd.Args[1:]...)
+}
+
+// terminateWhenReady starts the fixture, waits for it to write its ready
+// file and sends the helper SIGTERM, as Kubernetes does to a Pod's PID 1.
+func terminateWhenReady(t *testing.T, f claudeFixture) {
+	t.Helper()
+	if err := f.cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	ready := filepath.Join(f.dir, "ready")
+	for until := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(until) {
+			t.Fatal("the fixture never became ready")
+		}
+	}
+	if err := f.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.cmd.Wait(); err == nil {
+		t.Fatal("a terminated run succeeded")
+	}
+}
+
 // Once Claude Code is killed, its login file is not saved, even as a whole
 // login: the helper records the kill before it forwards a signal, and when a
-// signal ended Claude Code.
+// signal ended Claude Code. A refresh made before the kill reaches the store
+// only through a periodic sync that read it while Claude Code ran.
 func TestClaudeLaunchSavesNothingAfterAKill(t *testing.T) {
 	t.Run("forwarded signal", func(t *testing.T) {
 		t.Parallel()
 		f, store := signedInFixture(t, "sign-in-killed")
-		if err := f.cmd.Start(); err != nil {
-			t.Fatal(err)
-		}
-		ready := filepath.Join(f.dir, "ready")
-		for until := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-			if _, err := os.Stat(ready); err == nil {
-				break
-			}
-			if time.Now().After(until) {
-				t.Fatal("the fixture never wrote its login")
-			}
-		}
-		if err := f.cmd.Process.Signal(syscall.SIGTERM); err != nil {
-			t.Fatal(err)
-		}
-		if err := f.cmd.Wait(); err == nil {
-			t.Fatal("a terminated run succeeded")
-		}
+		withoutPeriodicSyncs(f)
+		terminateWhenReady(t, f)
 		storeHolds(t, store, storedLogin)
 	})
 	t.Run("ended by a signal", func(t *testing.T) {
 		t.Parallel()
 		f, store := signedInFixture(t, "sign-in-signalled")
+		withoutPeriodicSyncs(f)
 		if output, err := f.cmd.CombinedOutput(); err == nil {
 			t.Fatalf("a signalled run succeeded: %s", output)
 		}
+		storeHolds(t, store, storedLogin)
+	})
+	// Periodic syncs run: any that reads the login Claude Code writes as the
+	// forwarded signal reaches it already sees the kill.
+	t.Run("login written as the signal arrives", func(t *testing.T) {
+		t.Parallel()
+		f, store := signedInFixture(t, "sign-in-refreshed-as-killed")
+		terminateWhenReady(t, f)
 		storeHolds(t, store, storedLogin)
 	})
 }

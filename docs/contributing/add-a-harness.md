@@ -70,7 +70,12 @@ refuses mid-turn is untested.
    connection (`Entry`), its `Loader`, any launch files, and whether its
    launch reads `instructions.txt` and `request.json`. Set `RunKeyEnv` only
    when the client reads its key placeholder from the Pod's environment
-   rather than from its launch file or command. Put every launch file
+   rather than from its launch file or command; either way, add a row for
+   its selector to `podCredentialEnvironment` in
+   `internal/runtime/kubernetes/sandbox_credentials_test.go` with the
+   variables its AgentRun Pod's workload containers get
+   ([ADR 0071](../adr/0071-a-pod-gets-a-key-placeholder-only-for-a-client-that-reads-it.md)).
+   Put every launch file
    in [`internal/harness/launchfiles`](../../internal/harness/launchfiles) and
    list it with `launchFilesNamed`: that directory is embedded in the binary
    and is the one `.dockerignore` ships to image builds, so a launch file
@@ -85,7 +90,9 @@ refuses mid-turn is untested.
    control connection, the declared loader, the example and the reference row
    agree. A harness whose client needs a bridge also runs through the bridge
    hook below; one whose client loads MCP itself is checked only by the
-   verifiers in step 6.
+   verifiers in step 6. The two record tests fail until you regenerate
+   their records: run `SPROOZI_UPDATE_OUTCOMES=1 go test ./internal/harness/ ./cmd/sproozi/`
+   and review the difference (see what to expect in the guard list below).
 4. Add the client's pinned install under [`hack/clients`](../../hack/clients/README.md).
    This step and step 6 install the real client, so they need access to its
    package registry, such as npm.
@@ -133,7 +140,7 @@ described in [retained final answers](../reference/agent-contract.md#retained-fi
 
 ## What the guards check, and what they don't
 
-`go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/ ./cmd/sproozi/ ./internal/runtime/kubernetes/`
+`go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/ ./cmd/sproozi/ ./internal/nativeconfig/ ./internal/localsetup/ ./internal/runtime/kubernetes/`
 fails, naming the file to change, unless:
 
 - the registry, the `+kubebuilder:validation:Enum` marker and the generated
@@ -150,8 +157,24 @@ fails, naming the file to change, unless:
   `/etc/sproozi/contract/` (the guard can't tell whether the command really
   reads it), and a row in the reference's selector table with the right
   Managed value;
-- every managed kind has its own native directory and a protocol, is accepted
-  by `nativeconfig`, and has a supervisor adapter and a checkpoint format;
+- every managed kind has its own native directory and a protocol and is
+  accepted by `nativeconfig` (`TestManagedKindsAreWired`);
+- every managed kind's conversation state passes the checkpoint format with
+  its fixture: capture, inspect, restore, a capture of what restore
+  published, final text and continuity, its `Size` equal to its native
+  bytes, and an instruction-evidence flag tied to the fixture or a reason
+  for keeping none (`TestEveryManagedKindConformsToTheCheckpointFormat` in
+  `internal/checkpoint/conformance_test.go`, and
+  `TestEveryManagedKindHasACheckpointFormat`); a state type missing a method
+  fails to compile at its `CaptureState`;
+- every managed kind has a supervisor adapter that sets every required
+  function (`TestEveryManagedKindHasAnAdapter`,
+  `TestEveryAdapterSetsEveryRequiredFunction` in
+  `cmd/native-session/turnless_test.go`) and launches the registry's
+  `Executable`; a task launch that resumes a conversation is refused for
+  every kind (`TestATaskLaunchResumesNoConversation`);
+- every managed kind declares a `ModelFlag`, and a `ConfigOverride` or an
+  exemption with its reason;
 - every managed kind supplies every managed fact listed in the managed
   harness steps (an AgentRun-only harness supplies none), exactly one is the
   default, each sign-in choice is worded and names a mechanism the harness
@@ -166,7 +189,9 @@ fails, naming the file to change, unless:
   `case`, a `[]NativeKind` literal or as a composite literal key or map
   index, and converts no string literal to a `NativeKind`, except in the
   behaviour scopes (file and function) listed in `behaviourSites`, where a
-  new harness adds its cases without editing the list; and no string in
+  new harness adds its cases without editing the list and each of which must
+  name every managed kind's constant
+  (`TestEveryBehaviourSiteNamesEveryManagedKind`); and no string in
   `internal/harness` or `cmd/native-session` outside the registry repeats a
   registered credential variable, token placeholder, instructions file,
   executable, sign-in file or MCP file name. It does not catch a comparison
@@ -190,7 +215,22 @@ fails, naming the file to change, unless:
   `default` when it takes tasks or is the default); its refused flag
   spellings and reserved variables, recorded for every kind; and the
   empty-kind wizard rows, whose agent question lists every managed harness.
-  Any other change is an outcome the new harness altered for another.
+  Any other change is an outcome the new harness altered for another;
+- a checkpoint's bytes and what reading it returns are unchanged:
+  `internal/checkpoint/testdata/checkpoint-outcomes.json` records, for each
+  fixture in `stateFixtures`, its encoded artifacts (in
+  `testdata/checkpoint-artifacts/`), capture, inspect, restore, final text
+  and continuity, against one committed workspace archive. A new managed
+  harness regenerates it with `SPROOZI_UPDATE_OUTCOMES=1`: expect its
+  fixture's rows and artifact files, a continuity row for its kind under
+  every fixture, and a changed `harness-other-managed` variant of the fixture
+  before it in registry order. No existing artifact file may change;
+- the supervisor's wait texts (`cmd/native-session/testdata/waiting-outcomes.json`),
+  each managed kind's rendered launch arguments
+  (`cmd/native-session/testdata/launch-arguments.json`) and its lifecycle
+  (`cmd/native-session/testdata/supervisor-lifecycle.txt`, regenerated with
+  `-update-lifecycle-record`) are unchanged; a new kind adds its own rows and
+  worlds, and nothing else may change.
 
 They don't prove that a stock client loads its MCP file, that it shows the
 MCP tools to the model (pi, for example, hides them behind its `codemode`
@@ -257,11 +297,23 @@ and fails instead when `CI` is set.
 
 ## Managed harness
 
-Do the AgentRun steps first, then:
+Do the AgentRun steps first. A managed harness is then a registry entry and
+two pieces of code, each behind its own contract
+([ADR 0072](../adr/0072-the-managed-harness-contract.md)): its
+[conversation state](../../GLOSSARY.md#conversation-state), which a
+checkpoint carries, and its [supervisor adapter](../../GLOSSARY.md#supervisor-adapter),
+which runs it on a terminal. Follow the steps in order; after each, the
+`go test` command in step 8 names the next missing piece.
 
-1. In the registry entry, set `Native`, `NativeDirectory` and `Protocol`, the
-   model API it calls through the gateway, then every managed fact. The guard
-   test fails on a missing one, so a new harness never takes another's value:
+1. Declare its kind beside `NativeCodex` in
+   [`internal/harness/native_kind.go`](../../internal/harness/native_kind.go),
+   such as `NativeAcme NativeKind = "acme"`, equal to its selector, and use
+   it as the entry's selector (`string(NativeAcme)`) and `Native`. The
+   source-scan guards see a kind only through that constant. In the registry
+   entry, set `NativeDirectory` and `Protocol`, the model API it calls
+   through the gateway, then every managed fact. The guard test
+   (`TestManagedKindsSupplyEveryFact`) fails on a missing one, so a new
+   harness never takes another's value:
    - `DisplayName` and `Product`, the names messages and the setup wizard show;
    - `Executable`, the stock client's path in the managed sandbox image;
    - `InstructionsFile`, its user-level instructions file name;
@@ -269,10 +321,22 @@ Do the AgentRun steps first, then:
      `TokenEnv` with `TokenPlaceholder` when a gateway-held sign-in token uses
      another; `SignInYieldsGitHubToken` when it prefers `GH_TOKEN` to its own
      sign-in;
-   - `RefusedFlags`, the command-line options Sproozi controls (the tables in
-     [`internal/harness/native_args.go`](../../internal/harness/native_args.go));
+   - `RefusedFlags`, the command-line options Sproozi controls, and
+     `ModelFlag`, the option that chooses the model (`modelFlag` for a plain
+     `--model`); both are tables in
+     [`internal/harness/native_args.go`](../../internal/harness/native_args.go);
+   - `ConfigOverride`, when the client has an option that sets one
+     configuration key, as Codex's `-c` does, with the keys Sproozi sets
+     ([ADR 0073](../adr/0073-codex-harness-arguments-fail-closed.md)); when it
+     has none, an entry for its kind with the reason in `configOverrideExempt`
+     in `internal/harness/facts_test.go`;
    - `ReservedEnv`, the variables its supervisor sets and a launch may not;
-   - `TakesTask`, `RemoteExecutor` and `Default`, when each applies;
+   - `CaptureState`, its conversation state's capture, which step 3 writes;
+     until then this guard names it;
+   - `TakesTask`, `RemoteExecutor` and `Default`, when each applies, and
+     `StateProvesCompletion` when its captured state proves its last turn
+     completed (left unset, a stop needs the supervisor's acknowledgement, as
+     Claude Code's does);
    - `KeyOptions` and `SignInOptions`, any native options a local installation
      gives it; and `SignInFile` and `SignInProvider` when it signs in itself;
    - `SignInChoices`, the answers the setup wizard offers for how it reaches
@@ -287,38 +351,87 @@ Do the AgentRun steps first, then:
    instead (see the guard list below for what it misses).
 2. Accept it in `nativeconfig.ValidateHarness`
    ([`internal/nativeconfig/claude.go`](../../internal/nativeconfig/claude.go)).
-3. Add a supervisor adapter to `nativeAdapters` in
-   [`cmd/native-session/launch.go`](../../cmd/native-session/launch.go): launch
-   arguments, completed-turn observation and controlled stop. Its `executable`
-   is the registry's `Executable`; add a variable for it and for its native
-   home to `cmd/native-session/homes.go`, and add its graceful-stop wait text
-   to `waitingFor` in `cmd/native-session/main.go`: it has branches for
-   Copilot and Claude Code only, and any other kind gets Codex's, which checks
-   for Codex's journal.
+   It switches on strings because `api/v1alpha1` imports it and so it cannot
+   read the registry; `TestManagedKindsAreWired` fails until it accepts the
+   new selector.
+3. Give it a conversation state, the native files a checkpoint carries:
+   - In `internal/harness`, add a state type in its own file, as
+     [`copilot_state.go`](../../internal/harness/copilot_state.go) does,
+     that implements every method of `ConversationState`
+     ([`conversation_state.go`](../../internal/harness/conversation_state.go)):
+     its `Kind`, the harness conversation ID (`Thread`), its last completed
+     turn, its size in native bytes, `Restore` into a staged home,
+     `FinalText`, and `ValidateContinuity`. A harness whose conversation keeps
+     no evidence of the approved instructions returns nil there and says why
+     in its comment. Capture only the selected conversation file, never
+     configuration or credentials ([ADR 0008](../adr/0008-selected-native-and-git-checkpoints.md)),
+     and add tests with captured transcript fixtures beside it.
+   - Set the entry's `CaptureState` to a function that returns
+     `capturedState(CaptureAcmeState(...))`; a missing method then fails to
+     compile there.
+   - In [`internal/checkpoint/artifact.go`](../../internal/checkpoint/artifact.go),
+     add a field for the state to `nativeArtifact`, a case to `setState` and a
+     line to `state`. Never change an existing field: an artifact's bytes are
+     its identity in journals and receipts. Add a case for the field,
+     returning its native bytes, to `journalOf` in
+     `internal/checkpoint/outcomes_test.go`.
+   - Add a fixture state to `stateFixtures` in
+     `internal/checkpoint/outcomes_test.go`, and its final text, whether it
+     holds instruction evidence and, when it does not, why, to
+     `conversationContracts` in `internal/checkpoint/conformance_test.go`.
+     `TestEveryManagedKindConformsToTheCheckpointFormat` then runs the
+     fixture through capture, inspect, restore, final text and continuity.
+4. Give it a supervisor adapter, in its own file in `cmd/native-session`, as
+   [`copilot.go`](../../cmd/native-session/copilot.go) is:
+   - Add variables for its native home and `Executable`, read from the
+     registry, to `cmd/native-session/homes.go`.
+   - Add its entry to `nativeAdapters` in
+     [`cmd/native-session/launch.go`](../../cmd/native-session/launch.go),
+     keyed by its kind constant, with its `executable` and the six required
+     functions: `prepare` (its launch arguments and files), `observe` (its
+     selected conversation and completed turn), `turnless`, `waiting` (what a
+     graceful stop waits for, in fixed words), `finish` and `settle`.
+     `TestEveryAdapterSetsEveryRequiredFunction` fails on an unset one.
+     `completion` is optional; `optionalAdapterFields` in
+     `cmd/native-session/turnless_test.go` says what leaving it unset
+     means. A kind that takes a task binds its completion to the task's
+     own turn in `observe`; a task launch never resumes a conversation
+     (`NativeLaunch.Validate`). Leave `observesHooks` unset: it routes
+     Claude Code's hook command.
+   - Add a case for it to `recordedLaunch` in
+     `cmd/native-session/launch_args_record_test.go` that renders its launch
+     arguments through its `prepare`.
    If the client reports turns through hooks that run a `native-session`
    command, as Claude Code's `observe-claude` does, that command must report
    once its payload is whole, not wait for the end of its input: the client
    may close the hook's input late, and a hook its timeout kills reports
    nothing, which leaves the turn running. Test it with input that stays
    open, as `TestClaudeHookReportsACompletePayloadWithoutEndOfInput` does.
-4. Add its native state capture, validation and restore in
-   [`internal/checkpoint/artifact.go`](../../internal/checkpoint/artifact.go)
-   and `internal/harness`, with captured transcript fixtures, and read its
-   final answer from that state in `FinalText`
-   ([`internal/checkpoint/result.go`](../../internal/checkpoint/result.go)),
-   which otherwise returns no result for it.
-5. If its protocol is new, add the gateway model handler and the provider in
-   `internal/localsetup`.
-6. Run `go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/ ./cmd/sproozi/`;
-   the guards name each missing piece. Then prove a real round trip with
-   `make verify-local-onboarding` and the session verifiers in
-   [which command proves what](../../test/acceptance/running.md#which-command-proves-what).
-7. Document its managed behaviour in the harness reference's managed section.
-   Add its `DisplayName` to the local session and remote executor rows of the
+5. If its protocol is new, add the gateway model handler; if its provider is
+   new, add its default URL to `providerNamed` in
+   [`internal/localsetup/credentials.go`](../../internal/localsetup/credentials.go),
+   which refuses a provider it does not know.
+6. Regenerate the records the new kind adds rows to, in this order, and
+   review each difference (see the guard list below for what to expect):
+   first the lifecycle record,
+   `go test ./cmd/native-session/ -run TestSupervisorLifecycleRecord -update-lifecycle-record`,
+   then the others,
+   `SPROOZI_UPDATE_OUTCOMES=1 go test ./internal/harness/ ./cmd/sproozi/ ./internal/checkpoint/ ./cmd/native-session/`;
+   the second reports `TestSupervisorLifecycleRecord` failing until the
+   first has run.
+7. Document its managed behaviour in the harness reference's managed section,
+   and change its row in the selector table to Managed `yes`
+   (`TestEveryHarnessHasAnExampleAndAReferenceRow`). Add its `DisplayName` to
+   the local session and remote executor rows of the
    [configured MCP reference](../reference/configured-mcp.md), and, when it
    sets `RemoteExecutor`, to the sentence after them that names the
    harnesses an executor starts tasks and interactive sessions for;
    `TestConfiguredMCPReferenceMatchesTheRegistry` fails until they agree.
+8. Run `go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/ ./cmd/sproozi/ ./internal/nativeconfig/ ./internal/localsetup/ ./internal/runtime/kubernetes/`;
+   every guard now passes, or names the piece still missing. Then prove a
+   real round trip with `make verify-local-onboarding` and the session
+   verifiers in
+   [which command proves what](../../test/acceptance/running.md#which-command-proves-what).
 
 ## Gates
 

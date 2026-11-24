@@ -83,7 +83,6 @@ type server struct {
 	diagnostics     io.Writer
 	claude          claudeLifecycle
 	inputGeneration uint64
-	taskBaseline    string
 	// lastInputAt is when the last terminal write was accepted.
 	lastInputAt time.Time
 }
@@ -101,6 +100,11 @@ var quiesceWait = harness.NativeQuiesceWait
 // bound must fit, with quiesceWait, inside the five minutes the control
 // client waits for the reply.
 var quitWait = 30 * time.Second
+
+// stopWait bounds stop's wait for the harness it kills at a terminate, a
+// deadline or a failed stop. It is set only here; the supervisor reads no
+// flag, file or variable that changes it, and only tests replace it.
+var stopWait = 3 * time.Second
 
 // forcedStopWait bounds the wait for a harness the supervisor killed after
 // quitWait.
@@ -286,7 +290,7 @@ func (s *server) stop(e event) {
 	var exit nativepty.Exit
 	var err error
 	if n != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), stopWait)
 		defer cancel()
 		exit, err = n.Stop(ctx)
 		login.stop()
@@ -414,14 +418,6 @@ func (s *server) activate() response {
 		return r
 	}
 	env = append(env, "HOME="+agentHome)
-	if s.config.Task != "" && s.threadID != "" {
-		_, baseline, err := observeTurn(nativeHome, s.threadID, s.config.InstructionDigest, s.config.RolloutMaxBytes)
-		if err != nil {
-			r.Error = "initial task baseline is unavailable: " + err.Error()
-			return r
-		}
-		s.taskBaseline = baseline
-	}
 	// The sign-in comes first: a harness that keeps other settings in its
 	// login file, such as Copilot's config.json, has them merged in.
 	login, err := startLogin(s.config)
@@ -747,37 +743,19 @@ func (s *server) endGracefully(exit nativepty.Exit, code int, thread string) (ov
 	return ""
 }
 
-// waitingFor describes, in fixed words, what a graceful stop waits for.
+// waitingFor describes, in fixed words, what a graceful stop waits for: its
+// harness adapter's wait text. A kind without an adapter never stops
+// gracefully, since configure refuses it and activate cannot launch it, so it
+// has no wait text.
 func (s *server) waitingFor() string {
 	s.mu.Lock()
 	kind := s.config.Harness
 	s.mu.Unlock()
-	name := harness.NativeDisplayName(kind)
-	if kind == harness.NativeCopilot {
-		if _, _, err := s.observeCopilotTurn(); errors.Is(err, os.ErrNotExist) {
-			return name + " to start its first turn"
-		}
-		return "the current " + name + " turn to complete"
+	adapter, err := adapterFor(kind)
+	if err != nil {
+		return ""
 	}
-	if kind != harness.NativeClaude {
-		if !codexJournalExists(nativeHome) {
-			return name + " to start its first turn"
-		}
-		return "the current " + name + " turn to complete"
-	}
-	switch s.claudeCompletion().Observation {
-	case pendingTools:
-		return "a running Claude Code tool to finish"
-	case inputChanged:
-		return "terminal input sent after the last Claude Code turn to settle"
-	case "identity_unavailable":
-		return "Claude Code to report its conversation"
-	case "lifecycle_incomplete":
-		return "the current Claude Code turn to finish"
-	case "settled":
-		return "Claude Code to stop"
-	}
-	return "Claude Code's transcript to settle"
+	return adapter.waiting(s)
 }
 
 // inputSettled reports that gated input has been quiet long enough for any
@@ -821,7 +799,7 @@ func (s *server) isTurnless() bool {
 		return latched
 	}
 	adapter, err := adapterFor(kind)
-	if err != nil || adapter.turnless == nil || !adapter.turnless(s) {
+	if err != nil || !adapter.turnless(s) {
 		return false
 	}
 	s.mu.Lock()

@@ -33,6 +33,11 @@ bridge. The rule below is unchanged.
   MCP renderer, the AgentRun contract renderer, native-kind validation,
   provider selection, inspection hosts and the profile's harness files read
   it. An unregistered selector is an error everywhere.
+
+  Corrected 2026-11-21: the gateway's inspection hosts come from the model
+  provider table (`internal/endpoints/model/providers.go`), not the
+  registry. Only tests ever called the registry's
+  `ModelProtocol.InspectionHost`, which is now removed.
 - **Two tiers.** Every registered harness is an AgentRun harness; one with a
   native kind is also a managed harness. The glossary and the harness
   reference name both.
@@ -85,6 +90,16 @@ Corrected 2026-11-20: the registry entry of every managed harness also holds
 its setup wizard sign-in choices (`SignInChoices`), which were a map keyed by
 kind in `cmd/sproozi/wizard.go`.
 
+Corrected 2026-11-21: since [ADR 0072](0072-the-managed-harness-contract.md)
+(2026-11-21) the registry also holds each managed harness's model option
+(`ModelFlag`), its configuration override as data (`ConfigOverride`,
+Codex's `-c` with the keys Sproozi sets, read by one parser for every
+harness) and the function that captures its conversation state
+(`CaptureState`); checkpoint formats sit behind the
+`harness.ConversationState` interface, and completion observers behind the
+supervisor adapter's required functions. That record changes the sentence
+above that behaviour stays in code.
+
 ## Alternatives
 
 - **Allow a harness without MCP, marked "no diagnose".** It would add a
@@ -97,6 +112,13 @@ kind in `cmd/sproozi/wizard.go`.
 - **One table for every per-harness behaviour.** Checkpoint formats,
   completion observers and supervisor adapters are code, not data; the
   registry records facts and the guards check the code exists.
+
+  Corrected 2026-11-21: since [ADR 0072](0072-the-managed-harness-contract.md)
+  the registry holds, besides each harness's MCP `Entry` renderer, one more
+  function, each managed harness's `CaptureState`; and the guards check
+  that the code behaves, not only that it exists: a conformance test runs
+  each managed harness's conversation state through the checkpoint format,
+  and another requires every supervisor adapter function.
 
 ## Consequences and limits
 

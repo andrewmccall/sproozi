@@ -51,18 +51,74 @@ func outcomeArgs() [][]string {
 			}
 			if f.short != "" {
 				add("-" + f.short)
+				if f.value {
+					add("-" + f.short + "x")
+				}
 			}
 		}
 	}
-	add("--model", "x")
+	add(nativeModelFlag, "x")
 	add("--model=x")
 	add("-m", "x")
 	add("-mx")
 	add("-c", "model=x")
 	add("-c", "model_provider=x")
-	add("--config", "projects.x=y")
+	add(argConfig, "projects.x=y")
 	add("--")
-	add("--harmless")
+	add(argHarmless)
+	// Model selection: alone, after another argument, and inside a
+	// configuration override's value.
+	add(nativeModelFlag)
+	add("-m")
+	add(argHarmless, nativeModelFlag, "x")
+	add("--models")
+	add("-c", "-mx")
+	// Every spelling of a configuration override, its key quoting and
+	// nesting, and the argument it consumes.
+	add("--config=model=x")
+	add("-cmodel=x")
+	add(argConfig, "model=x")
+	add("-c")
+	add(argConfig)
+	add("-c", argSandbox)
+	add("-c", "sandbox_mode")
+	add("--config=")
+	add("-c", `"model_provider"=x`)
+	add("-c", ` model_provider . x = y`)
+	add("-c", `mcp_servers."sproozi".url=x`)
+	add("-c", "mcp_servers.other.url=x")
+	add("-c", "model_providers_extra=x")
+	add("-c", "notice.x=y")
+	add(argHarmless, "-c", "approval_policy=x")
+	add("-c", "x=y", argSandbox, "x")
+	// Forms that reach a controlled key or swallow an argument Sproozi
+	// adds: "=" after a short option, a separate value that is an option or
+	// missing, a parent table, an approved connection Sproozi renders, and
+	// TOML key spellings.
+	for _, args := range [][]string{
+		{"-c=model_provider=x"}, {"-c=sandbox_mode=x"}, {"-c=model=x"}, {"-c="}, {"-cmodel_provider=x"},
+		{"-c", argYolo}, {"-c", "-p", "x"}, {argConfig, argCdRoot}, {"-c", "--"}, {argHarmless, "-c"},
+		{"-m", argSandbox}, {nativeModelFlag, "-c"}, {argHarmless, "-m"}, {argHarmless, nativeModelFlag},
+		{"-c", "mcp_servers={}"}, {"-c", `mcp_servers={sproozi={url="https://x"}}`}, {"-c", "mcp_servers.sproozi={}"},
+		{"-c", `mcp_servers.github.url="https://x"`}, {"-c", "mcp_servers.github.required=false"},
+		{"-c", quotedSandboxMode}, {"-c", `" sandbox_mode"=x`}, {"-c", `'sandbox_mode'=x`},
+		{"-c", quotedSandboxMode}, {"-c", "sandbox_mode =x"}, {"-c", "SANDBOX_MODE=x"}, {"-c", "a b=x"},
+		{"-c", "=x"}, {"-c", `"unterminated=x`}, {"-c", "sandbox_mode.=x"}, {"-c", ".sandbox_mode=x"},
+		{"-c", "mcp_servers.sproozi=x"}, {"-c", "mcp_servers.sproozi.x=y"}, {"-c", "\"sandbox\\" + "u005fmode\"=x"},
+		{"-c", valueWithoutKey}, {"-cm"}, {argConfig, valueWithoutKey}, {"--config=foo"}, {"-c=foo"}, {"-c", "model"},
+		{"-c", "openai_base_url=x"}, {"-c", "shell_environment_policy.inherit=all"},
+		{"-c", reasoningEffortHigh}, {nativeModelFlag, "gpt-5.5", "-c", reasoningEffortHigh},
+	} {
+		add(args...)
+	}
+	// Every controlled key, and a key below it, so that dropping one from
+	// a ConfigOverride changes a row.
+	for _, h := range registry {
+		for _, key := range h.ConfigOverride.ControlledKeys {
+			add("-c", key+"=x")
+			add("-c", key+".x=y")
+		}
+	}
 	return out
 }
 
@@ -111,7 +167,6 @@ func recordedOutcomes() map[string]any {
 		o["signInOptions"] = h.SignInOptions
 		o["signInFile"] = h.SignInFile
 		o["provider"] = []string{h.Provider(false), h.Provider(true)}
-		o["inspectionHost"] = h.Protocol.InspectionHost()
 		o[outcomeDefault] = h.Default
 		env := map[string]any{}
 		for _, credential := range []NativeCredential{CredentialKey, CredentialToken, CredentialSignIn, "other"} {

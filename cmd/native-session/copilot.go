@@ -230,6 +230,13 @@ func (s *server) observeCopilotTurn() (string, string, error) {
 	return id, turn, err
 }
 
+// copilotWaiting is what a graceful stop of Copilot waits for: its first turn
+// until the session's journal exists, then the current one.
+func (s *server) copilotWaiting() string {
+	_, _, err := s.observeCopilotTurn()
+	return turnWaiting(harness.NativeCopilot, !errors.Is(err, os.ErrNotExist))
+}
+
 // copilotTurnless reports a first visit with no Copilot conversation to keep.
 func (s *server) copilotTurnless() bool {
 	id := s.copilotSession()

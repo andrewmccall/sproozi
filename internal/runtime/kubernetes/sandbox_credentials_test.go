@@ -37,7 +37,9 @@ func TestBuildPodSpecCredentialEnvironmentPerHarness(t *testing.T) {
 	for _, selector := range append([]string{""}, harness.Selectors()...) {
 		want, ok := podCredentialEnvironment[selector]
 		if !ok {
-			t.Errorf("harness %q has no row in podCredentialEnvironment", selector)
+			t.Errorf("harness %q has no row in podCredentialEnvironment in "+
+				"internal/runtime/kubernetes/sandbox_credentials_test.go: add the variables its AgentRun Pod's "+
+				"workload containers get with a gateway-held key and with its own sign-in (ADR 0071)", selector)
 			continue
 		}
 		for _, signIn := range []bool{false, true} {

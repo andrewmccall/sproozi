@@ -30,7 +30,6 @@ type Provider struct {
 	URL  string
 }
 
-// ProviderFor is the gateway-owned provider each harness uses by default.
 // SignsIn reports a harness that signs in to its own model provider, so the
 // local gateway forwards its sign-in and holds no key for it (ADR 0047).
 func SignsIn(kind harness.NativeKind) bool {
@@ -41,16 +40,29 @@ func SignsIn(kind harness.NativeKind) bool {
 // ProviderFor is the provider a harness reaches with credential, by
 // default: OpenAI or Anthropic with a key, and for Copilot with a token or
 // its own sign-in, GitHub's Copilot service. Name also names the stored
-// credential file.
-func ProviderFor(kind harness.NativeKind, credential harness.NativeCredential) Provider {
-	h, _ := harness.Managed(kind)
-	switch name := h.Provider(credential != harness.CredentialKey); name {
-	case string(harness.ProtocolAnthropic):
-		return Provider{Name: name, URL: anthropicURL}
-	case ProviderCopilot:
-		return Provider{Name: name, URL: copilotURL}
+// credential file. It refuses an unregistered kind, and a provider whose
+// default URL local setup does not know, rather than give either OpenAI's.
+func ProviderFor(kind harness.NativeKind, credential harness.NativeCredential) (Provider, error) {
+	h, err := harness.Managed(kind)
+	if err != nil {
+		return Provider{}, err
 	}
-	return Provider{Name: string(harness.ProtocolOpenAI), URL: openAIURL}
+	return providerNamed(h.Provider(credential != harness.CredentialKey))
+}
+
+// providerNamed is the provider with its default URL, by the name a
+// harness's registry entry gives it.
+func providerNamed(name string) (Provider, error) {
+	switch name {
+	case string(harness.ProtocolOpenAI):
+		return Provider{Name: name, URL: openAIURL}, nil
+	case string(harness.ProtocolAnthropic):
+		return Provider{Name: name, URL: anthropicURL}, nil
+	case ProviderCopilot:
+		return Provider{Name: name, URL: copilotURL}, nil
+	}
+	return Provider{}, fmt.Errorf("local setup has no default URL for model provider %q; "+
+		"add it to providerNamed in internal/localsetup/credentials.go", name)
 }
 
 // ProviderCopilot names GitHub Copilot's service and the GitHub token stored

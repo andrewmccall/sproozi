@@ -328,9 +328,26 @@ func (r *recording) finish(n *nativepty.Supervisor, ctx context.Context) (native
 // kill that ends Claude Code and Copilot.
 var recordedFinishes = map[harness.NativeKind]func(*nativepty.Supervisor, context.Context) (nativepty.Exit, error){}
 
+// realStopLimit bounds a recorded harness's real quit or kill. The record's
+// quitWait and forcedStopWait are short so that a finish the harness
+// ignores, or a kill never confirmed, ends quickly; a real quit spends 300 ms
+// before its Enter and a reap up to 100 ms more, so on a loaded machine it
+// can outlast them and would be recorded as forced. A real quit or kill
+// therefore gets its own real bound, as in production, rather than the
+// supervisor's short one. No recorded world has a deadline nearer than this
+// bound while a real quit or kill runs.
+const realStopLimit = 10 * time.Second
+
+// realStop is ctx without its cancellation, bounded by realStopLimit.
+func realStop(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), realStopLimit)
+}
+
 // ownFinish is the adapter's own finish.
 func (r *recording) ownFinish(n *nativepty.Supervisor, ctx context.Context) (nativepty.Exit, error) {
 	r.note("finish (" + r.loginState() + ")")
+	ctx, cancel := realStop(ctx)
+	defer cancel()
 	exit, err := recordedFinishes[r.w.kind](n, ctx)
 	r.settle()
 	return exit, err
@@ -343,6 +360,8 @@ func (r *recording) forceStop(n *nativepty.Supervisor, ctx context.Context) (nat
 		return nativepty.Exit{}, ctx.Err()
 	}
 	r.note("forced stop")
+	ctx, cancel := realStop(ctx)
+	defer cancel()
 	exit, err := n.Stop(ctx)
 	r.settle()
 	return exit, err
@@ -816,14 +835,20 @@ func recordWorld(t *testing.T, w world) (string, int) {
 	return b.String(), steps
 }
 
-// recordedWorlds are Codex's four, with and without a deadline, Claude
-// Code's and Copilot's with one, and a Codex world whose deadline passes.
-var recordedWorlds = []world{
-	{kind: harness.NativeCodex}, {kind: harness.NativeCodex, deadline: true},
-	{kind: harness.NativeCodex, first: true}, {kind: harness.NativeCodex, first: true, deadline: true},
-	{kind: harness.NativeClaude, deadline: true}, {kind: harness.NativeClaude, first: true, deadline: true},
-	{kind: harness.NativeCopilot, deadline: true}, {kind: harness.NativeCopilot, first: true, deadline: true},
-	{kind: harness.NativeCodex, deadline: true, late: true},
+// recordedWorlds are, for each managed kind in registry order, its first and
+// resumed visits with a deadline, and for the default kind (Codex) also
+// without one; then a default-kind world whose deadline passes.
+func recordedWorlds() []world {
+	var worlds []world
+	for _, kind := range harness.ManagedKinds() {
+		if kind == harness.Default() {
+			worlds = append(worlds, world{kind: kind}, world{kind: kind, deadline: true}, world{kind: kind, first: true},
+				world{kind: kind, first: true, deadline: true})
+			continue
+		}
+		worlds = append(worlds, world{kind: kind, deadline: true}, world{kind: kind, first: true, deadline: true})
+	}
+	return append(worlds, world{kind: harness.Default(), deadline: true, late: true})
 }
 
 // The supervisor's behaviour, for every event in every state it reaches, is
@@ -833,10 +858,11 @@ var recordedWorlds = []world{
 // harness ended, the login store, the exit report and log lines, and the
 // supervisor's exit code.
 func TestSupervisorLifecycleRecord(t *testing.T) {
-	if codexJournalExists(nativeHome) {
+	if codexJournalExists(codexHome) {
 		t.Skip("a real Codex home is present")
 	}
-	for _, kind := range []harness.NativeKind{harness.NativeCodex, harness.NativeClaude, harness.NativeCopilot} {
+	requireCompleteAdapters(t, "its lifecycle cannot be recorded")
+	for _, kind := range harness.ManagedKinds() {
 		recordedFinishes[kind] = nativeAdapters[kind].finish
 		withAdapter(t, kind, func(a *nativeAdapter) {
 			a.observe = func(s *server) (string, string, error) { return recordingOf(s).observe() }
@@ -854,14 +880,19 @@ func TestSupervisorLifecycleRecord(t *testing.T) {
 	setQuitWait(t, 600*time.Millisecond)
 	setForcedStopWait(t, 200*time.Millisecond)
 	setTurnlessSettle(t, 0)
-	previousWait, previousSettle := quiesceWait, inputSettle
-	quiesceWait, inputSettle = 2*time.Second, time.Hour
-	t.Cleanup(func() { quiesceWait, inputSettle = previousWait, previousSettle })
+	previousWait, previousSettle, previousStop := quiesceWait, inputSettle, stopWait
+	// A kill's reap waits for the process group and the terminal's reader,
+	// which on a loaded machine can outlast stop's 3 s; past it the exit is
+	// recorded with the wait's error instead of the kill. The record's real
+	// kills get realStopLimit, as its real quits do.
+	quiesceWait, inputSettle, stopWait = 2*time.Second, time.Hour, realStopLimit
+	t.Cleanup(func() { quiesceWait, inputSettle, stopWait = previousWait, previousSettle, previousStop })
 
-	records := make([]string, len(recordedWorlds))
-	counts := make([]int, len(recordedWorlds))
+	worlds := recordedWorlds()
+	records := make([]string, len(worlds))
+	counts := make([]int, len(worlds))
 	t.Run("worlds", func(t *testing.T) {
-		for i, w := range recordedWorlds {
+		for i, w := range worlds {
 			t.Run(w.String(), func(t *testing.T) {
 				t.Parallel()
 				records[i], counts[i] = recordWorld(t, w)
@@ -893,11 +924,13 @@ func TestSupervisorLifecycleRecord(t *testing.T) {
 		// The first line counts the steps; a differing step says more.
 		for i := range min(len(gotLines), len(wantLines)) {
 			if i > 0 && gotLines[i] != wantLines[i] {
-				t.Fatalf("the supervisor's lifecycle differs from %s at line %d:\n got %s\nwant %s",
+				t.Fatalf("the supervisor's lifecycle differs from %s at line %d:\n got %s\nwant %s\nIf the change is "+
+					"meant, regenerate it with -update-lifecycle-record and show the difference in its own commit",
 					lifecycleRecord, i+1, gotLines[i], wantLines[i])
 			}
 		}
-		t.Fatalf("the supervisor's lifecycle differs from %s in length: %d lines, recorded %d",
+		t.Fatalf("the supervisor's lifecycle differs from %s in length: %d lines, recorded %d; if the change is "+
+			"meant, regenerate it with -update-lifecycle-record and show the difference in its own commit",
 			lifecycleRecord, len(gotLines), len(wantLines))
 	}
 }

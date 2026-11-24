@@ -49,6 +49,14 @@ func validateAllowance(a map[string]Allowance) error {
 	}
 	return nil
 }
+
+// validateLaunchArgs refuses harness arguments Sproozi controls, with the
+// validator's message. It runs where a launch is created and before a stored
+// launch is started, not when a record loads.
+func validateLaunchArgs(l Launch) error {
+	return harness.ValidateNativeArgs(l.Harness, l.HarnessArgs)
+}
+
 func validateLaunch(l Launch) error {
 	// Only a first visit from a Git workspace lacks a thread, and it then has
 	// no checkpoint either; every other launch names both.
@@ -59,7 +67,11 @@ func validateLaunch(l Launch) error {
 	if err := workspace.ValidateIgnoredPaths(l.IncludeIgnored); err != nil {
 		return err
 	}
-	if err := harness.ValidateNativeArgs(l.Harness, l.HarnessArgs); err != nil {
+	// Only the arguments' size is checked here, on every load and save: which
+	// arguments are refused is checked where a launch is created or started
+	// (validateLaunchArgs), so a record an earlier release wrote still loads
+	// and its session can still end.
+	if err := harness.NativeArgsBounded(l.HarnessArgs); err != nil {
 		return err
 	}
 	if l.Login != "" {

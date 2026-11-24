@@ -8,6 +8,9 @@ import (
 // fixtureModel is a model name the tests pass.
 const fixtureModel = "gpt-5.5"
 
+// nativeModelFlag is the model option every managed harness takes.
+const nativeModelFlag = "--model"
+
 // addDirFlag is a flag every managed harness takes and Sproozi leaves alone.
 const addDirFlag = "--add-dir"
 
@@ -15,7 +18,7 @@ func TestNativeArgsRefuseOnlyFlagsSprooziControls(t *testing.T) {
 	allowed := map[NativeKind][][]string{
 		NativeCodex: {
 			{nativeModelFlag, fixtureModel}, {"-m", fixtureModel}, {"--search"}, {addDirFlag, "/tmp/x"},
-			{"-c", "model_reasoning_effort=high"}, {"--config=model=gpt-5.5"}, {"--enable", "x"},
+			{"-c", reasoningEffortHigh}, {"--config=model=gpt-5.5"}, {"--enable", "x"},
 		},
 		NativeClaude: {
 			{nativeModelFlag, "sonnet"}, {"--effort", "high"}, {addDirFlag, "/tmp"}, {"-d"}, {"--verbose"},
@@ -35,12 +38,12 @@ func TestNativeArgsRefuseOnlyFlagsSprooziControls(t *testing.T) {
 	}
 	refused := map[NativeKind][][]string{
 		NativeCodex: {
-			{"--sandbox", "read-only"}, {"-s", "read-only"}, {"-sread-only"}, {"--sandbox=read-only"},
-			{"-a", "on-request"}, {"--ask-for-approval=never"}, {"--yolo"}, {"--full-auto"},
-			{"-C", "/"}, {"--cd=/"}, {"--worktree"}, {"--oss"}, {"--local-provider", "ollama"},
+			{argSandbox, "read-only"}, {"-s", "read-only"}, {"-sread-only"}, {"--sandbox=read-only"},
+			{"-a", "on-request"}, {"--ask-for-approval=never"}, {argYolo}, {"--full-auto"},
+			{"-C", "/"}, {argCdRoot}, {"--worktree"}, {"--oss"}, {"--local-provider", "ollama"},
 			{"--profile", "x"}, {"--remote", "ws://x"}, {"--no-daemon"},
 			{"-c", "developer_instructions=x"}, {"-c", `"model_provider"="openai"`},
-			{"--config", "model_providers.openai.base_url=http://x"}, {"-cprojects.x.trust_level=trusted"},
+			{argConfig, "model_providers.openai.base_url=http://x"}, {"-cprojects.x.trust_level=trusted"},
 			{"-c", `mcp_servers."sproozi".url=x`}, {"-c", "approval_policy=on-request"}, {"--", "fix it"},
 		},
 		NativeClaude: {
@@ -50,7 +53,7 @@ func TestNativeArgsRefuseOnlyFlagsSprooziControls(t *testing.T) {
 			{"--session-id", "x"}, {"-p"}, {"--print"}, {"-w", "tree"}, {"--no-session-persistence"},
 		},
 		NativeCopilot: {
-			{"--allow-all"}, {"--yolo"}, {"--allow-all-urls"}, {"--additional-mcp-config", "@x"},
+			{"--allow-all"}, {argYolo}, {"--allow-all-urls"}, {"--additional-mcp-config", "@x"},
 			{"--disable-mcp-server=sproozi"}, {"--no-custom-instructions"}, {"--resume", "id"}, {"-r"}, {"--continue"},
 			{"--session-id=x"}, {"--connect", "x"}, {"-p", "hi"}, {"--prompt=hi"}, {"--acp"}, {"--remote"},
 			{"--bash-env=off"}, {"--no-bash-env"}, {"-s"},

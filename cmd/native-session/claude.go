@@ -127,6 +127,24 @@ func (s *server) claudeCompletion() *claudeCompletion {
 	return d
 }
 
+// claudeWaiting is what a graceful stop of Claude Code waits for, from its
+// completion observation.
+func (s *server) claudeWaiting() string {
+	switch s.claudeCompletion().Observation {
+	case pendingTools:
+		return "a running Claude Code tool to finish"
+	case inputChanged:
+		return "terminal input sent after the last Claude Code turn to settle"
+	case "identity_unavailable":
+		return "Claude Code to report its conversation"
+	case "lifecycle_incomplete":
+		return "the current Claude Code turn to finish"
+	case "settled":
+		return "Claude Code to stop"
+	}
+	return "Claude Code's transcript to settle"
+}
+
 func claudeJournalDiagnostic(err error) string {
 	// Match only fixed adapter errors. Unknown content-block names and OS path
 	// errors must not cross the diagnostic boundary as native payloads.
@@ -149,7 +167,7 @@ func (s *server) claudeHook(h *claudeHook) response {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r := response{Op: opClaudeHook, State: s.life.phase.wire()}
-	if h == nil || s.config.Harness != harness.NativeClaude || !s.life.phase.running() {
+	if h == nil || !nativeAdapters[s.config.Harness].observesHooks || !s.life.phase.running() {
 		r.Error = "Claude lifecycle observer is unavailable"
 		s.claude.rejected = "observer_unavailable"
 		return r

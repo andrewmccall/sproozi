@@ -15,7 +15,7 @@ import (
 // and can cut the exec stream that carries the reply. The supervisor waits
 // for the client, which closes only after it has written the reply out.
 func TestStoppedQuiesceWaitsForTheClientBeforeConcluding(t *testing.T) {
-	if codexJournalExists(nativeHome) {
+	if codexJournalExists(codexHome) {
 		t.Skip("a real Codex home is present")
 	}
 	setTurnlessSettle(t, 100*time.Millisecond)
@@ -53,7 +53,7 @@ func TestStoppedQuiesceWaitsForTheClientBeforeConcluding(t *testing.T) {
 
 // A client that never closes cannot hold the supervisor past the grace.
 func TestStoppedQuiesceConcludesAfterTheGrace(t *testing.T) {
-	if codexJournalExists(nativeHome) {
+	if codexJournalExists(codexHome) {
 		t.Skip("a real Codex home is present")
 	}
 	setTurnlessSettle(t, 100*time.Millisecond)

@@ -45,6 +45,63 @@ func CaptureCopilotState(home, threadID string, maxBytes int64) (CopilotState, e
 	return state, nil
 }
 
+// captureCopilot is Copilot's Harness.CaptureState; the journal's path does
+// not depend on the workspace.
+func captureCopilot(home, _, threadID string, maxBytes int64) (ConversationState, error) {
+	return capturedState(CaptureCopilotState(home, threadID, maxBytes))
+}
+
+// Kind is NativeCopilot.
+func (s CopilotState) Kind() NativeKind { return NativeCopilot }
+
+// Thread is the harness conversation ID (`threadId`).
+func (s CopilotState) Thread() string { return s.ThreadID }
+
+// Size is the journal's length.
+func (s CopilotState) Size() int { return len(s.Events) }
+
+// CompletedTurn is CompletedCopilotTurn.
+func (s CopilotState) CompletedTurn(maxBytes int64) (string, error) {
+	return CompletedCopilotTurn(s, maxBytes)
+}
+
+// Restore is RestoreCopilotState; the journal's path does not depend on the
+// workspace.
+func (s CopilotState) Restore(home, _ string, maxBytes int64) error {
+	return RestoreCopilotState(home, s, maxBytes)
+}
+
+// ValidateContinuity compares no evidence: the supervisor writes
+// copilot-instructions.md afresh at each launch. Copilot adds that file to
+// its system prompt (ADR 0048), and its journal records the first turn's
+// system.message; whether the instructions appear there has not been
+// checked, and nothing reads them. checkpoint.ValidateContinuity checks the
+// digest's form.
+func (s CopilotState) ValidateContinuity(string, int64) error { return nil }
+
+// FinalText is the main agent's last answer that requested no tools.
+func (s CopilotState) FinalText(maxBytes int64) (string, error) {
+	if _, err := CompletedCopilotTurn(s, maxBytes); err != nil {
+		return "", err
+	}
+	var text string
+	for line := range bytes.SplitSeq(s.Events, []byte{'\n'}) {
+		var row struct {
+			Type string `json:"type"`
+			Data struct {
+				Content      string            `json:"content"`
+				ToolRequests []json.RawMessage `json:"toolRequests"`
+				Parent       string            `json:"parentToolCallId"`
+			} `json:"data"`
+		}
+		if json.Unmarshal(line, &row) == nil && row.Type == "assistant.message" && row.Data.Parent == "" &&
+			len(row.Data.ToolRequests) == 0 {
+			text = row.Data.Content
+		}
+	}
+	return text, nil
+}
+
 // ReadCopilotState reads a live session's journal for observation, without
 // requiring a completed turn.
 func ReadCopilotState(home, threadID string, maxBytes int64) (CopilotState, error) {
@@ -57,7 +114,7 @@ func readCopilotEvents(home, threadID string, maxBytes int64) ([]byte, error) {
 	if err != nil || maxBytes <= 0 {
 		return nil, errors.New("invalid Copilot checkpoint selection")
 	}
-	if err = copilotDirectories(home, filepath.Dir(relative), false); err != nil {
+	if err = stateDirectories(home, filepath.Dir(relative), false, copilotUnsafeDirectory); err != nil {
 		return nil, err
 	}
 	name := filepath.Join(home, filepath.FromSlash(relative))
@@ -93,59 +150,15 @@ func RestoreCopilotState(home string, state CopilotState, maxBytes int64) error 
 	if err != nil {
 		return err
 	}
-	if err = copilotDirectories(home, filepath.Dir(relative), true); err != nil {
+	if err = stateDirectories(home, filepath.Dir(relative), true, copilotUnsafeDirectory); err != nil {
 		return err
 	}
-	name := filepath.Join(home, filepath.FromSlash(relative))
-	f, err := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if err != nil {
-		return err
-	}
-	_, writeErr := f.Write(state.Events)
-	if writeErr == nil {
-		writeErr = f.Sync()
-	}
-	closeErr := f.Close()
-	if writeErr != nil || closeErr != nil {
-		_ = os.Remove(name)
-		return errors.Join(writeErr, closeErr)
-	}
-	return nil
+	return writeStateFile(filepath.Join(home, filepath.FromSlash(relative)), state.Events)
 }
 
-// copilotDirectories checks, and with create makes, each directory of
-// relative under home, refusing links.
-func copilotDirectories(home, relative string, create bool) error {
-	dir := home
-	for i, step := range append([]string{""}, splitPath(relative)...) {
-		if i > 0 {
-			dir = filepath.Join(dir, step)
-			if create {
-				if err := os.Mkdir(dir, 0700); err != nil && !os.IsExist(err) {
-					return err
-				}
-			}
-		}
-		info, err := os.Lstat(dir)
-		if err != nil {
-			return stateFileError(err)
-		}
-		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return refusedState(errors.New("unsafe Copilot native directory"))
-		}
-	}
-	return nil
-}
-
-func splitPath(relative string) []string {
-	var out []string
-	for step := range bytes.SplitSeq([]byte(filepath.ToSlash(relative)), []byte("/")) {
-		if len(step) != 0 && string(step) != "." {
-			out = append(out, string(step))
-		}
-	}
-	return out
-}
+// copilotUnsafeDirectory refuses a link or non-directory on the journal's
+// path.
+const copilotUnsafeDirectory = "unsafe Copilot native directory"
 
 type copilotEvent struct {
 	ID       string          `json:"id"`

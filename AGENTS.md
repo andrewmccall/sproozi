@@ -57,7 +57,7 @@ Run the gates that match the change before declaring it done:
 | `go.mod`, `go.sum` or the Go toolchain pin | also `make verify-deps` (tidiness and `govulncheck`) |
 | Controller, gateway, network policy or install manifests | also `make test-e2e` (creates and removes its own Kind cluster) |
 | Documentation | `make verify-docs` |
-| A new harness | follow `docs/contributing/add-a-harness.md`; `go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/ ./cmd/sproozi/` guards the registry, CRD enum, rendered `sproozi` connection, MCP loader and bridge hook, examples, reference row and managed wiring; client loading and launch behaviour need review and `make verify-harness-clients`, `make verify-harness-process` (see the guide's "What the guards check") |
+| A new harness | follow `docs/contributing/add-a-harness.md`; `go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/ ./cmd/sproozi/ ./internal/nativeconfig/ ./internal/localsetup/ ./internal/runtime/kubernetes/` guards the registry, CRD enum, rendered `sproozi` connection, MCP loader and bridge hook, examples, reference row, Pod credential variables and managed wiring (each managed kind's facts, its conversation state through the checkpoint format, its supervisor adapter's required functions, and every remaining kind switch naming it), and the recorded outcomes; client loading and launch behaviour need review and `make verify-harness-clients`, `make verify-harness-process` (see the guide's "What the guards check") |
 | MCP registry, policy or examples | `make verify-mcp` |
 | Release candidate | `make verify-release` |
 

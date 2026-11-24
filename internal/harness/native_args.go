@@ -19,11 +19,11 @@ const (
 	NativeArgsMax = 64
 	// NativeArgMaxBytes bounds one harness argument.
 	NativeArgMaxBytes = 4096
-	// nativeModelFlag is the model option every managed harness takes.
-	nativeModelFlag = "--model"
 	// remoteName is Codex's and Copilot's remote-session flag and OpenCode's
 	// remote MCP transport.
 	remoteName = "remote"
+	// modelName is the model option's long name and Codex's model configuration key.
+	modelName = "model"
 )
 
 // controlledFlag names one option a harness takes. value reports that it takes
@@ -60,13 +60,41 @@ var codexControlled = []controlledFlag{
 	{long: []string{"no-alt-screen", "no-daemon"}, why: whySetting},
 }
 
-// codexControlledKeys are configuration keys a -c/--config override may not
-// set, with every key below them.
-var codexControlledKeys = []string{
-	"developer_instructions", "instructions", "model_instructions_file", "experimental_instructions_file",
-	"model_provider", "model_providers", "mcp_servers.sproozi", "projects", "sandbox_mode",
-	"sandbox_workspace_write", "approval_policy", "approvals_reviewer", "check_for_update_on_startup",
-	"profile", "profiles", "notice",
+// ConfigOverride is a harness's command-line option that sets one
+// configuration key, such as Codex's -c key=value. Its value is a dotted key,
+// whose parts may be TOML-quoted, then "=" and the key's value. The zero value
+// is a harness with no such option.
+type ConfigOverride struct {
+	// Flag is the option in each spelling; its value is the next argument,
+	// or follows "=" (or, for a short name, is joined to it).
+	Flag controlledFlag
+	// ControlledKeys are the keys Sproozi sets, each with every key below
+	// it; an override of one is refused (see ValidateNativeArgs).
+	ControlledKeys []string
+	// ModelKey is the key that chooses the model (see NativeArgsSelectModel).
+	ModelKey string
+}
+
+// modelFlag is the model option of a harness that spells it only --model.
+var modelFlag = controlledFlag{long: []string{modelName}, value: true}
+
+// codexModelFlag is Codex's model option, --model or -m.
+var codexModelFlag = controlledFlag{long: []string{modelName}, short: "m", value: true}
+
+// codexConfigOverride is Codex's -c/--config override and the keys Sproozi
+// sets, or that change what it sets. mcp_servers is the whole table: a launch
+// renders every approved connection there beside the control connection, and
+// which names are approved varies by launch
+// (TestEveryKeyACodexLaunchSetsIsControlled).
+var codexConfigOverride = ConfigOverride{
+	Flag: controlledFlag{long: []string{"config"}, short: "c", value: true},
+	ControlledKeys: []string{
+		"developer_instructions", "instructions", "model_instructions_file", "experimental_instructions_file",
+		"model_provider", "model_providers", "mcp_servers", "projects", "sandbox_mode",
+		"sandbox_workspace_write", "approval_policy", "approvals_reviewer", "check_for_update_on_startup",
+		"profile", "profiles", "notice",
+	},
+	ModelKey: modelName,
 }
 
 var claudeControlled = []controlledFlag{
@@ -103,6 +131,50 @@ var copilotControlled = []controlledFlag{
 	{long: []string{"acp", remoteName, "remote-export", "silent", "share-gist"}, short: "s", why: whyLifecycle},
 }
 
+// NativeConfigOverrideKeys lists the key of each configuration override in
+// args, in every spelling ValidateNativeArgs reads, as a TOML dotted key
+// whose every part is a quoted basic string, so it reads back as the same
+// key whatever characters a part holds: "" for an override it cannot read.
+// A kind without a ConfigOverride has none.
+func NativeConfigOverrideKeys(kind NativeKind, args []string) []string {
+	h, err := Managed(kind)
+	if err != nil {
+		return nil
+	}
+	var keys []string
+	for i := 0; i < len(args); i++ {
+		parts, consumed, ok := h.ConfigOverride.keyParts(args, i)
+		if !ok {
+			continue
+		}
+		quoted := make([]string, len(parts))
+		for n, part := range parts {
+			quoted[n] = tomlQuote(part)
+		}
+		keys = append(keys, strings.Join(quoted, "."))
+		i += consumed
+	}
+	return keys
+}
+
+// NativeArgsBounded checks only the size of harness arguments: how many,
+// how long and that none holds a NUL. A stored record checks this when it
+// loads; which arguments Sproozi refuses is checked, by ValidateNativeArgs,
+// where a launch is created and where one is started, so a record holding
+// arguments an earlier release accepted still loads and its session can
+// still end (ADR 0073).
+func NativeArgsBounded(args []string) error {
+	if len(args) > NativeArgsMax {
+		return fmt.Errorf("harness arguments: at most %d are accepted", NativeArgsMax)
+	}
+	for _, arg := range args {
+		if len(arg) > NativeArgMaxBytes || strings.ContainsAny(arg, "\x00") {
+			return fmt.Errorf("harness arguments: each must be at most %d bytes without NUL", NativeArgMaxBytes)
+		}
+	}
+	return nil
+}
+
 // ValidateNativeArgs refuses harness arguments that would replace a flag
 // Sproozi controls, with a message naming the flag and why. A refusal is
 // explicit; Sproozi never rewrites the user's arguments.
@@ -113,13 +185,8 @@ func ValidateNativeArgs(kind NativeKind, args []string) error {
 	if err := kind.Validate(); err != nil {
 		return err
 	}
-	if len(args) > NativeArgsMax {
-		return fmt.Errorf("harness arguments: at most %d are accepted", NativeArgsMax)
-	}
-	for _, arg := range args {
-		if len(arg) > NativeArgMaxBytes || strings.ContainsAny(arg, "\x00") {
-			return fmt.Errorf("harness arguments: each must be at most %d bytes without NUL", NativeArgMaxBytes)
-		}
+	if err := NativeArgsBounded(args); err != nil {
+		return err
 	}
 	h, _ := Managed(kind)
 	controlled := h.RefusedFlags
@@ -131,16 +198,33 @@ func ValidateNativeArgs(kind NativeKind, args []string) error {
 			return fmt.Errorf("harness argument %q is refused: Sproozi adds the conversation to resume after "+
 				"the harness arguments; remove it", arg)
 		}
-		if kind == NativeCodex {
-			key, consumed, ok := codexConfigKey(args, i)
-			if ok {
-				if refused := controlledKey(key); refused != "" {
-					return fmt.Errorf("harness argument %q is refused: Sproozi sets %q for %s sessions; remove it",
-						strings.Join(args[i:i+consumed+1], " "), refused, kind)
-				}
-				i += consumed
+		// An option whose value is the next argument needs one that is not
+		// itself an option.
+		for _, f := range []controlledFlag{h.ConfigOverride.Flag, h.ModelFlag} {
+			if !f.bare(arg) {
 				continue
 			}
+			if i+1 >= len(args) {
+				return fmt.Errorf("harness argument %q is refused: it needs a value after it, and Sproozi adds the "+
+					"conversation to resume after the harness arguments; give its value", arg)
+			}
+			if strings.HasPrefix(args[i+1], "-") {
+				return fmt.Errorf("harness argument %q is refused: its value %q begins with \"-\", so the harness "+
+					"could read it as an option; give a value", arg+" "+args[i+1], args[i+1])
+			}
+		}
+		if key, consumed, ok := h.ConfigOverride.key(args, i); ok {
+			if key == "" {
+				return fmt.Errorf("harness argument %q is refused: a configuration override is a TOML key, "+
+					"\"=\" and a value; remove it",
+					strings.Join(args[i:i+consumed+1], " "))
+			}
+			if refused := h.ConfigOverride.controlled(key); refused != "" {
+				return fmt.Errorf("harness argument %q is refused: Sproozi sets %q for %s sessions; remove it",
+					strings.Join(args[i:i+consumed+1], " "), refused, kind)
+			}
+			i += consumed
+			continue
 		}
 		for _, f := range controlled {
 			if name, ok := f.matches(arg); ok {
@@ -154,15 +238,18 @@ func ValidateNativeArgs(kind NativeKind, args []string) error {
 // NativeArgsSelectModel reports that the user's harness arguments choose the
 // model, so the configured default model is left out of the launch.
 func NativeArgsSelectModel(kind NativeKind, args []string) bool {
+	h, err := Managed(kind)
+	if err != nil {
+		// No launch reaches a kind the registry does not hold; it reports
+		// --model, as it always has.
+		h.ModelFlag = modelFlag
+	}
 	for i, arg := range args {
-		if arg == nativeModelFlag || strings.HasPrefix(arg, nativeModelFlag+"=") ||
-			kind == NativeCodex && (arg == "-m" || strings.HasPrefix(arg, "-m")) {
+		if _, ok := h.ModelFlag.matches(arg); ok {
 			return true
 		}
-		if kind == NativeCodex {
-			if key, _, ok := codexConfigKey(args, i); ok && key == "model" {
-				return true
-			}
+		if key, _, ok := h.ConfigOverride.key(args, i); ok && key == h.ConfigOverride.ModelKey {
+			return true
 		}
 	}
 	return false
@@ -183,44 +270,68 @@ func (f controlledFlag) matches(arg string) (string, bool) {
 	return "", false
 }
 
-// codexConfigKey reads the key of a Codex -c/--config override at args[i]
-// and how many further arguments it consumed.
-func codexConfigKey(args []string, i int) (string, int, bool) {
+// bare reports that arg is a value-taking option spelled without its value,
+// which is then the next argument.
+func (f controlledFlag) bare(arg string) bool {
+	return f.value && (slices.ContainsFunc(f.long, func(name string) bool { return arg == "--"+name }) ||
+		f.short != "" && arg == "-"+f.short)
+}
+
+// valueAt reads the value of this option at args[i] and how many further
+// arguments it consumed. A bare spelling with no argument after it has none.
+func (f controlledFlag) valueAt(args []string, i int) (string, int, bool) {
 	arg := args[i]
-	var value string
-	consumed := 0
-	switch {
-	case arg == "-c" || arg == "--config":
+	if f.bare(arg) {
 		if i+1 >= len(args) {
 			return "", 0, false
 		}
-		value, consumed = args[i+1], 1
-	case strings.HasPrefix(arg, "--config="):
-		value = strings.TrimPrefix(arg, "--config=")
-	case strings.HasPrefix(arg, "-c") && !strings.HasPrefix(arg, "--"):
-		value = strings.TrimPrefix(arg, "-c")
-	default:
-		return "", 0, false
+		return args[i+1], 1, true
 	}
-	key, _, _ := strings.Cut(value, "=")
-	return normalizeConfigKey(key), consumed, true
+	for _, name := range f.long {
+		if value, ok := strings.CutPrefix(arg, "--"+name+"="); ok {
+			return value, 0, true
+		}
+	}
+	if f.short != "" && !strings.HasPrefix(arg, "--") {
+		if value, ok := strings.CutPrefix(arg, "-"+f.short); ok {
+			// "-c=key=value" is "-c key=value", as the client's parser
+			// reads a short option's "=".
+			return strings.TrimPrefix(value, "="), 0, true
+		}
+	}
+	return "", 0, false
 }
 
-// normalizeConfigKey removes TOML quoting and spaces from a dotted key, so
-// `"model_provider"` and `mcp_servers."sproozi".url` compare by name.
-func normalizeConfigKey(key string) string {
-	parts := strings.Split(strings.TrimSpace(key), ".")
-	for i, part := range parts {
-		parts[i] = strings.Trim(strings.TrimSpace(part), `"'`)
-	}
-	return strings.Join(parts, ".")
+// key reads the key of an override at args[i] and how many further
+// arguments it consumed.
+func (o ConfigOverride) key(args []string, i int) (string, int, bool) {
+	parts, consumed, ok := o.keyParts(args, i)
+	return strings.Join(parts, "."), consumed, ok
 }
 
-func controlledKey(key string) string {
-	if i := slices.IndexFunc(codexControlledKeys, func(c string) bool {
-		return key == c || strings.HasPrefix(key, c+".")
+// keyParts reads the parts of an override's key at args[i], none for one
+// that is not a TOML dotted key followed by "=", and how many further
+// arguments it consumed.
+func (o ConfigOverride) keyParts(args []string, i int) ([]string, int, bool) {
+	value, consumed, ok := o.Flag.valueAt(args, i)
+	if !ok {
+		return nil, 0, false
+	}
+	parts, rest, parsed := tomlDottedKey(value)
+	if !parsed || !strings.HasPrefix(rest, "=") {
+		// Not a TOML dotted key followed by "=": unparseable, refused.
+		return nil, consumed, true
+	}
+	return parts, consumed, true
+}
+
+// controlled is the controlled key that key is, is below, or holds as a
+// table that an override of key would replace, or "".
+func (o ConfigOverride) controlled(key string) string {
+	if i := slices.IndexFunc(o.ControlledKeys, func(c string) bool {
+		return key == c || strings.HasPrefix(key, c+".") || strings.HasPrefix(c, key+".")
 	}); i >= 0 {
-		return codexControlledKeys[i]
+		return o.ControlledKeys[i]
 	}
 	return ""
 }

@@ -1,0 +1,2768 @@
+{
+  "fixtures": {
+    "claude-code": {
+      "capture": {
+        "error": "",
+        "harness": "claude-code",
+        "native": {
+          "bytes": 1135,
+          "sha256": "178aba3411ac3fb98aa6fefdc861b31c778d19fa4272f129a48d47425e353db5"
+        },
+        "threadId": "26386254-894d-4504-9bac-23ab929077cd",
+        "turnId": "9d2ec943-c3d0-436d-b599-6f62917a9e0a"
+      },
+      "kind": "claude-code",
+      "variants": {
+        "harness-empty": {
+          "artifact": {
+            "bytes": 11327,
+            "sha256": "afad3f6e7d223b1ded649575a9310aed4dab0750f3dd34bf4af7e9925b1f2555"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "codex": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "copilot": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: inconsistent native harness state",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "harness-other-managed": {
+          "artifact": {
+            "bytes": 11334,
+            "sha256": "be83ba714de331bed47e29ec9eaf738905f191fd5ccc94a684237781a7c27f8b"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "codex": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "copilot": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: inconsistent native harness state",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "harness-unregistered": {
+          "artifact": {
+            "bytes": 11341,
+            "sha256": "b47667c79dac8f7efaebf8d04af028e31bbcd4450a67e310fb77945e379469c2"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "codex": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "copilot": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: inconsistent native harness state",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "no-state": {
+          "artifact": {
+            "bytes": 9612,
+            "sha256": "0d4a00dc6208be76edb2aa0a2df8d101db5387bb765c0672ced294e4c29f7a59"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "codex": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "copilot": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: inconsistent native harness state",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "two-states": {
+          "artifact": {
+            "bytes": 11402,
+            "sha256": "fbe7c778507f915dd98f075e0bdeee8066a683c62079fcacbcdb95abd7d0f317"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "codex": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "copilot": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: inconsistent native harness state",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "version-1-with-harness": {
+          "artifact": {
+            "bytes": 11338,
+            "sha256": "53947135d92fa4a9746e01e14a8d059660e3ec5a2c98c7200be7d52d3e8f173e"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "right": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "wrong": "checkpoint: invalid artifact: json: unknown field \"harness\""
+              },
+              "codex": {
+                "malformed": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "right": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "wrong": "checkpoint: invalid artifact: json: unknown field \"harness\""
+              },
+              "copilot": {
+                "malformed": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "right": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "wrong": "checkpoint: invalid artifact: json: unknown field \"harness\""
+              },
+              "not-registered": {
+                "malformed": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "right": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "wrong": "checkpoint: invalid artifact: json: unknown field \"harness\""
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "version-3": {
+          "artifact": {
+            "bytes": 11338,
+            "sha256": "0ebdee8361407f488d6b531fbc250ee17e01122ad2cdbecb1b05a7c866908f0a"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "right": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "wrong": "checkpoint: invalid artifact: checkpoint: unsupported artifact version"
+              },
+              "codex": {
+                "malformed": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "right": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "wrong": "checkpoint: invalid artifact: checkpoint: unsupported artifact version"
+              },
+              "copilot": {
+                "malformed": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "right": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "wrong": "checkpoint: invalid artifact: checkpoint: unsupported artifact version"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "right": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "wrong": "checkpoint: invalid artifact: checkpoint: unsupported artifact version"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        }
+      },
+      "version-2": {
+        "artifact": {
+          "bytes": 11338,
+          "sha256": "6a34a91456853364a38081c0cd1f1b307d444550c9623f45a031773640b50173"
+        },
+        "read": {
+          "continuity": {
+            "claude-code": {
+              "malformed": "checkpoint: invalid trusted instruction digest",
+              "right": "",
+              "wrong": ""
+            },
+            "codex": {
+              "malformed": "checkpoint: native harness conflicts with trusted launch",
+              "right": "checkpoint: native harness conflicts with trusted launch",
+              "wrong": "checkpoint: native harness conflicts with trusted launch"
+            },
+            "copilot": {
+              "malformed": "checkpoint: native harness conflicts with trusted launch",
+              "right": "checkpoint: native harness conflicts with trusted launch",
+              "wrong": "checkpoint: native harness conflicts with trusted launch"
+            },
+            "not-registered": {
+              "malformed": "checkpoint: native harness conflicts with trusted launch",
+              "right": "checkpoint: native harness conflicts with trusted launch",
+              "wrong": "checkpoint: native harness conflicts with trusted launch"
+            }
+          },
+          "finalText": {
+            "error": "",
+            "text": "CLAUDE_FIRST_COMPLETE",
+            "truncated": false
+          },
+          "inspect": {
+            "error": "",
+            "metadata": {
+              "harness": "claude-code",
+              "threadId": "26386254-894d-4504-9bac-23ab929077cd",
+              "turnId": "9d2ec943-c3d0-436d-b599-6f62917a9e0a",
+              "sha256": "6a34a91456853364a38081c0cd1f1b307d444550c9623f45a031773640b50173",
+              "bytes": 11338,
+              "workspace": {
+                "revision": "013db6e565cb5c85042abcdb985abb944ec436ca",
+                "objectFormat": "sha1",
+                "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+              }
+            }
+          },
+          "restore": {
+            "error": "",
+            "metadata": {
+              "harness": "claude-code",
+              "threadId": "26386254-894d-4504-9bac-23ab929077cd",
+              "turnId": "9d2ec943-c3d0-436d-b599-6f62917a9e0a",
+              "sha256": "6a34a91456853364a38081c0cd1f1b307d444550c9623f45a031773640b50173",
+              "bytes": 11338,
+              "workspace": {
+                "revision": "013db6e565cb5c85042abcdb985abb944ec436ca",
+                "objectFormat": "sha1",
+                "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+              }
+            },
+            "tree": [
+              ". drwx------",
+              "claude drwx------",
+              "claude/projects drwx------",
+              "claude/projects/-WORKSPACE- drwx------",
+              "claude/projects/-WORKSPACE-/26386254-894d-4504-9bac-23ab929077cd.jsonl -rw------- 178aba3411ac3fb98aa6fefdc861b31c778d19fa4272f129a48d47425e353db5",
+              "workspace drwx------",
+              "workspace/.git",
+              "workspace/.gitignore -rw------- a6c7e3c5ddd823efc8b7a30853eabc152dac866843bd7a39dc4a29e0a0eb68b3",
+              "workspace/note -rw------- 0e442b07e3772e8f5622478242ddf5f9f197bbd6a0402cd71471db4081abb291",
+              "workspace/untracked -rw------- be02c0270dc16cf866391d81369ce9b50c9bd1c9cb0834a5c2788c70b35ead2e"
+            ]
+          },
+          "workspace": {
+            "archive": {
+              "bytes": 7168,
+              "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+            },
+            "error": "",
+            "metadata": {
+              "revision": "013db6e565cb5c85042abcdb985abb944ec436ca",
+              "objectFormat": "sha1",
+              "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+            }
+          }
+        }
+      }
+    },
+    "codex": {
+      "capture": {
+        "error": "",
+        "harness": "codex",
+        "native": {
+          "bytes": 401,
+          "sha256": "08452b77ecdd2ab4fe9926ef7b2173e4a109ddfa95e08426626a930c674f2368"
+        },
+        "threadId": "01a126e8-288d-7350-9b52-627e16048343",
+        "turnId": "fixture-turn"
+      },
+      "kind": "codex",
+      "variants": {
+        "harness-empty": {
+          "artifact": {
+            "bytes": 10325,
+            "sha256": "038e1bd9f1fc531a181938f5d0985e212f82641a2e8cefaf0735851c5e5f3de3"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "codex": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "copilot": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: inconsistent native harness state",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "harness-other-managed": {
+          "artifact": {
+            "bytes": 10336,
+            "sha256": "54e1ecf3679409446d0321be217cbe3e2fb632e6fb8aec6cce2b9e3d52a3ca81"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "codex": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "copilot": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: inconsistent native harness state",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "harness-unregistered": {
+          "artifact": {
+            "bytes": 10339,
+            "sha256": "de6622b026d63337c4b940f5fb6336dd0f3e7459adf5b6f08434041737e5da45"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "codex": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "copilot": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: inconsistent native harness state",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "no-state": {
+          "artifact": {
+            "bytes": 9606,
+            "sha256": "dc191e78bb9242e1b424d13a939c3e1fc6834eb19a1dc15e9301e7ba16c442c2"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "codex": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "copilot": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: inconsistent native harness state",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "two-states": {
+          "artifact": {
+            "bytes": 10398,
+            "sha256": "6e5d580188e181455d14c47ea09b7469a6c053f4e7153327853b72f62219fd50"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "codex": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "copilot": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: inconsistent native harness state",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "version-1-with-harness": {
+          "artifact": {
+            "bytes": 10330,
+            "sha256": "96db330f8bad4838c62a13904723621aaa0e7423ed549776b0e189f8e4d55f45"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "right": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "wrong": "checkpoint: invalid artifact: json: unknown field \"harness\""
+              },
+              "codex": {
+                "malformed": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "right": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "wrong": "checkpoint: invalid artifact: json: unknown field \"harness\""
+              },
+              "copilot": {
+                "malformed": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "right": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "wrong": "checkpoint: invalid artifact: json: unknown field \"harness\""
+              },
+              "not-registered": {
+                "malformed": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "right": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "wrong": "checkpoint: invalid artifact: json: unknown field \"harness\""
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "version-3": {
+          "artifact": {
+            "bytes": 10330,
+            "sha256": "ed57b6e381e439707b609246e3071a56d8e822c31cfa14d361b7378657e40e96"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "right": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "wrong": "checkpoint: invalid artifact: checkpoint: unsupported artifact version"
+              },
+              "codex": {
+                "malformed": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "right": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "wrong": "checkpoint: invalid artifact: checkpoint: unsupported artifact version"
+              },
+              "copilot": {
+                "malformed": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "right": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "wrong": "checkpoint: invalid artifact: checkpoint: unsupported artifact version"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "right": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "wrong": "checkpoint: invalid artifact: checkpoint: unsupported artifact version"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        }
+      },
+      "version-1": {
+        "artifact": {
+          "bytes": 10313,
+          "sha256": "dcc1a869f720596aec3b23bc1b3b4d9034513f7e48113219351cdcc035c7cc41"
+        },
+        "read": {
+          "continuity": {
+            "claude-code": {
+              "malformed": "checkpoint: native harness conflicts with trusted launch",
+              "right": "checkpoint: native harness conflicts with trusted launch",
+              "wrong": "checkpoint: native harness conflicts with trusted launch"
+            },
+            "codex": {
+              "malformed": "native initial instructions do not match trusted launch",
+              "right": "native initial instructions do not match trusted launch",
+              "wrong": "native initial instructions do not match trusted launch"
+            },
+            "copilot": {
+              "malformed": "checkpoint: native harness conflicts with trusted launch",
+              "right": "checkpoint: native harness conflicts with trusted launch",
+              "wrong": "checkpoint: native harness conflicts with trusted launch"
+            },
+            "not-registered": {
+              "malformed": "checkpoint: native harness conflicts with trusted launch",
+              "right": "checkpoint: native harness conflicts with trusted launch",
+              "wrong": "checkpoint: native harness conflicts with trusted launch"
+            }
+          },
+          "finalText": {
+            "error": "",
+            "text": "",
+            "truncated": false
+          },
+          "inspect": {
+            "error": "",
+            "metadata": {
+              "harness": "codex",
+              "threadId": "01a126e8-288d-7350-9b52-627e16048343",
+              "turnId": "fixture-turn",
+              "sha256": "dcc1a869f720596aec3b23bc1b3b4d9034513f7e48113219351cdcc035c7cc41",
+              "bytes": 10313,
+              "workspace": {
+                "revision": "013db6e565cb5c85042abcdb985abb944ec436ca",
+                "objectFormat": "sha1",
+                "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+              }
+            }
+          },
+          "restore": {
+            "error": "",
+            "metadata": {
+              "harness": "codex",
+              "threadId": "01a126e8-288d-7350-9b52-627e16048343",
+              "turnId": "fixture-turn",
+              "sha256": "dcc1a869f720596aec3b23bc1b3b4d9034513f7e48113219351cdcc035c7cc41",
+              "bytes": 10313,
+              "workspace": {
+                "revision": "013db6e565cb5c85042abcdb985abb944ec436ca",
+                "objectFormat": "sha1",
+                "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+              }
+            },
+            "tree": [
+              ". drwx------",
+              "codex drwx------",
+              "codex/sessions drwx------",
+              "codex/sessions/2026 drwx------",
+              "codex/sessions/2026/10 drwx------",
+              "codex/sessions/2026/10/10 drwx------",
+              "codex/sessions/2026/10/10/rollout-2026-10-10T18-41-51-01a126e8-288d-7350-9b52-627e16048343.jsonl -rw------- 08452b77ecdd2ab4fe9926ef7b2173e4a109ddfa95e08426626a930c674f2368",
+              "workspace drwx------",
+              "workspace/.git",
+              "workspace/.gitignore -rw------- a6c7e3c5ddd823efc8b7a30853eabc152dac866843bd7a39dc4a29e0a0eb68b3",
+              "workspace/note -rw------- 0e442b07e3772e8f5622478242ddf5f9f197bbd6a0402cd71471db4081abb291",
+              "workspace/untracked -rw------- be02c0270dc16cf866391d81369ce9b50c9bd1c9cb0834a5c2788c70b35ead2e"
+            ]
+          },
+          "workspace": {
+            "archive": {
+              "bytes": 7168,
+              "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+            },
+            "error": "",
+            "metadata": {
+              "revision": "013db6e565cb5c85042abcdb985abb944ec436ca",
+              "objectFormat": "sha1",
+              "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+            }
+          }
+        }
+      },
+      "version-2": {
+        "artifact": {
+          "bytes": 10330,
+          "sha256": "4b4ad7161d60b3e9c0177a63bf17ab872587f6afa91eee1668c20b6edf0fe121"
+        },
+        "read": {
+          "continuity": {
+            "claude-code": {
+              "malformed": "checkpoint: native harness conflicts with trusted launch",
+              "right": "checkpoint: native harness conflicts with trusted launch",
+              "wrong": "checkpoint: native harness conflicts with trusted launch"
+            },
+            "codex": {
+              "malformed": "native initial instructions do not match trusted launch",
+              "right": "native initial instructions do not match trusted launch",
+              "wrong": "native initial instructions do not match trusted launch"
+            },
+            "copilot": {
+              "malformed": "checkpoint: native harness conflicts with trusted launch",
+              "right": "checkpoint: native harness conflicts with trusted launch",
+              "wrong": "checkpoint: native harness conflicts with trusted launch"
+            },
+            "not-registered": {
+              "malformed": "checkpoint: native harness conflicts with trusted launch",
+              "right": "checkpoint: native harness conflicts with trusted launch",
+              "wrong": "checkpoint: native harness conflicts with trusted launch"
+            }
+          },
+          "finalText": {
+            "error": "",
+            "text": "",
+            "truncated": false
+          },
+          "inspect": {
+            "error": "",
+            "metadata": {
+              "harness": "codex",
+              "threadId": "01a126e8-288d-7350-9b52-627e16048343",
+              "turnId": "fixture-turn",
+              "sha256": "4b4ad7161d60b3e9c0177a63bf17ab872587f6afa91eee1668c20b6edf0fe121",
+              "bytes": 10330,
+              "workspace": {
+                "revision": "013db6e565cb5c85042abcdb985abb944ec436ca",
+                "objectFormat": "sha1",
+                "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+              }
+            }
+          },
+          "restore": {
+            "error": "",
+            "metadata": {
+              "harness": "codex",
+              "threadId": "01a126e8-288d-7350-9b52-627e16048343",
+              "turnId": "fixture-turn",
+              "sha256": "4b4ad7161d60b3e9c0177a63bf17ab872587f6afa91eee1668c20b6edf0fe121",
+              "bytes": 10330,
+              "workspace": {
+                "revision": "013db6e565cb5c85042abcdb985abb944ec436ca",
+                "objectFormat": "sha1",
+                "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+              }
+            },
+            "tree": [
+              ". drwx------",
+              "codex drwx------",
+              "codex/sessions drwx------",
+              "codex/sessions/2026 drwx------",
+              "codex/sessions/2026/10 drwx------",
+              "codex/sessions/2026/10/10 drwx------",
+              "codex/sessions/2026/10/10/rollout-2026-10-10T18-41-51-01a126e8-288d-7350-9b52-627e16048343.jsonl -rw------- 08452b77ecdd2ab4fe9926ef7b2173e4a109ddfa95e08426626a930c674f2368",
+              "workspace drwx------",
+              "workspace/.git",
+              "workspace/.gitignore -rw------- a6c7e3c5ddd823efc8b7a30853eabc152dac866843bd7a39dc4a29e0a0eb68b3",
+              "workspace/note -rw------- 0e442b07e3772e8f5622478242ddf5f9f197bbd6a0402cd71471db4081abb291",
+              "workspace/untracked -rw------- be02c0270dc16cf866391d81369ce9b50c9bd1c9cb0834a5c2788c70b35ead2e"
+            ]
+          },
+          "workspace": {
+            "archive": {
+              "bytes": 7168,
+              "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+            },
+            "error": "",
+            "metadata": {
+              "revision": "013db6e565cb5c85042abcdb985abb944ec436ca",
+              "objectFormat": "sha1",
+              "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+            }
+          }
+        }
+      }
+    },
+    "codex-instructed": {
+      "capture": {
+        "error": "",
+        "harness": "codex",
+        "native": {
+          "bytes": 735,
+          "sha256": "5c001ecf786dac632772b5203ccb44a961d2fb03e682569df777e922a66145e7"
+        },
+        "threadId": "01a126e8-288d-7350-9b52-627e16048343",
+        "turnId": "fixture-turn"
+      },
+      "kind": "codex",
+      "variants": {
+        "harness-empty": {
+          "artifact": {
+            "bytes": 10769,
+            "sha256": "febdc31ddfb9f00ac3c68929b3a346b3d5407f051a03796a092a2fd5f3078f99"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "codex": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "copilot": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: inconsistent native harness state",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "harness-other-managed": {
+          "artifact": {
+            "bytes": 10780,
+            "sha256": "0d1067a909044b26ae25c9a37f6440eef1e313de99e67867edf0156469983ba8"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "codex": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "copilot": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: inconsistent native harness state",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "harness-unregistered": {
+          "artifact": {
+            "bytes": 10783,
+            "sha256": "3ca385e4ef6e0099d621273344a493055f1231c37bcae7b7f6a065d5e98294bd"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "codex": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "copilot": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: inconsistent native harness state",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "no-state": {
+          "artifact": {
+            "bytes": 9606,
+            "sha256": "dc191e78bb9242e1b424d13a939c3e1fc6834eb19a1dc15e9301e7ba16c442c2"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "codex": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "copilot": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: inconsistent native harness state",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "two-states": {
+          "artifact": {
+            "bytes": 10842,
+            "sha256": "f2c978e35abd4d017aaeb1a248c02686e6abb58ca80a5732cc7307309b8a5a8e"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "codex": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "copilot": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: inconsistent native harness state",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "version-1-with-harness": {
+          "artifact": {
+            "bytes": 10774,
+            "sha256": "4a9bf8c3cfb22588d33e3adbe6760b990d5857d23bc4efc628ef6bcc3b642d9b"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "right": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "wrong": "checkpoint: invalid artifact: json: unknown field \"harness\""
+              },
+              "codex": {
+                "malformed": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "right": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "wrong": "checkpoint: invalid artifact: json: unknown field \"harness\""
+              },
+              "copilot": {
+                "malformed": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "right": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "wrong": "checkpoint: invalid artifact: json: unknown field \"harness\""
+              },
+              "not-registered": {
+                "malformed": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "right": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "wrong": "checkpoint: invalid artifact: json: unknown field \"harness\""
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "version-3": {
+          "artifact": {
+            "bytes": 10774,
+            "sha256": "23ad036649e9163d3b0433bd19b9a203f79fceda88ce11ce0994cb788c3659c5"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "right": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "wrong": "checkpoint: invalid artifact: checkpoint: unsupported artifact version"
+              },
+              "codex": {
+                "malformed": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "right": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "wrong": "checkpoint: invalid artifact: checkpoint: unsupported artifact version"
+              },
+              "copilot": {
+                "malformed": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "right": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "wrong": "checkpoint: invalid artifact: checkpoint: unsupported artifact version"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "right": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "wrong": "checkpoint: invalid artifact: checkpoint: unsupported artifact version"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        }
+      },
+      "version-1": {
+        "artifact": {
+          "bytes": 10757,
+          "sha256": "53d4a3aa5cb4058d1a19b9f96162b6d8a3b368fecf1d8f4bcc319818c2011aa5"
+        },
+        "read": {
+          "continuity": {
+            "claude-code": {
+              "malformed": "checkpoint: native harness conflicts with trusted launch",
+              "right": "checkpoint: native harness conflicts with trusted launch",
+              "wrong": "checkpoint: native harness conflicts with trusted launch"
+            },
+            "codex": {
+              "malformed": "native initial instructions do not match trusted launch",
+              "right": "",
+              "wrong": "native initial instructions do not match trusted launch"
+            },
+            "copilot": {
+              "malformed": "checkpoint: native harness conflicts with trusted launch",
+              "right": "checkpoint: native harness conflicts with trusted launch",
+              "wrong": "checkpoint: native harness conflicts with trusted launch"
+            },
+            "not-registered": {
+              "malformed": "checkpoint: native harness conflicts with trusted launch",
+              "right": "checkpoint: native harness conflicts with trusted launch",
+              "wrong": "checkpoint: native harness conflicts with trusted launch"
+            }
+          },
+          "finalText": {
+            "error": "",
+            "text": "Fixture reply.",
+            "truncated": false
+          },
+          "inspect": {
+            "error": "",
+            "metadata": {
+              "harness": "codex",
+              "threadId": "01a126e8-288d-7350-9b52-627e16048343",
+              "turnId": "fixture-turn",
+              "sha256": "53d4a3aa5cb4058d1a19b9f96162b6d8a3b368fecf1d8f4bcc319818c2011aa5",
+              "bytes": 10757,
+              "workspace": {
+                "revision": "013db6e565cb5c85042abcdb985abb944ec436ca",
+                "objectFormat": "sha1",
+                "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+              }
+            }
+          },
+          "restore": {
+            "error": "",
+            "metadata": {
+              "harness": "codex",
+              "threadId": "01a126e8-288d-7350-9b52-627e16048343",
+              "turnId": "fixture-turn",
+              "sha256": "53d4a3aa5cb4058d1a19b9f96162b6d8a3b368fecf1d8f4bcc319818c2011aa5",
+              "bytes": 10757,
+              "workspace": {
+                "revision": "013db6e565cb5c85042abcdb985abb944ec436ca",
+                "objectFormat": "sha1",
+                "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+              }
+            },
+            "tree": [
+              ". drwx------",
+              "codex drwx------",
+              "codex/sessions drwx------",
+              "codex/sessions/2026 drwx------",
+              "codex/sessions/2026/10 drwx------",
+              "codex/sessions/2026/10/10 drwx------",
+              "codex/sessions/2026/10/10/rollout-2026-10-10T18-41-51-01a126e8-288d-7350-9b52-627e16048343.jsonl -rw------- 5c001ecf786dac632772b5203ccb44a961d2fb03e682569df777e922a66145e7",
+              "workspace drwx------",
+              "workspace/.git",
+              "workspace/.gitignore -rw------- a6c7e3c5ddd823efc8b7a30853eabc152dac866843bd7a39dc4a29e0a0eb68b3",
+              "workspace/note -rw------- 0e442b07e3772e8f5622478242ddf5f9f197bbd6a0402cd71471db4081abb291",
+              "workspace/untracked -rw------- be02c0270dc16cf866391d81369ce9b50c9bd1c9cb0834a5c2788c70b35ead2e"
+            ]
+          },
+          "workspace": {
+            "archive": {
+              "bytes": 7168,
+              "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+            },
+            "error": "",
+            "metadata": {
+              "revision": "013db6e565cb5c85042abcdb985abb944ec436ca",
+              "objectFormat": "sha1",
+              "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+            }
+          }
+        }
+      },
+      "version-2": {
+        "artifact": {
+          "bytes": 10774,
+          "sha256": "eaad995770b3fb13a5c1c276c54d0c329f9ee1a1566b581b9b87c2d7baa9dcf0"
+        },
+        "read": {
+          "continuity": {
+            "claude-code": {
+              "malformed": "checkpoint: native harness conflicts with trusted launch",
+              "right": "checkpoint: native harness conflicts with trusted launch",
+              "wrong": "checkpoint: native harness conflicts with trusted launch"
+            },
+            "codex": {
+              "malformed": "native initial instructions do not match trusted launch",
+              "right": "",
+              "wrong": "native initial instructions do not match trusted launch"
+            },
+            "copilot": {
+              "malformed": "checkpoint: native harness conflicts with trusted launch",
+              "right": "checkpoint: native harness conflicts with trusted launch",
+              "wrong": "checkpoint: native harness conflicts with trusted launch"
+            },
+            "not-registered": {
+              "malformed": "checkpoint: native harness conflicts with trusted launch",
+              "right": "checkpoint: native harness conflicts with trusted launch",
+              "wrong": "checkpoint: native harness conflicts with trusted launch"
+            }
+          },
+          "finalText": {
+            "error": "",
+            "text": "Fixture reply.",
+            "truncated": false
+          },
+          "inspect": {
+            "error": "",
+            "metadata": {
+              "harness": "codex",
+              "threadId": "01a126e8-288d-7350-9b52-627e16048343",
+              "turnId": "fixture-turn",
+              "sha256": "eaad995770b3fb13a5c1c276c54d0c329f9ee1a1566b581b9b87c2d7baa9dcf0",
+              "bytes": 10774,
+              "workspace": {
+                "revision": "013db6e565cb5c85042abcdb985abb944ec436ca",
+                "objectFormat": "sha1",
+                "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+              }
+            }
+          },
+          "restore": {
+            "error": "",
+            "metadata": {
+              "harness": "codex",
+              "threadId": "01a126e8-288d-7350-9b52-627e16048343",
+              "turnId": "fixture-turn",
+              "sha256": "eaad995770b3fb13a5c1c276c54d0c329f9ee1a1566b581b9b87c2d7baa9dcf0",
+              "bytes": 10774,
+              "workspace": {
+                "revision": "013db6e565cb5c85042abcdb985abb944ec436ca",
+                "objectFormat": "sha1",
+                "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+              }
+            },
+            "tree": [
+              ". drwx------",
+              "codex drwx------",
+              "codex/sessions drwx------",
+              "codex/sessions/2026 drwx------",
+              "codex/sessions/2026/10 drwx------",
+              "codex/sessions/2026/10/10 drwx------",
+              "codex/sessions/2026/10/10/rollout-2026-10-10T18-41-51-01a126e8-288d-7350-9b52-627e16048343.jsonl -rw------- 5c001ecf786dac632772b5203ccb44a961d2fb03e682569df777e922a66145e7",
+              "workspace drwx------",
+              "workspace/.git",
+              "workspace/.gitignore -rw------- a6c7e3c5ddd823efc8b7a30853eabc152dac866843bd7a39dc4a29e0a0eb68b3",
+              "workspace/note -rw------- 0e442b07e3772e8f5622478242ddf5f9f197bbd6a0402cd71471db4081abb291",
+              "workspace/untracked -rw------- be02c0270dc16cf866391d81369ce9b50c9bd1c9cb0834a5c2788c70b35ead2e"
+            ]
+          },
+          "workspace": {
+            "archive": {
+              "bytes": 7168,
+              "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+            },
+            "error": "",
+            "metadata": {
+              "revision": "013db6e565cb5c85042abcdb985abb944ec436ca",
+              "objectFormat": "sha1",
+              "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+            }
+          }
+        }
+      }
+    },
+    "copilot": {
+      "capture": {
+        "error": "",
+        "harness": "copilot",
+        "native": {
+          "bytes": 41347,
+          "sha256": "fdfd15a625fe7cea5d32018fdbb7712cc158aef47c5f3af8523132fd6f28ec53"
+        },
+        "threadId": "0a7c5e1e-3b2d-4c4f-9a8b-1f2e3d4c5b6a",
+        "turnId": "6d1df198-7b54-4c2c-ad56-a6c689e02344"
+      },
+      "kind": "copilot",
+      "variants": {
+        "harness-empty": {
+          "artifact": {
+            "bytes": 64807,
+            "sha256": "f57ac41c57812f766478c1b268cc13f430cdd3578c9d0cebb796ac1ecb3f4b9e"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "codex": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "copilot": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: inconsistent native harness state",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "harness-other-managed": {
+          "artifact": {
+            "bytes": 64812,
+            "sha256": "3acf6900b1d990d4b72e034a626e502c49fd1cc5a687061c06db449402d914bf"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "codex": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "copilot": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: inconsistent native harness state",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "harness-unregistered": {
+          "artifact": {
+            "bytes": 64821,
+            "sha256": "dba4baddc771cb16291d4d67f83f362d06b89ac08f29a003a9d149bf28343b69"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "codex": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "copilot": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: inconsistent native harness state",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "no-state": {
+          "artifact": {
+            "bytes": 9608,
+            "sha256": "035893ba00b9d086932abb92d49799618bebd98b2ba37d79026a807b7f28d951"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "codex": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "copilot": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: inconsistent native harness state",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "two-states": {
+          "artifact": {
+            "bytes": 64878,
+            "sha256": "78ae76859346824801c4a85885a4f55178db87650ca5111f5d96f0141436bd42"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "codex": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "copilot": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: inconsistent native harness state",
+                "right": "checkpoint: inconsistent native harness state",
+                "wrong": "checkpoint: inconsistent native harness state"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: inconsistent native harness state",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: inconsistent native harness state",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "version-1-with-harness": {
+          "artifact": {
+            "bytes": 64814,
+            "sha256": "63dc97f708118aee16b0cb20b46bf90c4923b75770180cb5047d1901dae300f8"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "right": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "wrong": "checkpoint: invalid artifact: json: unknown field \"harness\""
+              },
+              "codex": {
+                "malformed": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "right": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "wrong": "checkpoint: invalid artifact: json: unknown field \"harness\""
+              },
+              "copilot": {
+                "malformed": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "right": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "wrong": "checkpoint: invalid artifact: json: unknown field \"harness\""
+              },
+              "not-registered": {
+                "malformed": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "right": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+                "wrong": "checkpoint: invalid artifact: json: unknown field \"harness\""
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: invalid artifact: json: unknown field \"harness\"",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        },
+        "version-3": {
+          "artifact": {
+            "bytes": 64814,
+            "sha256": "c88740bae84d99318b2bd3076448b9d13c8c2fa4222a89c897d298fc41c7a943"
+          },
+          "read": {
+            "continuity": {
+              "claude-code": {
+                "malformed": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "right": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "wrong": "checkpoint: invalid artifact: checkpoint: unsupported artifact version"
+              },
+              "codex": {
+                "malformed": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "right": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "wrong": "checkpoint: invalid artifact: checkpoint: unsupported artifact version"
+              },
+              "copilot": {
+                "malformed": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "right": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "wrong": "checkpoint: invalid artifact: checkpoint: unsupported artifact version"
+              },
+              "not-registered": {
+                "malformed": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "right": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+                "wrong": "checkpoint: invalid artifact: checkpoint: unsupported artifact version"
+              }
+            },
+            "finalText": {
+              "error": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+              "text": "",
+              "truncated": false
+            },
+            "inspect": {
+              "error": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "restore": {
+              "error": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+              "metadata": {
+                "harness": "",
+                "threadId": "",
+                "turnId": "",
+                "sha256": "",
+                "bytes": 0,
+                "workspace": {
+                  "revision": "",
+                  "objectFormat": "",
+                  "sha256": ""
+                }
+              }
+            },
+            "workspace": {
+              "archive": {
+                "bytes": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "error": "checkpoint: invalid artifact: checkpoint: unsupported artifact version",
+              "metadata": {
+                "revision": "",
+                "objectFormat": "",
+                "sha256": ""
+              }
+            }
+          }
+        }
+      },
+      "version-2": {
+        "artifact": {
+          "bytes": 64814,
+          "sha256": "ab890146a3b696944d3e20c7ac8b0cc8cdabe6568093b5b57805c1273c2fa738"
+        },
+        "read": {
+          "continuity": {
+            "claude-code": {
+              "malformed": "checkpoint: native harness conflicts with trusted launch",
+              "right": "checkpoint: native harness conflicts with trusted launch",
+              "wrong": "checkpoint: native harness conflicts with trusted launch"
+            },
+            "codex": {
+              "malformed": "checkpoint: native harness conflicts with trusted launch",
+              "right": "checkpoint: native harness conflicts with trusted launch",
+              "wrong": "checkpoint: native harness conflicts with trusted launch"
+            },
+            "copilot": {
+              "malformed": "checkpoint: invalid trusted instruction digest",
+              "right": "",
+              "wrong": ""
+            },
+            "not-registered": {
+              "malformed": "checkpoint: native harness conflicts with trusted launch",
+              "right": "checkpoint: native harness conflicts with trusted launch",
+              "wrong": "checkpoint: native harness conflicts with trusted launch"
+            }
+          },
+          "finalText": {
+            "error": "",
+            "text": "Fixture reply.",
+            "truncated": false
+          },
+          "inspect": {
+            "error": "",
+            "metadata": {
+              "harness": "copilot",
+              "threadId": "0a7c5e1e-3b2d-4c4f-9a8b-1f2e3d4c5b6a",
+              "turnId": "6d1df198-7b54-4c2c-ad56-a6c689e02344",
+              "sha256": "ab890146a3b696944d3e20c7ac8b0cc8cdabe6568093b5b57805c1273c2fa738",
+              "bytes": 64814,
+              "workspace": {
+                "revision": "013db6e565cb5c85042abcdb985abb944ec436ca",
+                "objectFormat": "sha1",
+                "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+              }
+            }
+          },
+          "restore": {
+            "error": "",
+            "metadata": {
+              "harness": "copilot",
+              "threadId": "0a7c5e1e-3b2d-4c4f-9a8b-1f2e3d4c5b6a",
+              "turnId": "6d1df198-7b54-4c2c-ad56-a6c689e02344",
+              "sha256": "ab890146a3b696944d3e20c7ac8b0cc8cdabe6568093b5b57805c1273c2fa738",
+              "bytes": 64814,
+              "workspace": {
+                "revision": "013db6e565cb5c85042abcdb985abb944ec436ca",
+                "objectFormat": "sha1",
+                "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+              }
+            },
+            "tree": [
+              ". drwx------",
+              "copilot drwx------",
+              "copilot/session-state drwx------",
+              "copilot/session-state/0a7c5e1e-3b2d-4c4f-9a8b-1f2e3d4c5b6a drwx------",
+              "copilot/session-state/0a7c5e1e-3b2d-4c4f-9a8b-1f2e3d4c5b6a/events.jsonl -rw------- fdfd15a625fe7cea5d32018fdbb7712cc158aef47c5f3af8523132fd6f28ec53",
+              "workspace drwx------",
+              "workspace/.git",
+              "workspace/.gitignore -rw------- a6c7e3c5ddd823efc8b7a30853eabc152dac866843bd7a39dc4a29e0a0eb68b3",
+              "workspace/note -rw------- 0e442b07e3772e8f5622478242ddf5f9f197bbd6a0402cd71471db4081abb291",
+              "workspace/untracked -rw------- be02c0270dc16cf866391d81369ce9b50c9bd1c9cb0834a5c2788c70b35ead2e"
+            ]
+          },
+          "workspace": {
+            "archive": {
+              "bytes": 7168,
+              "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+            },
+            "error": "",
+            "metadata": {
+              "revision": "013db6e565cb5c85042abcdb985abb944ec436ca",
+              "objectFormat": "sha1",
+              "sha256": "fcf78d37f358913f9b17785d222edf7e264d66523a3eb19e90f346e51b623ee0"
+            }
+          }
+        }
+      }
+    }
+  },
+  "refusedCaptures": {
+    "claude-code": "stopped native state refused: lstat \u003chome\u003e/projects: no such file or directory",
+    "codex": "stopped native state refused: lstat \u003chome\u003e/sessions: no such file or directory",
+    "copilot": "stopped native state refused: lstat \u003chome\u003e/session-state: no such file or directory",
+    "not-registered": "checkpoint: unsupported native harness"
+  }
+}

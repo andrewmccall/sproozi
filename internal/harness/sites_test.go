@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -14,19 +15,13 @@ import (
 )
 
 // behaviourSites are the functions and declarations outside the registry that
-// still branch on a managed kind. Each is behaviour waiting for the behaviour
-// slice (ADR 0039 keeps behaviour in code), keyed "file: scope". A new
-// harness adds cases inside these scopes without editing this list; a branch
-// in any other scope fails TestNoHarnessFactOutsideTheRegistry.
+// still branch on a managed kind, keyed "file: scope": behaviour that stays in
+// code (ADR 0072). A new harness adds its case inside each of these scopes
+// without editing this list, and TestEveryBehaviourSiteNamesEveryManagedKind
+// fails until it has; a branch in any other scope fails
+// TestNoHarnessFactOutsideTheRegistry.
 var behaviourSites = map[string]string{
-	"internal/harness/native_args.go: ValidateNativeArgs":    "parses Codex's -c/--config overrides",
-	"internal/harness/native_args.go: NativeArgsSelectModel": "parses Codex's -m and -c model=",
-	"internal/checkpoint/artifact.go: CaptureStopped":        "captures each native state format",
-	"internal/checkpoint/artifact.go: nativeArtifact.native": "checks each native state format",
-	"internal/checkpoint/artifact.go: Restore":               "restores each native state format",
-	"cmd/native-session/launch.go: nativeAdapters":           "the supervisor adapter of each managed kind",
-	"cmd/native-session/main.go: server.waitingFor":          "graceful-stop wait text from each kind's turn observation",
-	"cmd/native-session/claude.go: server.claudeHook":        "Claude Code's lifecycle hooks",
+	"cmd/native-session/launch.go: nativeAdapters": "the supervisor adapter of each managed kind",
 }
 
 // literalScanRoots are the packages that implement the managed harnesses, where
@@ -43,6 +38,8 @@ type harnessSite struct {
 	scope string
 	line  int
 	text  string
+	// kinds are the kind constants the branch names.
+	kinds []string
 }
 
 // kindConstants names the constants a file declares with type NativeKind.
@@ -63,6 +60,31 @@ func kindConstants(f *ast.File) []string {
 		}
 	}
 	return names
+}
+
+// kindValues maps each NativeKind constant a file declares to its value.
+func kindValues(f *ast.File) map[string]string {
+	values := map[string]string{}
+	for _, decl := range f.Decls {
+		g, ok := decl.(*ast.GenDecl)
+		if !ok || g.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range g.Specs {
+			v := spec.(*ast.ValueSpec)
+			if t, ok := v.Type.(*ast.Ident); !ok || t.Name != kindTypeName {
+				continue
+			}
+			for i, n := range v.Names {
+				if i < len(v.Values) {
+					if lit, ok := v.Values[i].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+						values[n.Name], _ = strconv.Unquote(lit.Value)
+					}
+				}
+			}
+		}
+	}
+	return values
 }
 
 // declScope names a top-level declaration: a function, a method as
@@ -100,7 +122,7 @@ func declScope(decl ast.Decl) string {
 // index, lists one in a []NativeKind literal, or converts a string literal to
 // a NativeKind.
 func kindBranches(fset *token.FileSet, f *ast.File, kinds []string) []harnessSite {
-	isKind := func(e ast.Expr) bool {
+	kindName := func(e ast.Expr) string {
 		for {
 			p, ok := e.(*ast.ParenExpr)
 			if !ok {
@@ -108,63 +130,84 @@ func kindBranches(fset *token.FileSet, f *ast.File, kinds []string) []harnessSit
 			}
 			e = p.X
 		}
+		var name string
 		switch x := e.(type) {
 		case *ast.Ident:
-			return slices.Contains(kinds, x.Name)
+			name = x.Name
 		case *ast.SelectorExpr:
-			return slices.Contains(kinds, x.Sel.Name)
+			name = x.Sel.Name
 		}
-		return false
+		if slices.Contains(kinds, name) {
+			return name
+		}
+		return ""
 	}
-	isKindType := func(e ast.Expr) bool {
-		switch x := e.(type) {
-		case *ast.Ident:
-			return x.Name == kindTypeName
-		case *ast.SelectorExpr:
-			return x.Sel.Name == kindTypeName
+	isKind := func(e ast.Expr) bool { return kindName(e) != "" }
+	named := func(exprs ...ast.Expr) []string {
+		var names []string
+		for _, e := range exprs {
+			if name := kindName(e); name != "" {
+				names = append(names, name)
+			}
 		}
-		return false
+		return names
 	}
 	var sites []harnessSite
 	for _, decl := range f.Decls {
 		scope := declScope(decl)
 		ast.Inspect(decl, func(n ast.Node) bool {
-			var hit ast.Node
-			switch x := n.(type) {
-			case *ast.CompositeLit:
-				if a, ok := x.Type.(*ast.ArrayType); ok && isKindType(a.Elt) && slices.ContainsFunc(x.Elts, isKind) {
-					hit = x
-				}
-			case *ast.IndexExpr:
-				if isKind(x.Index) {
-					hit = x
-				}
-			case *ast.CallExpr:
-				if len(x.Args) == 1 && isKindType(x.Fun) {
-					if lit, ok := x.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
-						hit = x
-					}
-				}
-			case *ast.BinaryExpr:
-				if (x.Op == token.EQL || x.Op == token.NEQ) && (isKind(x.X) || isKind(x.Y)) {
-					hit = x
-				}
-			case *ast.CaseClause:
-				if slices.ContainsFunc(x.List, isKind) {
-					hit = x
-				}
-			case *ast.KeyValueExpr:
-				if isKind(x.Key) {
-					hit = x
-				}
-			}
-			if hit != nil {
-				sites = append(sites, harnessSite{scope: scope, line: fset.Position(hit.Pos()).Line})
+			if hit, names := kindBranch(n, isKind, named); hit != nil {
+				sites = append(sites, harnessSite{scope: scope, line: fset.Position(hit.Pos()).Line, kinds: names})
 			}
 			return true
 		})
 	}
 	return sites
+}
+
+// isKindType reports that e names the NativeKind type.
+func isKindType(e ast.Expr) bool {
+	switch x := e.(type) {
+	case *ast.Ident:
+		return x.Name == kindTypeName
+	case *ast.SelectorExpr:
+		return x.Sel.Name == kindTypeName
+	}
+	return false
+}
+
+// kindBranch reports n when it is one of the forms kindBranches flags, with
+// the kind constants it names.
+func kindBranch(n ast.Node, isKind func(ast.Expr) bool, named func(...ast.Expr) []string) (ast.Node, []string) {
+	switch x := n.(type) {
+	case *ast.CompositeLit:
+		if a, ok := x.Type.(*ast.ArrayType); ok && isKindType(a.Elt) && slices.ContainsFunc(x.Elts, isKind) {
+			return x, named(x.Elts...)
+		}
+	case *ast.IndexExpr:
+		if isKind(x.Index) {
+			return x, named(x.Index)
+		}
+	case *ast.CallExpr:
+		if len(x.Args) == 1 && isKindType(x.Fun) {
+			if lit, ok := x.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+				return x, nil
+			}
+		}
+	case *ast.BinaryExpr:
+		if (x.Op == token.EQL || x.Op == token.NEQ) && (isKind(x.X) || isKind(x.Y)) {
+			return x, named(x.X, x.Y)
+		}
+	case *ast.CaseClause:
+		if slices.ContainsFunc(x.List, isKind) {
+			return x, named(x.List...)
+		}
+	case *ast.KeyValueExpr:
+		if isKind(x.Key) {
+			return x, named(x.Key)
+		}
+	}
+	return nil, nil
 }
 
 // registryValues are the registered values that harness code must read from
@@ -282,8 +325,8 @@ func TestNoHarnessFactOutsideTheRegistry(t *testing.T) {
 			seen[key] = true
 			if _, ok := behaviourSites[key]; !ok {
 				t.Errorf("%s:%d (%s) branches on a managed kind; read the fact from the harness's registry entry "+
-					"in %s, adding a field if it has none (docs/contributing/add-a-harness.md). Only behaviour "+
-					"waiting for the behaviour slice belongs in behaviourSites in internal/harness/sites_test.go",
+					"in %s, adding a field if it has none (docs/contributing/add-a-harness.md). Only behaviour that stays "+
+					"in code (ADR 0072) belongs in behaviourSites in internal/harness/sites_test.go",
 					name, site.line, site.scope, registryFile)
 			}
 		}
@@ -300,6 +343,69 @@ func TestNoHarnessFactOutsideTheRegistry(t *testing.T) {
 		for _, site := range repeatedValues(fset, f) {
 			t.Errorf("%s:%d (%s) repeats the registry value %q; read it from the harness's entry in %s",
 				name, site.line, site.scope, site.text, registryFile)
+		}
+	}
+}
+
+// harnessKinds reads the NativeKind constants internal/harness declares, by
+// name, with their values.
+func harnessKinds(t *testing.T, fset *token.FileSet) map[string]string {
+	t.Helper()
+	kinds := map[string]string{}
+	for name, f := range goFiles(t, fset, "internal/harness") {
+		if strings.HasPrefix(name, "internal/harness/") && strings.Count(name, "/") == 2 {
+			maps.Copy(kinds, kindValues(f))
+		}
+	}
+	return kinds
+}
+
+// Every scope still in behaviourSites names every managed kind, so a new
+// harness cannot be silently absent from a switch or table that remains: a
+// kind it does not name would take its default, or nothing. The kinds are
+// the registry's managed tier; each needs a NativeKind constant in
+// internal/harness for the scan to see it.
+//
+// While nativeAdapters is the only scope listed, this repeats
+// TestEveryManagedKindHasAnAdapter (cmd/native-session); it is here for any
+// scope added to behaviourSites later. It checks only that the scope names
+// the kind's constant somewhere in a form the scan flags, such as a map
+// index, not that the scope has a case for the kind that does the right
+// thing.
+func TestEveryBehaviourSiteNamesEveryManagedKind(t *testing.T) {
+	fset := token.NewFileSet()
+	constants := harnessKinds(t, fset)
+	constantOf := map[NativeKind]string{}
+	for name, value := range constants {
+		constantOf[NativeKind(value)] = name
+	}
+	named := map[string]map[string]bool{}
+	for name, f := range goFiles(t, fset, "internal", "cmd", "api", "test") {
+		for _, site := range kindBranches(fset, f, slices.Collect(maps.Keys(constants))) {
+			key := name + ": " + site.scope
+			if _, ok := behaviourSites[key]; !ok {
+				continue // TestNoHarnessFactOutsideTheRegistry reports it.
+			}
+			if named[key] == nil {
+				named[key] = map[string]bool{}
+			}
+			for _, kind := range site.kinds {
+				named[key][kind] = true
+			}
+		}
+	}
+	for _, kind := range ManagedKinds() {
+		constant := constantOf[kind]
+		if constant == "" {
+			t.Errorf("managed harness %q has no NativeKind constant in internal/harness; declare one beside "+
+				"NativeCodex in internal/harness/native_kind.go and use it in its registry entry", kind)
+			continue
+		}
+		for _, key := range slices.Sorted(maps.Keys(behaviourSites)) {
+			if !named[key][constant] {
+				t.Errorf("%s (%s) has no case for managed harness %q: name %s there "+
+					"(docs/contributing/add-a-harness.md)", key, behaviourSites[key], kind, constant)
+			}
 		}
 	}
 }

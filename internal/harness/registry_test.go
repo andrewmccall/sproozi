@@ -317,11 +317,17 @@ var reservedEnvExempt = map[NativeKind]string{
 // wrong: a managed harness supplies every one, so a new one never silently
 // takes another's value, and an AgentRun-only harness supplies none.
 func managedFactProblems(h Harness) []string {
+	if h.Native == "" && (h.ModelFlag.declared() || h.ConfigOverride.Flag.declared()) {
+		return []string{"has no Native kind, so it must not set ModelFlag or ConfigOverride"}
+	}
 	if h.Native == "" {
 		if h.DisplayName != "" || h.Product != "" || h.Executable != "" || h.InstructionsFile != "" || h.KeyEnv != "" ||
 			h.RefusedFlags != nil || h.ReservedEnv != nil || h.RemoteExecutor || h.TakesTask || h.Default ||
 			h.TokenEnv != "" || h.KeyOptions != nil || h.SignInOptions != nil || h.SignInChoices != nil {
 			return []string{"has no Native kind, so it must not set the managed facts"}
+		}
+		if h.CaptureState != nil {
+			return []string{"has no Native kind, so it must not set CaptureState"}
 		}
 		return nil
 	}
@@ -329,23 +335,38 @@ func managedFactProblems(h Harness) []string {
 	for _, fact := range []struct {
 		name    string
 		missing bool
+		// or is what a harness without the fact supplies instead.
+		or string
 	}{
-		{"DisplayName", h.DisplayName == ""},
-		{"Product", h.Product == ""},
-		{"Executable", !strings.HasPrefix(h.Executable, "/")},
-		{"InstructionsFile", h.InstructionsFile == ""},
-		{"KeyEnv", h.KeyEnv == ""},
-		{"RefusedFlags", len(h.RefusedFlags) == 0},
-		{"ReservedEnv", len(h.ReservedEnv) == 0 && reservedEnvExempt[h.Native] == ""},
-		{"SignInChoices", len(h.SignInChoices) == 0},
+		{"DisplayName", h.DisplayName == "", ""},
+		{"Product", h.Product == "", ""},
+		{"Executable", !strings.HasPrefix(h.Executable, "/"), ""},
+		{"CaptureState", h.CaptureState == nil, ""},
+		{"InstructionsFile", h.InstructionsFile == "", ""},
+		{"KeyEnv", h.KeyEnv == "", ""},
+		{"ModelFlag", !h.ModelFlag.declared() || !h.ModelFlag.value, ""},
+		{"ConfigOverride", !h.ConfigOverride.Flag.declared() && configOverrideExempt[h.Native] == "",
+			"or, for a client with no option that sets one configuration key, an entry with that reason in " +
+				"configOverrideExempt in internal/harness/facts_test.go"},
+		{"RefusedFlags", len(h.RefusedFlags) == 0, ""},
+		{"ReservedEnv", len(h.ReservedEnv) == 0 && reservedEnvExempt[h.Native] == "",
+			"or an entry with its reason in reservedEnvExempt in internal/harness/registry_test.go"},
+		{"SignInChoices", len(h.SignInChoices) == 0, ""},
 	} {
 		if fact.missing {
-			problems = append(problems, "needs "+fact.name+"; a managed harness must supply every fact, "+
+			name := fact.name
+			if fact.or != "" {
+				name += ", " + fact.or + ","
+			}
+			problems = append(problems, "needs "+name+"; a managed harness must supply every fact, "+
 				"see docs/contributing/add-a-harness.md")
 		}
 	}
 	if (h.TokenEnv == "") != (h.TokenPlaceholder == "") {
 		problems = append(problems, "must set TokenEnv and TokenPlaceholder together")
+	}
+	if o := h.ConfigOverride; o.Flag.declared() != (len(o.ControlledKeys) != 0) || o.Flag.declared() != (o.ModelKey != "") {
+		problems = append(problems, "must set ConfigOverride's Flag, ControlledKeys and ModelKey together")
 	}
 	return append(problems, signInChoiceProblems(h)...)
 }

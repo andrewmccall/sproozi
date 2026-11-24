@@ -30,6 +30,13 @@ func TestManagedFactProblemsNamesEachBrokenRule(t *testing.T) {
 		{"relative Executable", func(h *Harness) { h.Executable = "bin/agent" }, "needs Executable"},
 		{"no InstructionsFile", func(h *Harness) { h.InstructionsFile = "" }, "needs InstructionsFile"},
 		{"no KeyEnv", func(h *Harness) { h.KeyEnv = "" }, "needs KeyEnv"},
+		{"no ModelFlag", func(h *Harness) { h.ModelFlag = controlledFlag{} }, "needs ModelFlag"},
+		{"a ModelFlag without a value", func(h *Harness) { h.ModelFlag.value = false }, "needs ModelFlag"},
+		{"a ConfigOverride without its keys", func(h *Harness) { h.ConfigOverride.ControlledKeys = nil },
+			"ConfigOverride's Flag, ControlledKeys and ModelKey together"},
+		{"no ConfigOverride", func(h *Harness) { h.ConfigOverride = ConfigOverride{} },
+			"needs ConfigOverride, or, for a client with no option that sets one configuration key, an entry with that " +
+				"reason in configOverrideExempt"},
 		{"no RefusedFlags", func(h *Harness) { h.RefusedFlags = nil }, "needs RefusedFlags"},
 		{"no ReservedEnv", func(h *Harness) { h.ReservedEnv = nil }, "needs ReservedEnv"},
 		{"no SignInChoices", func(h *Harness) { h.SignInChoices = nil }, "needs SignInChoices"},
@@ -66,7 +73,37 @@ func TestManagedFactProblemsNamesEachBrokenRule(t *testing.T) {
 		t.Errorf("an AgentRun-only entry with SignInChoices: %q; want one problem naming its missing Native kind",
 			problems)
 	}
+	agentRun.SignInChoices, agentRun.ModelFlag = nil, modelFlag
+	if problems := managedFactProblems(agentRun); len(problems) != 1 || !strings.Contains(problems[0], "no Native kind") {
+		t.Errorf("an AgentRun-only entry with a ModelFlag: %q; want one problem naming its missing Native kind",
+			problems)
+	}
 }
+
+// configOverrideExempt names the managed harnesses that declare no
+// ConfigOverride, and why: a harness whose arguments can set one
+// configuration key must declare that option, so its controlled keys are
+// refused.
+var configOverrideExempt = map[NativeKind]string{
+	NativeClaude: "its configuration options are --settings and --setting-sources, which RefusedFlags refuses as " +
+		"whole options; it has no option that sets one key",
+	NativeCopilot: "not established from this repository: its RefusedFlags refuse its MCP and tool options as whole " +
+		"options, and Sproozi writes its settings.json and config.json itself, but whether the client has an " +
+		"option that sets one configuration key has not been checked",
+}
+
+// An exemption names a managed harness that declares no ConfigOverride.
+func TestConfigOverrideExemptionsAreCurrent(t *testing.T) {
+	for kind := range configOverrideExempt {
+		if h, err := Managed(kind); err != nil || h.ConfigOverride.Flag.declared() {
+			t.Errorf("configOverrideExempt names %q, which is not a managed harness without a ConfigOverride; "+
+				"remove it", kind)
+		}
+	}
+}
+
+// declared reports that the option has a spelling.
+func (f controlledFlag) declared() bool { return len(f.long) != 0 || f.short != "" }
 
 // Exactly one managed harness is the default: none and two are each refused,
 // and a default on an AgentRun-only entry does not count.

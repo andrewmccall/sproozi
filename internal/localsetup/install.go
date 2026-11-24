@@ -295,7 +295,10 @@ func (i *installer) prepareHarness(ctx context.Context) error {
 			"leave out --sign-in and give it a provider key")
 	}
 	mechanism := chooseMechanism(o, *i.selected, keyGiven)
-	provider := ProviderFor(i.selected.Harness, mechanism)
+	provider, err := ProviderFor(i.selected.Harness, mechanism)
+	if err != nil {
+		return fail("harness", err, "use --harness "+harness.ManagedKindList())
+	}
 	i.selected.ProviderURL = providerURL(o.ProviderURL, i.selected.ProviderURL, provider)
 	// An explicit CA bundle replaces the stored one on every run.
 	if o.ProviderCAFile != "" {
@@ -309,14 +312,8 @@ func (i *installer) prepareHarness(ctx context.Context) error {
 	if o.ChatGPT {
 		return i.signInChatGPT(ctx, provider)
 	}
-	if o.Login != "" && mechanism != harness.CredentialSignIn {
-		return fail("harness", fmt.Errorf("--login names a login of a harness that signs in itself, but %s uses a "+
-			"credential the gateway holds", o.Harness), "add --sign-in")
-	}
-	if o.Login != "" && o.Login != harness.DefaultLogin && !slices.Contains(i.selected.Logins, o.Login) {
-		i.selected.Logins = append(i.selected.Logins, o.Login)
-		i.step("%s has a login %q; start a session on it with: sproozi run --harness %s --login %s",
-			o.Harness, o.Login, o.Harness, o.Login)
+	if err = i.addLogin(mechanism); err != nil {
+		return err
 	}
 	if mechanism == harness.CredentialSignIn {
 		// The harness signs in in its first session; the gateway forwards
@@ -374,6 +371,23 @@ func chooseMechanism(o Options, current Harness, keyGiven bool) harness.NativeCr
 	return harness.CredentialKey
 }
 
+// addLogin refuses --login for a harness that uses a credential the gateway
+// holds, and records a named login --login gives a harness that signs in
+// itself.
+func (i *installer) addLogin(mechanism harness.NativeCredential) error {
+	o := i.o
+	if o.Login != "" && mechanism != harness.CredentialSignIn {
+		return fail("harness", fmt.Errorf("--login names a login of a harness that signs in itself, but %s uses a "+
+			"credential the gateway holds", o.Harness), "add --sign-in")
+	}
+	if o.Login != "" && o.Login != harness.DefaultLogin && !slices.Contains(i.selected.Logins, o.Login) {
+		i.selected.Logins = append(i.selected.Logins, o.Login)
+		i.step("%s has a login %q; start a session on it with: sproozi run --harness %s --login %s",
+			o.Harness, o.Login, o.Harness, o.Login)
+	}
+	return nil
+}
+
 // providerURL is the harness's provider URL: the flag's, or a default that
 // follows the mechanism, such as Copilot's plan host when it signs in. A
 // private endpoint stays as configured.
@@ -422,7 +436,10 @@ func (i *installer) addHarness() error {
 	if err != nil {
 		return err
 	}
-	provider := ProviderFor(o.Harness, harness.CredentialKey)
+	provider, err := ProviderFor(o.Harness, harness.CredentialKey)
+	if err != nil {
+		return fail("harness", err, "use --harness "+harness.ManagedKindList())
+	}
 	name := "local"
 	if len(i.inst.Harnesses) > 0 {
 		directory, _ := harness.NativeDirectory(o.Harness)

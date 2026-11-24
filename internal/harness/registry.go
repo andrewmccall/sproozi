@@ -83,6 +83,14 @@ type Harness struct {
 	// RefusedFlags are the command-line options Sproozi controls; a user's
 	// harness arguments may not set them (see ValidateNativeArgs).
 	RefusedFlags []controlledFlag
+	// ModelFlag is the command-line option that chooses the model; a user's
+	// harness arguments that set it replace the configured model (see
+	// NativeArgsSelectModel).
+	ModelFlag controlledFlag
+	// ConfigOverride is the option that sets one configuration key, with
+	// the keys Sproozi sets, when the harness has one (Codex's -c); the zero
+	// value when it has none.
+	ConfigOverride ConfigOverride
 	// ReservedEnv are the variables the supervisor sets for this harness and a
 	// launch's explicit environment may not replace, besides the fixed ones
 	// (HOME, PWD, KUBECONFIG). A harness may declare none only with a reason in
@@ -97,6 +105,10 @@ type Harness struct {
 	// task's completion is bound to its prompt's turn by the supervisor's
 	// UserPromptSubmit hook (ADR 0057).
 	RemoteExecutor bool
+	// CaptureState captures the kind's conversation from a stopped native
+	// home, for the workspace at workspace, as the ConversationState a checkpoint
+	// carries (internal/checkpoint).
+	CaptureState func(home, workspace, threadID string, maxBytes int64) (ConversationState, error)
 
 	// TakesTask: the supervisor submits a task as the launch's prompt and
 	// binds completion to that prompt's turn: Codex by the task text in its
@@ -198,14 +210,6 @@ const (
 	ProtocolAnthropic ModelProtocol = "anthropic"
 )
 
-// InspectionHost is the provider host the gateway inspects for the protocol.
-func (p ModelProtocol) InspectionHost() string {
-	if p == ProtocolAnthropic {
-		return "api.anthropic.com"
-	}
-	return "api.openai.com"
-}
-
 // codexKeyOptions point stock Codex at the OpenAI Responses API through the
 // gateway with the worker's placeholder key, and trust the managed workspace.
 var codexKeyOptions = []string{
@@ -242,7 +246,9 @@ var registry = []Harness{
 		SignInFile: "auth.json", StateProvesCompletion: true,
 		DisplayName: "Codex", Product: "OpenAI Codex CLI", Executable: "/usr/local/bin/codex", InstructionsFile: "AGENTS.md",
 		KeyEnv: nativeOpenAIKey, RunKeyEnv: nativeOpenAIKey, RefusedFlags: codexControlled, ReservedEnv: []string{"CODEX_HOME"},
+		ModelFlag: codexModelFlag, ConfigOverride: codexConfigOverride,
 		RemoteExecutor: true, TakesTask: true, Default: true, KeyOptions: codexKeyOptions, SignInOptions: []string{codexTrust},
+		CaptureState: captureCodex,
 		SignInChoices: []SignInChoice{
 			{Label: "An OpenAI API key, held by the gateway", Answer: AnswerKey},
 			{Label: "A ChatGPT plan, signed in now in your browser and held by the gateway",
@@ -254,6 +260,7 @@ var registry = []Harness{
 		SignInFile:  ".credentials.json",
 		DisplayName: "Claude Code", Product: "Anthropic Claude Code", Executable: "/usr/local/bin/claude", InstructionsFile: "CLAUDE.md",
 		KeyEnv: nativeAnthropicKey, RefusedFlags: claudeControlled, RemoteExecutor: true, TakesTask: true,
+		ModelFlag: modelFlag,
 		ReservedEnv: []string{"CLAUDE_CONFIG_DIR", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_AUTOUPDATER",
 			"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"},
 		SignInChoices: []SignInChoice{
@@ -261,6 +268,7 @@ var registry = []Harness{
 			{Label: `A sign-in token from "claude setup-token", held by the gateway`, Answer: AnswerToken},
 			{Label: "Claude Code signs in itself with /login in its first session", Answer: AnswerSignIn},
 		},
+		CaptureState: captureClaude,
 		RequestFiles: true, Loader: NativeMCP, LaunchFiles: launchFilesNamed("claude-launch.py"),
 		MCP: MCPFormat{File: "claude-mcp.json", Field: mcpServersField, Entry: func(name, address string) (string, any) {
 			return name, map[string]any{connectionType: httpTransport, connectionURL: address}
@@ -280,6 +288,8 @@ var registry = []Harness{
 			{Label: "A GitHub token with Copilot access, held by the gateway", Answer: AnswerToken},
 			{Label: "An OpenAI API key, held by the gateway (no Copilot plan needed)", Answer: AnswerKey},
 		},
+		CaptureState: captureCopilot,
+		ModelFlag:    modelFlag,
 		RequestFiles: true, Loader: NativeMCP,
 		MCP: MCPFormat{File: "copilot-mcp.json", Field: mcpServersField, Entry: func(name, address string) (string, any) {
 			return name, map[string]any{connectionType: httpTransport, connectionURL: address, "tools": []string{"*"}}
