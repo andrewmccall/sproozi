@@ -325,6 +325,25 @@ checkpoint until it stops. A stop, a cancellation and a task's completion are
 never refused for space: what they keep was reserved, and refusing them would
 lose work.
 
+Admission fails closed when it cannot check the bound. A session whose
+record (`directory/work`) or journal (`directory/sessions`) is there but cannot
+be read is not taken to reserve nothing: the submission or resume is refused
+as `unavailable`, and nothing changed. The causes are a file the executor
+cannot open or read (wrong owner, permission bits that allow group or other
+access, I/O errors, too many open files), a file that is not a regular file
+(a directory, a symbolic link), a file over its size bound, and a coordinator
+that is closed. The executor's log names the work session:
+`Could not determine reserved storage for work session <id>`. Restore the
+file's owner and mode (private to the executor's user) or the storage, then
+repeat the request. `remove` cannot clear such a session: it reads the record
+and journal first and fails the same way.
+
+These reserve nothing and do not refuse: a session removed while admission
+counts, and a record or journal that reads but is not valid (it does not
+parse, has trailing data, names another session or, for a journal, another
+execution, or fails its checks). Nothing
+can commit a checkpoint for such a session.
+
 Outside the bound: removal marks (below), and scratch space. Validating an
 upload before admission, and capturing a revision or an empty workspace for
 a task after it, each write up to `maxCheckpointBytes` under

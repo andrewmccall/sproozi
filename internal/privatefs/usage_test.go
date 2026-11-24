@@ -181,6 +181,25 @@ func TestUsageCountsWhatItFinds(t *testing.T) {
 	}
 }
 
+// A file nobody can read is counted by its size: the sum examines sizes
+// only, with lstat, which needs no access to the file (so it holds for root
+// and on Windows too). Admission's own refusal of a record it cannot read is
+// the owner's, not this sum's.
+func TestUsageCountsAFileNobodyCanRead(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "unreadable")
+	writeSized(t, path, 5)
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+	size, err := Usage(dir, nil)
+	if err != nil || size != 5 {
+		t.Fatalf("Usage = %d, %v; want 5, no error", size, err)
+	}
+}
+
 // Only an entry the listing found and that is gone when examined is
 // skipped: a root that is missing, or that goes after it was examined, still
 // fails the sum.

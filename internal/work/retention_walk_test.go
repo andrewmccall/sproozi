@@ -38,8 +38,9 @@ func TestAdmissionCountsAReplacementInProgress(t *testing.T) {
 }
 
 // Admission's walk of the catalogue examines nothing but sizes, as it always
-// has: a stray file, a FIFO, a symbolic link and a record nobody can read
-// count at their own size, and a directory it cannot list fails admission.
+// has: a stray file, a FIFO, a symbolic link and a record that is not valid
+// count at their own size (a record that cannot be read fails admission: see
+// TestAdmissionFailsClosedForARecordItCannotRead), and a directory it cannot list fails admission.
 func TestAdmissionKeepsItsRefusals(t *testing.T) {
 	t.Parallel()
 	c, _ := fixture(t)
@@ -55,7 +56,7 @@ func TestAdmissionKeepsItsRefusals(t *testing.T) {
 	if err := os.Symlink(target, filepath.Join(c.Directory, "link")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(c.Directory, "6f1c7d2e-3a4b-4c5d-8e9f-0a1b2c3d4e5f.json"), make([]byte, 5), 0o000); err != nil {
+	if err := os.WriteFile(filepath.Join(c.Directory, "6f1c7d2e-3a4b-4c5d-8e9f-0a1b2c3d4e5f.json"), make([]byte, 5), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	admitsExactly(t, o, kept+7+int64(len(target))+5)
