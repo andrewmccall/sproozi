@@ -205,9 +205,11 @@ inconsistent. A table declares which endings each phase accepts and how
 each is charged; the reservation is charged only through it and only
 before the call is settled, and nothing leaves the ended phase, so a call
 is charged and recorded at most once. An ending the table does not declare
-is logged and replaced by its phase's most conservative declared ending,
+is logged and replaced by its phase's own declared default ending,
 so every call that ends is charged and recorded. Both hold while one
-goroutine owns the call, which every test in the package checks. No
+goroutine owns the call; a test build checks that on every call the
+handler admits (TestHandlerClaimsEachCallForItsGoroutine) and on every
+call the end tests build. No
 recorded outcome, and no order of writes, ledger calls, log lines and
 audit events, changed.
 

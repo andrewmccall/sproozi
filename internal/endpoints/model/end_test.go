@@ -212,7 +212,7 @@ func TestEndDerivesEachEndingFromItsPhase(t *testing.T) {
 }
 
 // end refuses an ending its phase does not declare. The refusal is logged
-// and the call falls back to its phase's own conservative ending
+// and the call falls back to its phase's own declared default ending
 // (callFallbacks), so it is still charged once, recorded once and, when the
 // workload has been sent nothing, answered with the gateway's own 500. An
 // ending after the call ended stays a logged no-op. end refuses rather

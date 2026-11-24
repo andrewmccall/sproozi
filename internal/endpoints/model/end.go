@@ -237,7 +237,7 @@ func (c *modelCall) settle(x ending) error {
 }
 
 // callFallbacks is the ending a call takes when end is given one its phase
-// does not declare: the most conservative ending that phase already has.
+// does not declare: the default ending that phase declares for itself.
 // Nothing falls back from callEnded, so an ending after the end does
 // nothing.
 //
@@ -359,10 +359,11 @@ func (c *modelCall) charge(rule chargeRule, x ending) {
 //     nothing. relayWhole follows it: OpenAI relays a provider's non-2xx
 //     answer (allowed true, with its upstreamStatus), Anthropic replaces it
 //     with the gateway's own error (allowed false, no upstreamStatus). The
-//     exception is outside end: refuseReservation writes the gateway's own
-//     503 to a call stopped while it waited for its budget, yet records
-//     allowed true, where a call stopped before its response headers
-//     records allowed false here.
+//     exceptions are outside end: refuseReservation writes the gateway's own
+//     503 to a call stopped while it waited for its budget, and its own 408
+//     "cancelled while waiting for its budget" to one that ended there, yet
+//     records allowed true for both, where a call stopped before its
+//     response headers records allowed false here.
 func (c *modelCall) record(from callPhase, x ending, before audit.Event) {
 	ctx := c.r.Context()
 	if x.fallback {
