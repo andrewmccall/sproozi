@@ -96,7 +96,7 @@ func newMCPFixture(t *testing.T, configure func(*gateway.ExecutionGrant)) *mcpFi
 		Upstream: u, Client: f.upstreamClient, AuditLogger: audit.NewLogger(&f.auditData),
 	})
 	dispatcher := gateway.Dispatcher{kubernetesgateway.Authority: {
-		Capability: string(sprooziv1alpha1.CapabilityKubernetesRead), Tier: audit.TierSemantic,
+		Capability: sprooziv1alpha1.CapabilityKubernetesRead, Tier: audit.TierSemantic,
 		Handler: handler, Budgets: budget.NewTracker(),
 	}}
 	cert := mcpCertificate(t)

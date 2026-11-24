@@ -202,3 +202,43 @@ The gateway writes one JSON audit record per request to its log. Collect
 log pipeline and keep it for your retention period; Pod logs disappear when the
 Pod is replaced.
 
+A record names the execution (`runID`, `runUID`, `executionBackend`, and
+`saName`, `saNamespace`, `saUID` on Kubernetes), the policy (`policyName`,
+`policyGeneration`), the route (`capability`, `semanticLevel`), the
+`operation` and, where it applies, `service`, `resource`, `artifactURL`,
+`providerAuthMode` and `upstreamStatus`. `allowed` says whether the gateway
+permitted the request and `denyReason` why not. Model calls add `model`,
+`tokensUsed`, `inputTokens`, `outputTokens`, `usageSource`, `endReason`,
+`tokenBudget` and `tokensRemaining`. A record never contains request or
+response bodies, headers, credentials or query strings.
+
+`outcome` says how the request ended
+([ADR 0070](../adr/0070-gateway-routes-declare-admission-and-requests-record-one-decision.md)):
+
+| `outcome` | Meaning |
+| --- | --- |
+| `served` | A response was relayed, whatever its status. `endReason` says how a model call ended. |
+| `refused_request` | The request was malformed or unsupported. |
+| `refused_policy` | The run, policy or a credential rule does not allow it. |
+| `refused_budget` | The allocation or budget is exhausted, or too many model calls are pending. |
+| `unavailable` | The gateway could not account, build or authenticate the upstream request, or is stopping. |
+| `upstream_failed` | Nothing usable came back before anything was relayed. |
+| `cancelled` | The workload left before a response was relayed. |
+| `unrecorded` | The handler wrote no record; the dispatcher wrote this one for the route. It names no request detail. |
+
+`outcome` follows the cause, not the HTTP status: an unsupported operation,
+method or query answered 403 is `refused_request`, and a budget refusal a
+handler answers 502 is `refused_budget`. `allowed` is unchanged by `outcome`
+and not always its opposite: a model call that ends while it waits for its
+budget because the gateway is stopping is `allowed` `true` with `outcome`
+`unavailable`, and a provider's own error is `allowed` `true` on OpenAI
+routes. Read `outcome` to tell a budget refusal from a policy refusal or an
+upstream failure. Every gateway record carries `outcome`, including the
+proxy's refusal of a destination that is not enabled.
+
+These requests have no record by design while their auditing is undecided:
+named MCP discovery (`initialize`, `tools/list`, `ping`, `server/discover`
+and notifications), Kubernetes `/mcp` discovery and its shape and argument
+refusals, and the `sproozi` control connection. Requests without a valid
+gateway identity are refused before routing and have no record.
+

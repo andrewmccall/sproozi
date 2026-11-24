@@ -332,7 +332,7 @@ func TestGatewayAuditsAuthenticatedUnknownDestination(t *testing.T) {
 				return
 			}
 			if len(events) != 1 || events[0].Allowed || events[0].RunUID != "test-execution" ||
-				events[0].Operation != "CONNECT docs.example.com:443" || events[0].DenyReason == "" {
+				events[0].Operation != "CONNECT docs.example.com:443" || events[0].DenyReason == "" || events[0].Outcome != audit.RefusedPolicy {
 				t.Fatalf("audit = %+v", events)
 			}
 		})

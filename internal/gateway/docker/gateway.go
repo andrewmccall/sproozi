@@ -54,10 +54,20 @@ func NewGateway(owner *Owner, config GatewayConfig) (*proxytransport.Gateway, er
 	if owner.policy.Spec.Budgets[api.CapabilityModelInference].MaxCostMicros > 0 && config.Model.Pricing == nil {
 		return nil, errors.New("docker gateway: trusted model pricing required")
 	}
-	tracker := budget.NewTrackerWithLedger(owner.ledger)
 	// Every native execution reaches the Sproozi control connection on the MCP
 	// authority; the journal forwards each audit record unchanged.
 	journal := diagnose.NewJournal(config.AuditLogger, diagnose.Limits{})
+	dispatch, err := composeRoutes(owner, config, budget.NewTrackerWithLedger(owner.ledger), journal)
+	if err != nil {
+		return nil, err
+	}
+	guard := gateway.NewLeakGuard(dispatch, nil)
+	return proxytransport.New(proxytransport.Config{Certificates: config.Certificates, Serving: config.Serving, Authenticate: owner.Authenticate, Revalidate: owner.Revalidate, Handler: guard, AllowedAuthority: guard.Allows, ProviderCredential: guard.ForwardsCredential, AuditLogger: journal, MaxModelCallDuration: config.MaxModelCall})
+}
+
+// composeRoutes builds the routes NewGateway serves, each writing to journal
+// and charging tracker, and refuses any route without a valid admission.
+func composeRoutes(owner *Owner, config GatewayConfig, tracker *budget.Tracker, journal *diagnose.Journal) (gateway.Dispatcher, error) {
 	config.AuditLogger = journal
 	modelConfig := config.Model
 	modelConfig.AuditLogger = config.AuditLogger
@@ -73,13 +83,23 @@ func NewGateway(owner *Owner, config GatewayConfig) (*proxytransport.Gateway, er
 	if _, covered := config.Certificates[host]; err != nil || host == "" || port != "443" || reserved || !covered {
 		return nil, errors.New("docker gateway: exact certified MCP authority on port 443 required")
 	}
-	var named = http.NotFoundHandler()
+	// Without a registry every other path on the MCP authority is refused
+	// with the standard 404, and the refusal is recorded without the path.
+	var named http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		e := gateway.AuditEvent(r.Context(), "mcp.request")
+		e.Service, e.DenyReason, e.Outcome = "mcp", "no MCP server is registered at this gateway", audit.RefusedPolicy
+		gateway.Record(r.Context(), journal, e)
+		http.NotFound(w, r)
+	})
 	if config.MCPRegistry != nil {
 		named = mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: config.MCPRegistry, HTTPClient: config.MCPClient, Budgets: tracker, AuditLogger: journal})
 	}
-	dispatch[config.MCPAuthority] = gateway.Route{Tier: audit.TierProtocol, Handler: diagnose.NewControl(journal, named)}
-	guard := gateway.NewLeakGuard(dispatch, nil)
-	return proxytransport.New(proxytransport.Config{Certificates: config.Certificates, Serving: config.Serving, Authenticate: owner.Authenticate, Revalidate: owner.Revalidate, Handler: guard, AllowedAuthority: guard.Allows, ProviderCredential: guard.ForwardsCredential, AuditLogger: journal, MaxModelCallDuration: config.MaxModelCall})
+	dispatch[config.MCPAuthority] = gateway.Route{Admission: gateway.AdmitSelected,
+		Tier: audit.TierProtocol, Handler: diagnose.NewControl(journal, named), AuditLogger: journal}
+	if err := dispatch.Validate(); err != nil {
+		return nil, err
+	}
+	return dispatch, nil
 }
 
 func addNativeRoutes(owner *Owner, config GatewayConfig, dispatch gateway.Dispatcher, tracker *budget.Tracker) error {
@@ -92,7 +112,7 @@ func addNativeRoutes(owner *Owner, config GatewayConfig, dispatch gateway.Dispat
 		githubHandler := &githubgateway.Handler{Config: githubConfig}
 		for _, host := range []string{githubgateway.GitAuthority, githubgateway.APIAuthority} {
 			// Keep a provider's path routes on the host, such as Copilot's.
-			dispatch[host] = gateway.Route{Capability: string(api.CapabilityGitHubPullRequest), Tier: audit.TierSemantic, Handler: githubHandler, Budgets: tracker, AuditLogger: config.AuditLogger,
+			dispatch[host] = gateway.Route{Capability: api.CapabilityGitHubPullRequest, Tier: audit.TierSemantic, Handler: githubHandler, Budgets: tracker, AuditLogger: config.AuditLogger,
 				Paths: dispatch[host].Paths}
 		}
 	}
@@ -102,7 +122,7 @@ func addNativeRoutes(owner *Owner, config GatewayConfig, dispatch gateway.Dispat
 		}
 		kubeConfig := *config.Kubernetes
 		kubeConfig.AuditLogger = config.AuditLogger
-		dispatch[kubernetesgateway.Authority] = gateway.Route{Capability: string(api.CapabilityKubernetesRead), Tier: audit.TierSemantic, Handler: kubernetesgateway.NewHandler(kubeConfig), Budgets: tracker, AuditLogger: config.AuditLogger}
+		dispatch[kubernetesgateway.Authority] = gateway.Route{Capability: api.CapabilityKubernetesRead, Tier: audit.TierSemantic, Handler: kubernetesgateway.NewHandler(kubeConfig), Budgets: tracker, AuditLogger: config.AuditLogger}
 	}
 	for _, capability := range owner.nativeCapabilities {
 		if !slices.Contains(owner.policy.Spec.AllowedCapabilities, capability) || capability == api.CapabilityGitHubPullRequest && config.GitHub == nil || capability == api.CapabilityKubernetesRead && config.Kubernetes == nil {
@@ -129,7 +149,7 @@ func modelRoutes(config GatewayConfig, modelConfig modelgateway.HandlerConfig, t
 		return nil, errors.New("docker gateway: unknown model provider")
 	}
 	route := func(handler http.Handler, forwards bool) gateway.Route {
-		return gateway.Route{Capability: string(api.CapabilityModelInference), Tier: audit.TierSemantic, Handler: handler,
+		return gateway.Route{Capability: api.CapabilityModelInference, Tier: audit.TierSemantic, Handler: handler,
 			Budgets: tracker, AuditLogger: config.AuditLogger, ProviderCredential: forwards}
 	}
 	apiRoute := !provider.Models[0].SignedIn
@@ -175,5 +195,10 @@ func modelRoutes(config GatewayConfig, modelConfig modelgateway.HandlerConfig, t
 func addPath(dispatch gateway.Dispatcher, authority, prefix string, r gateway.Route) {
 	owner := dispatch[authority]
 	owner.Paths = append(owner.Paths, gateway.PathRoute{Prefix: prefix, Route: r})
+	// The authority's other paths are refused through it until another
+	// capability serves them, and that refusal is recorded.
+	if owner.AuditLogger == nil {
+		owner.AuditLogger = r.AuditLogger
+	}
 	dispatch[authority] = owner
 }

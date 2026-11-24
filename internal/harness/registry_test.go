@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"regexp"
 	"slices"
@@ -244,6 +245,14 @@ func exampleProblem(h Harness, example string) string {
 		return fmt.Sprintf("%s's containers never set HTTPS_PROXY; build it from the gateway token as "+
 			"examples/harnesses/agentruntime-opencode.yaml does", example)
 	}
+	if h.RunKeyEnv == "" && !strings.Contains(string(spec), runKeyPlaceholder) &&
+		!slices.ContainsFunc(slices.Collect(maps.Values(h.LaunchFiles)), func(file string) bool {
+			return strings.Contains(file, runKeyPlaceholder)
+		}) {
+		return fmt.Sprintf("the Pod gives no key placeholder without RunKeyEnv, but neither %s nor a launch file "+
+			"sets %s; set the client's key to it, or set RunKeyEnv when the client reads it from the Pod",
+			example, runKeyPlaceholder)
+	}
 	read := []string{h.MCP.File}
 	if h.Loader.Bridge != "" {
 		read = append(read, h.Loader.Bridge)
@@ -260,6 +269,31 @@ func exampleProblem(h Harness, example string) string {
 		"the MCP file or the launch file that does", example, read)
 }
 
+// runKeyPlaceholder is the public key placeholder an AgentRun's client sends,
+// as internal/runtime/kubernetes/contract.go names it; that package imports
+// this one, so the guard can't reach its constant.
+const runKeyPlaceholder = "sproozi-local-placeholder"
+
+// A harness whose client doesn't read its key from the Pod (no RunKeyEnv)
+// must supply its own placeholder, or it fails only on a cluster.
+func TestExampleProblemRequiresAKeyPlaceholderWithoutRunKeyEnv(t *testing.T) {
+	// examples/mcp sets no key: Codex reads the Pod's OPENAI_API_KEY.
+	fake := Harness{Selector: string(NativeCodex), MCP: MCPFormat{File: "codex-mcp.toml"}}
+	const example = "examples/mcp/agentruntime.yaml"
+	if problem := exampleProblem(fake, example); !strings.Contains(problem, runKeyPlaceholder) {
+		t.Fatalf("a harness with neither RunKeyEnv nor its own placeholder passed: %q", problem)
+	}
+	fake.RunKeyEnv = "OPENAI_API_KEY"
+	if problem := exampleProblem(fake, example); problem != "" {
+		t.Fatalf("a harness that reads the Pod's key failed: %s", problem)
+	}
+	fake.RunKeyEnv = ""
+	fake.LaunchFiles = map[string]string{"fake-launch.py": `env["KEY"] = "` + runKeyPlaceholder + `"`}
+	if problem := exampleProblem(fake, example); problem != "" {
+		t.Fatalf("a launch file's placeholder was not counted: %s", problem)
+	}
+}
+
 // The image build context must ship every launch file.
 func TestDockerignoreShipsLaunchFiles(t *testing.T) {
 	data, err := os.ReadFile("../../.dockerignore")
@@ -272,46 +306,77 @@ func TestDockerignoreShipsLaunchFiles(t *testing.T) {
 	}
 }
 
-// Every managed harness supplies every per-harness fact, so a new one never
-// silently takes another's value, and an AgentRun-only harness supplies none.
-func TestManagedKindsSupplyEveryFact(t *testing.T) {
-	// reservedEnvExempt names the managed harnesses that declare no ReservedEnv
-	// and why.
-	reservedEnvExempt := map[NativeKind]string{
-		NativeCopilot: "its supervisor sets COPILOT_HOME and COPILOT_AUTO_UPDATE, but they have never been refused in a " +
-			"launch's explicit environment; kept as it was",
+// reservedEnvExempt names the managed harnesses that declare no ReservedEnv
+// and why.
+var reservedEnvExempt = map[NativeKind]string{
+	NativeCopilot: "its supervisor sets COPILOT_HOME and COPILOT_AUTO_UPDATE, but they have never been refused in a " +
+		"launch's explicit environment; kept as it was",
+}
+
+// managedFactProblems names each managed fact an entry is missing or gets
+// wrong: a managed harness supplies every one, so a new one never silently
+// takes another's value, and an AgentRun-only harness supplies none.
+func managedFactProblems(h Harness) []string {
+	if h.Native == "" {
+		if h.DisplayName != "" || h.Product != "" || h.Executable != "" || h.InstructionsFile != "" || h.KeyEnv != "" ||
+			h.RefusedFlags != nil || h.ReservedEnv != nil || h.RemoteExecutor || h.TakesTask || h.Default ||
+			h.TokenEnv != "" || h.KeyOptions != nil || h.SignInOptions != nil || h.SignInChoices != nil {
+			return []string{"has no Native kind, so it must not set the managed facts"}
+		}
+		return nil
 	}
+	var problems []string
+	for _, fact := range []struct {
+		name    string
+		missing bool
+	}{
+		{"DisplayName", h.DisplayName == ""},
+		{"Product", h.Product == ""},
+		{"Executable", !strings.HasPrefix(h.Executable, "/")},
+		{"InstructionsFile", h.InstructionsFile == ""},
+		{"KeyEnv", h.KeyEnv == ""},
+		{"RefusedFlags", len(h.RefusedFlags) == 0},
+		{"ReservedEnv", len(h.ReservedEnv) == 0 && reservedEnvExempt[h.Native] == ""},
+		{"SignInChoices", len(h.SignInChoices) == 0},
+	} {
+		if fact.missing {
+			problems = append(problems, "needs "+fact.name+"; a managed harness must supply every fact, "+
+				"see docs/contributing/add-a-harness.md")
+		}
+	}
+	if (h.TokenEnv == "") != (h.TokenPlaceholder == "") {
+		problems = append(problems, "must set TokenEnv and TokenPlaceholder together")
+	}
+	return append(problems, signInChoiceProblems(h)...)
+}
+
+// registryProblems runs managedFactProblems over entries and requires
+// exactly one managed harness to be the default.
+func registryProblems(entries []Harness) []string {
+	var problems []string
 	defaults := 0
-	for _, h := range registry {
-		if h.Native == "" {
-			if h.DisplayName != "" || h.Product != "" || h.Executable != "" || h.InstructionsFile != "" || h.KeyEnv != "" ||
-				h.RefusedFlags != nil || h.ReservedEnv != nil || h.RemoteExecutor || h.TakesTask || h.Default ||
-				h.TokenEnv != "" || h.KeyOptions != nil || h.SignInOptions != nil {
-				t.Errorf("harness %q has no Native kind, so %s must not set the managed facts", h.Selector, registryFile)
-			}
-			continue
+	for _, h := range entries {
+		for _, problem := range managedFactProblems(h) {
+			problems = append(problems, fmt.Sprintf("harness %q %s", h.Selector, problem))
 		}
-		missing := map[string]bool{
-			"DisplayName": h.DisplayName == "", "Product": h.Product == "", "InstructionsFile": h.InstructionsFile == "",
-			"KeyEnv": h.KeyEnv == "", "RefusedFlags": len(h.RefusedFlags) == 0,
-			"Executable":  !strings.HasPrefix(h.Executable, "/"),
-			"ReservedEnv": len(h.ReservedEnv) == 0 && reservedEnvExempt[h.Native] == "",
-		}
-		for fact, isMissing := range missing {
-			if isMissing {
-				t.Errorf("managed harness %q needs %s in %s; a managed harness must supply every fact, "+
-					"see docs/contributing/add-a-harness.md", h.Selector, fact, registryFile)
-			}
-		}
-		if (h.TokenEnv == "") != (h.TokenPlaceholder == "") {
-			t.Errorf("managed harness %q must set TokenEnv and TokenPlaceholder together in %s", h.Selector, registryFile)
-		}
-		if h.Default {
+		if h.Native != "" && h.Default {
 			defaults++
 		}
 	}
-	if defaults != 1 || Default() == "" {
-		t.Errorf("exactly one managed harness must be the Default in %s; found %d", registryFile, defaults)
+	if defaults != 1 {
+		problems = append(problems, fmt.Sprintf("exactly one managed harness must be the Default; found %d", defaults))
+	}
+	return problems
+}
+
+// Every registered entry supplies every managed fact, and exactly one managed
+// harness is the default.
+func TestManagedKindsSupplyEveryFact(t *testing.T) {
+	for _, problem := range registryProblems(registry) {
+		t.Errorf("%s in %s", problem, registryFile)
+	}
+	if Default() == "" {
+		t.Errorf("Default() names no managed harness in %s", registryFile)
 	}
 }
 
@@ -335,5 +400,85 @@ func TestLaunchFilesAgreeWithTheirRegistryEntry(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// signInChoiceProblems checks each setup wizard answer: worded, one of the
+// wizard's answers, given once, a ChatGPT plan only for an OpenAI harness and
+// the harness's own sign-in only when it has a sign-in file.
+func signInChoiceProblems(h Harness) []string {
+	var problems []string
+	labels, answers := map[string]bool{}, map[SignInAnswer]bool{}
+	for i, c := range h.SignInChoices {
+		switch {
+		case strings.TrimSpace(c.Label) == "":
+			problems = append(problems, fmt.Sprintf("SignInChoices[%d] needs a Label", i))
+		case !slices.Contains([]SignInAnswer{AnswerKey, AnswerChatGPT, AnswerToken, AnswerSignIn}, c.Answer):
+			problems = append(problems, fmt.Sprintf("SignInChoices[%d] needs an Answer", i))
+		case labels[c.Label] || answers[c.Answer]:
+			problems = append(problems, fmt.Sprintf("SignInChoices[%d] repeats an earlier choice", i))
+		case c.Answer == AnswerChatGPT && h.Protocol != ProtocolOpenAI:
+			problems = append(problems, fmt.Sprintf("SignInChoices[%d] offers a ChatGPT plan, which only an "+
+				"OpenAI harness can use", i))
+		case c.Answer == AnswerSignIn && h.SignInFile == "":
+			problems = append(problems, fmt.Sprintf("SignInChoices[%d] lets the harness sign in itself, which "+
+				"needs its SignInFile", i))
+		}
+		labels[c.Label], answers[c.Answer] = true, true
+	}
+	return problems
+}
+
+// The configured-MCP reference states two facts. Sessions of every managed
+// kind get the servers locally and when they run on a remote executor,
+// including a session moved there; an executor starts tasks and interactive
+// sessions itself only for the RemoteExecutor harnesses.
+func TestConfiguredMCPReferenceMatchesTheRegistry(t *testing.T) {
+	data, err := os.ReadFile("../../docs/reference/configured-mcp.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var managed, starts []string
+	for _, h := range registry {
+		if h.Native == "" {
+			continue
+		}
+		managed = append(managed, h.DisplayName)
+		if h.RemoteExecutor {
+			starts = append(starts, h.DisplayName)
+		}
+	}
+	and := func(names []string) string {
+		if len(names) < 2 {
+			return strings.Join(names, "")
+		}
+		return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, row := range []struct{ where, want string }{
+		{"Local sessions (`sproozi run`)", and(managed)},
+		{"Sessions on a remote executor", and(managed)},
+	} {
+		prefix := "| " + row.where + " | "
+		var got []string
+		for _, l := range lines {
+			if after, ok := strings.CutPrefix(l, prefix); ok {
+				cell, _, _ := strings.Cut(after, " |")
+				got = append(got, cell)
+			}
+		}
+		if len(got) != 1 || got[0] != row.want {
+			t.Errorf("docs/reference/configured-mcp.md needs one %q row naming %q, the managed harnesses in %s; "+
+				"it has %q", row.where, row.want, registryFile, got)
+		}
+	}
+	const starter = "it starts tasks and interactive sessions itself only for "
+	text := strings.Join(strings.Fields(string(data)), " ")
+	_, rest, found := strings.Cut(text, starter)
+	got, _, _ := strings.Cut(rest, ".")
+	got, _, _ = strings.Cut(got, " (")
+	if !found || got != and(starts) {
+		t.Errorf("docs/reference/configured-mcp.md must say %q followed by %q, the RemoteExecutor harnesses in %s; "+
+			"it says %q", starter, and(starts), registryFile, got)
 	}
 }

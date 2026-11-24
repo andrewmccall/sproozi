@@ -43,7 +43,7 @@ func assertDenial(t *testing.T, response *httptest.ResponseRecorder, status int,
 
 func TestDispatcherRequiresContextIdentity(t *testing.T) {
 	called := false
-	d := gateway.Dispatcher{fixtureAuthority: {Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	d := gateway.Dispatcher{fixtureAuthority: {Admission: gateway.AdmitSelected, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
 		w.WriteHeader(http.StatusNoContent)
 	})}}
@@ -80,12 +80,12 @@ func TestDispatcherEnforcesRouteCapabilityAndAuditsRouteTier(t *testing.T) {
 			var events bytes.Buffer
 			logger := audit.NewLogger(&events)
 			called := false
-			d := gateway.Dispatcher{fixtureAuthority: {Capability: string(capability), Tier: audit.TierSemantic,
+			d := gateway.Dispatcher{fixtureAuthority: {Capability: capability, Tier: audit.TierSemantic,
 				AuditLogger: logger, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					called = true
 					event := gateway.AuditEvent(r.Context(), "read")
 					event.Allowed = true
-					logger.Log(event)
+					gateway.Record(r.Context(), logger, event)
 					w.WriteHeader(http.StatusNoContent)
 				})}}
 			grant := &gateway.ExecutionGrant{Execution: gateway.Reference{Backend: gateway.BackendDocker, UID: fixtureExecutionUID},
@@ -124,7 +124,7 @@ func TestDispatcherDeniesUnknownDestinationAndUnavailableBudgetAsJSON(t *testing
 		Template:     gateway.TemplateSnapshot{Name: fixtureTemplateName},
 		Capabilities: []api.CapabilityKind{capability}}
 	// A configured budget without its tracker cannot be accounted.
-	d := gateway.Dispatcher{fixtureAuthority: {Capability: string(capability), Handler: http.NotFoundHandler()}}
+	d := gateway.Dispatcher{fixtureAuthority: {Capability: capability, Handler: http.NotFoundHandler()}}
 	for _, tc := range []struct {
 		target, errorType, code string
 		status                  int
@@ -142,7 +142,7 @@ func TestDispatcherDeniesUnknownDestinationAndUnavailableBudgetAsJSON(t *testing
 func TestDispatcherDeliversFirstChunkBeforeHandlerCompletes(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
-	d := gateway.Dispatcher{fixtureAuthority: {Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	d := gateway.Dispatcher{fixtureAuthority: {Admission: gateway.AdmitSelected, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "first\n")
 		w.(http.Flusher).Flush()
 		<-release
@@ -182,7 +182,7 @@ func TestDispatcherServesAPathRouteWithItsOwnCapability(t *testing.T) {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { served = name; w.WriteHeader(http.StatusNoContent) })
 	}
 	d := gateway.Dispatcher{fixtureAuthority: {Capability: "github.pullRequest", Handler: handler("github"),
-		Paths: []gateway.PathRoute{{Prefix: "/copilot_internal/", Route: gateway.Route{Handler: handler("copilot")}}}}}
+		Paths: []gateway.PathRoute{{Prefix: "/copilot_internal/", Route: gateway.Route{Admission: gateway.AdmitSelected, Handler: handler("copilot")}}}}}
 	grant := &gateway.ExecutionGrant{Policy: gateway.PolicySnapshot{Name: fixturePolicyName},
 		Execution: gateway.Reference{Backend: gateway.BackendKubernetes, UID: fixtureExecutionUID},
 		Template:  gateway.TemplateSnapshot{Name: fixtureTemplateName}}
@@ -203,5 +203,30 @@ func TestDispatcherServesAPathRouteWithItsOwnCapability(t *testing.T) {
 	}
 	if !d.Allows(fixtureAuthority) {
 		t.Fatal("a host with only a path route isn't allowed")
+	}
+}
+
+// A route with a handler declares who admits it; a reserved route without a
+// handler needs no declaration.
+func TestValidateRefusesRoutesWithoutAValidAdmission(t *testing.T) {
+	h := http.NotFoundHandler()
+	for _, tc := range []struct {
+		name  string
+		route gateway.Route
+		valid bool
+	}{
+		{"capability", gateway.Route{Capability: api.CapabilityKubernetesRead, Handler: h}, true},
+		{"reserved without a handler", gateway.Route{}, true},
+		{"zero route with a handler", gateway.Route{Handler: h}, false},
+		{"selected", gateway.Route{Admission: gateway.AdmitSelected, Handler: h}, true},
+		{"selected with a capability", gateway.Route{Admission: gateway.AdmitSelected,
+			Capability: api.CapabilityKubernetesRead, Handler: h}, false},
+		{"unknown admission", gateway.Route{Admission: 9, Handler: h}, false},
+		{"undeclared path route", gateway.Route{Paths: []gateway.PathRoute{{Prefix: "/login/", Route: gateway.Route{Handler: h}}}}, false},
+	} {
+		err := gateway.Dispatcher{fixtureAuthority: tc.route}.Validate()
+		if (err == nil) != tc.valid {
+			t.Errorf("%s: Validate() = %v", tc.name, err)
+		}
 	}
 }

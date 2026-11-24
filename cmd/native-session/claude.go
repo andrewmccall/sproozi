@@ -313,8 +313,10 @@ func claudePreferences(env []string) map[string]any {
 	preferences := map[string]any{"theme": "dark", "hasCompletedOnboarding": true,
 		"bypassPermissionsModeAccepted": true,
 		"projects":                      map[string]any{workspace: map[string]any{"hasTrustDialogAccepted": true}}}
+	// The registry names the variable that carries the placeholder key.
+	claude, _ := harness.Managed(harness.NativeClaude)
 	for _, entry := range env {
-		if key, ok := strings.CutPrefix(entry, "ANTHROPIC_API_KEY="); ok && key != "" {
+		if key, ok := strings.CutPrefix(entry, claude.KeyEnv+"="); ok && key != "" {
 			tail := key[max(0, len(key)-20):]
 			preferences["customApiKeyResponses"] = map[string]any{"approved": []string{tail}, "rejected": []string{}}
 		}

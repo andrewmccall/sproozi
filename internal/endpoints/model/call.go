@@ -326,7 +326,7 @@ func (c *modelCall) relay(resp *http.Response) {
 		if typeErr != nil {
 			c.observeFailure(typeErr.Error())
 			c.settleInterrupted(endUpstreamError)
-			c.h.deny(c.w, c.e, http.StatusBadGateway, "unsupported provider response", "server_error", "upstream_error")
+			c.h.deny(c.r.Context(), c.w, c.e, http.StatusBadGateway, "unsupported provider response", "server_error", "upstream_error")
 			return
 		}
 	}

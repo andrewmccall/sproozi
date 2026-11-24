@@ -76,7 +76,9 @@ func (j *Journal) Log(e audit.Event) {
 	if j.next != nil {
 		j.next.Log(e)
 	}
-	if e.Allowed || e.RunUID == "" {
+	// A record the dispatcher wrote because a handler wrote none is not a
+	// refusal, and has no reason to show (ADR 0070).
+	if e.Allowed || e.RunUID == "" || e.Outcome == audit.Unrecorded {
 		return
 	}
 	j.mu.Lock()

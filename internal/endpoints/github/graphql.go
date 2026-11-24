@@ -86,45 +86,45 @@ func isGraphQL(r *http.Request) bool {
 func (h *Handler) handleGraphQL(w http.ResponseWriter, r *http.Request, e audit.Event, identity *gateway.ExecutionGrant) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxGraphQLBody+1))
 	if err != nil || len(body) == 0 || len(body) > maxGraphQLBody {
-		h.deny(w, e, http.StatusBadRequest, "GraphQL request body is invalid")
+		h.deny(r.Context(), w, e, http.StatusBadRequest, "GraphQL request body is invalid")
 		return
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
 
 	envelope, err := decodeGraphQLEnvelope(body)
 	if err != nil {
-		h.deny(w, e, http.StatusForbidden, "GraphQL operation is not permitted")
+		h.deny(r.Context(), w, e, http.StatusForbidden, "GraphQL operation is not permitted")
 		return
 	}
 	operation, err := classifyGraphQL(envelope.Query)
 	if err != nil {
-		h.deny(w, e, http.StatusForbidden, "GraphQL operation is not permitted")
+		h.deny(r.Context(), w, e, http.StatusForbidden, "GraphQL operation is not permitted")
 		return
 	}
 	if envelope.OperationName != "" && envelope.OperationName != operation.Name {
-		h.deny(w, e, http.StatusForbidden, "GraphQL operation is not permitted")
+		h.deny(r.Context(), w, e, http.StatusForbidden, "GraphQL operation is not permitted")
 		return
 	}
 	if (operation.Name == repositoryInfoOperation || operation.Name == pullRequestByNumberOperation) &&
 		(operation.Kind != graphqlQuery || operation.Root != "repository") {
-		h.deny(w, e, http.StatusForbidden, "GraphQL operation is not permitted")
+		h.deny(r.Context(), w, e, http.StatusForbidden, "GraphQL operation is not permitted")
 		return
 	}
 	if operation.Name != repositoryInfoOperation && operation.Name != pullRequestByNumberOperation && operation.Name != pullRequestCreateOperation {
-		h.deny(w, e, http.StatusForbidden, "GraphQL operation is not permitted")
+		h.deny(r.Context(), w, e, http.StatusForbidden, "GraphQL operation is not permitted")
 		return
 	}
 	if operation.Name != pullRequestCreateOperation {
 		document, documentErr := boundedReadDocument(operation.Name, envelope.Query)
 		if documentErr != nil {
-			h.deny(w, e, http.StatusForbidden, "GraphQL operation is not permitted")
+			h.deny(r.Context(), w, e, http.StatusForbidden, "GraphQL operation is not permitted")
 			return
 		}
 		envelope.Query = document
 	}
 	if operation.Name == pullRequestCreateOperation {
 		if err := validatePullRequestCreateDocument(envelope.Query); err != nil {
-			h.deny(w, e, http.StatusForbidden, "GraphQL operation is not permitted")
+			h.deny(r.Context(), w, e, http.StatusForbidden, "GraphQL operation is not permitted")
 			return
 		}
 	}
@@ -142,31 +142,31 @@ func (h *Handler) handleGraphQL(w http.ResponseWriter, r *http.Request, e audit.
 		err = validateGraphQLCreateEnvelope(operation, envelope.Variables, identity.Execution.UID, identity)
 	}
 	if err != nil {
-		h.deny(w, e, http.StatusForbidden, "GraphQL repository or operation is not permitted")
+		h.deny(r.Context(), w, e, http.StatusForbidden, "GraphQL repository or operation is not permitted")
 		return
 	}
 	if repo != "" && !slices.Contains(identity.Policy.Spec.GitHubPullRequest.Repositories, repo) {
 		e.Resource = repo
-		h.deny(w, e, http.StatusForbidden, "repository not permitted by policy")
+		h.deny(r.Context(), w, e, http.StatusForbidden, "repository not permitted by policy")
 		return
 	}
 	e.Resource = repo
 
 	ghToken, err := h.Config.TokenProvider.Token(r.Context())
 	if err != nil {
-		h.deny(w, e, http.StatusInternalServerError, "failed to obtain GitHub credentials")
+		h.deny(r.Context(), w, e, http.StatusInternalServerError, "failed to obtain GitHub credentials")
 		return
 	}
 
 	if operation.Name != pullRequestCreateOperation {
 		upstream, err := url.JoinPath(h.Config.APIBaseURL, "graphql")
 		if err != nil {
-			h.deny(w, e, http.StatusInternalServerError, "failed to build upstream URL")
+			h.deny(r.Context(), w, e, http.StatusInternalServerError, "failed to build upstream URL")
 			return
 		}
 		payload, err := json.Marshal(envelope)
 		if err != nil {
-			h.deny(w, e, http.StatusBadRequest, "GraphQL request body is invalid")
+			h.deny(r.Context(), w, e, http.StatusBadRequest, "GraphQL request body is invalid")
 			return
 		}
 		forwarded := r.Clone(r.Context())
@@ -470,63 +470,70 @@ type graphQLMutationResponse struct {
 func (h *Handler) handleGraphQLPRCreate(w http.ResponseWriter, r *http.Request, e audit.Event, identity *gateway.ExecutionGrant, envelope graphQLEnvelope, token string) {
 	input := make(map[string]json.RawMessage)
 	if err := json.Unmarshal(envelope.Variables[inputVariable], &input); err != nil {
-		h.deny(w, e, http.StatusForbidden, "GraphQL operation is not permitted")
+		h.deny(r.Context(), w, e, http.StatusForbidden, "GraphQL operation is not permitted")
 		return
 	}
 	repositoryID, _ := graphqlString(input[repositoryIDField])
 	repo, err := h.resolveGraphQLRepositoryID(r, token, repositoryID)
 	if err != nil || !slices.Contains(identity.Policy.Spec.GitHubPullRequest.Repositories, repo) {
-		h.deny(w, e, http.StatusForbidden, "repository not permitted by policy")
+		if err != nil {
+			e.Outcome = gateway.FailureOutcome(err)
+		}
+		h.deny(r.Context(), w, e, http.StatusForbidden, "repository not permitted by policy")
 		return
 	}
 	e.Resource = repo
 
 	upstream, err := url.JoinPath(h.Config.APIBaseURL, "graphql")
 	if err != nil {
-		h.deny(w, e, http.StatusInternalServerError, "failed to build upstream URL")
+		h.deny(r.Context(), w, e, http.StatusInternalServerError, "failed to build upstream URL")
 		return
 	}
 	payload, err := cannedPullRequestCreatePayload(input)
 	if err != nil {
-		h.deny(w, e, http.StatusInternalServerError, "failed to build GraphQL operation")
+		h.deny(r.Context(), w, e, http.StatusInternalServerError, "failed to build GraphQL operation")
 		return
 	}
 	forwarded := r.Clone(r.Context())
 	forwarded.Body = io.NopCloser(bytes.NewReader(payload))
 	response, err := h.doUpstream(forwarded, upstream, token)
 	if err != nil {
-		h.deny(w, e, http.StatusBadGateway, "upstream request failed")
+		e.Outcome = gateway.FailureOutcome(err)
+		h.deny(r.Context(), w, e, http.StatusBadGateway, "upstream request failed")
 		return
 	}
 	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxGraphQLBody+1))
 	if err != nil || len(body) > maxGraphQLBody {
-		h.deny(w, e, http.StatusBadGateway, "upstream GraphQL response was invalid")
+		h.deny(r.Context(), w, e, http.StatusBadGateway, "upstream GraphQL response was invalid")
 		return
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		h.copyResponse(w, response, body)
-		h.auditAllowed(e, response.StatusCode)
+		h.auditAllowed(r.Context(), e, response.StatusCode)
 		return
 	}
 	var created graphQLMutationResponse
 	if json.Unmarshal(body, &created) != nil || len(created.Errors) != 0 || created.Data.CreatePullRequest.PullRequest.URL == "" {
-		h.deny(w, e, http.StatusBadGateway, "upstream GraphQL mutation response was invalid")
+		h.deny(r.Context(), w, e, http.StatusBadGateway, "upstream GraphQL mutation response was invalid")
 		return
 	}
 	repoFromURL, number, err := parseGitHubPRURL(created.Data.CreatePullRequest.PullRequest.URL)
 	if err != nil || repoFromURL != repo {
-		h.deny(w, e, http.StatusBadGateway, "upstream pull request identity was invalid")
+		h.deny(r.Context(), w, e, http.StatusBadGateway, "upstream pull request identity was invalid")
 		return
 	}
 	verified, err := h.readBackGraphQLPR(r, token, repo, number)
+	if err != nil {
+		e.Outcome = gateway.FailureOutcome(err)
+	}
 	if err != nil || verified.Repository != repo || verified.Number != number || verified.URL != created.Data.CreatePullRequest.PullRequest.URL || !runOwnedBranch(verified.HeadRef, identity.Execution.UID) || !policyBranch(verified.BaseRef, identity.Policy.Spec.GitHubPullRequest.AllowedBaseBranches) || !graphqlHexSHA.MatchString(verified.HeadOID) {
-		h.deny(w, e, http.StatusBadGateway, "pull request read-back was invalid")
+		h.deny(r.Context(), w, e, http.StatusBadGateway, "pull request read-back was invalid")
 		return
 	}
 	e.ArtifactURL = verified.URL
 	h.copyResponse(w, response, body)
-	h.auditAllowed(e, response.StatusCode)
+	h.auditAllowed(r.Context(), e, response.StatusCode)
 }
 
 type verifiedGraphQLPR struct {

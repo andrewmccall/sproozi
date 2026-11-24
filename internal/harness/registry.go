@@ -33,6 +33,12 @@ type Harness struct {
 	// RequestFiles adds instructions.txt and request.json to the contract for
 	// launch commands that read the request from files.
 	RequestFiles bool
+	// RunKeyEnv is the variable in which an AgentRun Pod's workload
+	// containers get the public key placeholder, for a client that reads its
+	// key from the Pod's environment. Empty when the harness's launch file or
+	// runtime command sets its own placeholder: the Pod then gets none. A
+	// runtime with the harness's own sign-in gets none either way (ADR 0047).
+	RunKeyEnv string
 	// Native is the managed-session kind, or empty when the harness runs only
 	// as an AgentRun.
 	Native NativeKind
@@ -82,10 +88,14 @@ type Harness struct {
 	// (HOME, PWD, KUBECONFIG). A harness may declare none only with a reason in
 	// the guard test.
 	ReservedEnv []string
-	// RemoteExecutor reports that a remote executor may run this harness, for
-	// both tasks and interactive sessions. A Claude Code task's completion is
-	// bound to its prompt's turn by the supervisor's UserPromptSubmit hook (ADR
-	// 0057).
+	// RemoteExecutor reports that a remote executor configured for this
+	// harness may start work for it: tasks and interactive sessions the cluster
+	// owns. Its one reader is the executor's work catalogue
+	// (internal/work/owner.go). A session of any managed kind moved to an
+	// executor for its harness still runs there; the placement handler
+	// (internal/session/profile) accepts every managed kind. A Claude Code
+	// task's completion is bound to its prompt's turn by the supervisor's
+	// UserPromptSubmit hook (ADR 0057).
 	RemoteExecutor bool
 
 	// TakesTask: the supervisor submits a task as the launch's prompt and
@@ -110,7 +120,35 @@ type Harness struct {
 	// signs in itself. Both may be empty.
 	KeyOptions    []string
 	SignInOptions []string
+	// SignInChoices are the ways the setup wizard (cmd/sproozi/wizard.go)
+	// offers for the harness to reach its model provider, most common first
+	// (docs/guides/local-sessions.md#choose-how-an-agent-signs-in).
+	SignInChoices []SignInChoice
 }
+
+// SignInChoice is one answer to the setup wizard's sign-in question.
+type SignInChoice struct {
+	// Label is the answer's wording.
+	Label string
+	// Answer is how the harness then reaches its provider.
+	Answer SignInAnswer
+}
+
+// SignInAnswer is a way the setup wizard offers for a harness to reach its
+// model provider; each is one of its flags.
+type SignInAnswer string
+
+const (
+	// AnswerKey: an API key the gateway holds (no flag).
+	AnswerKey SignInAnswer = "key"
+	// AnswerChatGPT: the gateway signs in to a ChatGPT plan during setup and
+	// holds that ChatGPT credential (--chatgpt).
+	AnswerChatGPT SignInAnswer = "chatgpt"
+	// AnswerToken: a sign-in token the gateway holds (--token).
+	AnswerToken SignInAnswer = "token"
+	// AnswerSignIn: the harness signs in itself (--sign-in).
+	AnswerSignIn SignInAnswer = "sign-in"
+)
 
 // ProvesCompletion reports the kind's StateProvesCompletion.
 func ProvesCompletion(kind NativeKind) bool {
@@ -185,6 +223,17 @@ var codexKeyOptions = []string{
 // ChatGPT backend or the API to match its sign-in (ADR 0047).
 const codexTrust = `projects."/workspace/session/workspace".trust_level="trusted"`
 
+// The variables that carry the OpenAI and Anthropic placeholder keys, as the
+// entries below name them.
+const (
+	nativeOpenAIKey    = "OPENAI_API_KEY"
+	nativeAnthropicKey = "ANTHROPIC_API_KEY"
+)
+
+// NativeCopilotTokenPlaceholder stands in for a GitHub token the gateway holds:
+// Copilot needs one to call its plan's service, and the gateway replaces it.
+const NativeCopilotTokenPlaceholder = "gho_sprooziworkerplaceholder0000000000"
+
 // mcpServersField is Claude Code's MCP configuration key.
 const mcpServersField = "mcpServers"
 
@@ -192,8 +241,14 @@ var registry = []Harness{
 	{Selector: string(NativeCodex), Native: NativeCodex, NativeDirectory: string(NativeCodex), Protocol: ProtocolOpenAI,
 		SignInFile: "auth.json", StateProvesCompletion: true,
 		DisplayName: "Codex", Product: "OpenAI Codex CLI", Executable: "/usr/local/bin/codex", InstructionsFile: "AGENTS.md",
-		KeyEnv: nativeOpenAIKey, RefusedFlags: codexControlled, ReservedEnv: []string{"CODEX_HOME"},
+		KeyEnv: nativeOpenAIKey, RunKeyEnv: nativeOpenAIKey, RefusedFlags: codexControlled, ReservedEnv: []string{"CODEX_HOME"},
 		RemoteExecutor: true, TakesTask: true, Default: true, KeyOptions: codexKeyOptions, SignInOptions: []string{codexTrust},
+		SignInChoices: []SignInChoice{
+			{Label: "An OpenAI API key, held by the gateway", Answer: AnswerKey},
+			{Label: "A ChatGPT plan, signed in now in your browser and held by the gateway",
+				Answer: AnswerChatGPT},
+			{Label: "Codex signs in itself with ChatGPT in its first session", Answer: AnswerSignIn},
+		},
 		MCP: MCPFormat{File: "codex-mcp.toml"}, Loader: NativeMCP},
 	{Selector: string(NativeClaude), Native: NativeClaude, NativeDirectory: "claude", Protocol: ProtocolAnthropic,
 		SignInFile:  ".credentials.json",
@@ -201,6 +256,11 @@ var registry = []Harness{
 		KeyEnv: nativeAnthropicKey, RefusedFlags: claudeControlled, RemoteExecutor: true, TakesTask: true,
 		ReservedEnv: []string{"CLAUDE_CONFIG_DIR", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_AUTOUPDATER",
 			"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"},
+		SignInChoices: []SignInChoice{
+			{Label: "An Anthropic API key, held by the gateway", Answer: AnswerKey},
+			{Label: `A sign-in token from "claude setup-token", held by the gateway`, Answer: AnswerToken},
+			{Label: "Claude Code signs in itself with /login in its first session", Answer: AnswerSignIn},
+		},
 		RequestFiles: true, Loader: NativeMCP, LaunchFiles: launchFilesNamed("claude-launch.py"),
 		MCP: MCPFormat{File: "claude-mcp.json", Field: mcpServersField, Entry: func(name, address string) (string, any) {
 			return name, map[string]any{connectionType: httpTransport, connectionURL: address}
@@ -214,6 +274,12 @@ var registry = []Harness{
 		DisplayName: "Copilot", Product: "GitHub Copilot CLI", Executable: "/usr/local/bin/copilot",
 		InstructionsFile: "copilot-instructions.md", KeyEnv: "COPILOT_PROVIDER_API_KEY", RefusedFlags: copilotControlled,
 		TokenEnv: "COPILOT_GITHUB_TOKEN", TokenPlaceholder: NativeCopilotTokenPlaceholder, SignInYieldsGitHubToken: true,
+		SignInChoices: []SignInChoice{
+			{Label: "Copilot signs in itself with /login and your Copilot plan in its first session",
+				Answer: AnswerSignIn},
+			{Label: "A GitHub token with Copilot access, held by the gateway", Answer: AnswerToken},
+			{Label: "An OpenAI API key, held by the gateway (no Copilot plan needed)", Answer: AnswerKey},
+		},
 		RequestFiles: true, Loader: NativeMCP,
 		MCP: MCPFormat{File: "copilot-mcp.json", Field: mcpServersField, Entry: func(name, address string) (string, any) {
 			return name, map[string]any{connectionType: httpTransport, connectionURL: address, "tools": []string{"*"}}

@@ -2,6 +2,7 @@ package model
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"path"
@@ -71,19 +72,27 @@ func (h *Relay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.MethodDelete, http.MethodConnect, http.MethodOptions, http.MethodTrace, http.MethodPatch}, r.Method) {
 			method = r.Method
 		}
-		h.refuse(w, e, http.StatusForbidden, fmt.Sprintf(
+		// A path the relay serves, with the wrong method or a query, is a
+		// malformed request; any other path is not relayed by decision.
+		e.Outcome = audit.RefusedPolicy
+		if slices.ContainsFunc(h.Routes, func(route RelayRoute) bool {
+			return route.Path == r.URL.Path || route.Prefix && strings.HasPrefix(r.URL.Path, route.Path)
+		}) {
+			e.Outcome = audit.RefusedRequest
+		}
+		h.refuse(r.Context(), w, e, http.StatusForbidden, fmt.Sprintf(
 			"the gateway relays only the provider's sign-in and account requests (method %s; query parameters present: %t)",
 			method, r.URL.RawQuery != ""))
 		return
 	}
 	body, err := readBounded(r.Body, maxRelayRequestBytes)
 	if err != nil {
-		h.refuse(w, e, http.StatusRequestEntityTooLarge, "relayed request exceeds gateway limit")
+		h.refuse(r.Context(), w, e, http.StatusRequestEntityTooLarge, "relayed request exceeds gateway limit")
 		return
 	}
 	upstream, err := http.NewRequestWithContext(r.Context(), r.Method, h.UpstreamURL+r.URL.RequestURI(), bytes.NewReader(body))
 	if err != nil {
-		h.refuse(w, e, http.StatusInternalServerError, "failed to build relayed request")
+		h.refuse(r.Context(), w, e, http.StatusInternalServerError, "failed to build relayed request")
 		return
 	}
 	for name, values := range r.Header {
@@ -95,7 +104,7 @@ func (h *Relay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.Auth != nil && h.Auth.Mode() != modelauth.WorkloadMode {
 		if err = h.Auth.Authorize(upstream); err != nil {
-			h.refuse(w, e, http.StatusServiceUnavailable, "provider authentication is unavailable")
+			h.refuse(r.Context(), w, e, http.StatusServiceUnavailable, "provider authentication is unavailable")
 			return
 		}
 	}
@@ -103,17 +112,17 @@ func (h *Relay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := client.Do(upstream)
 	if err != nil {
-		h.refuse(w, e, http.StatusBadGateway, "relayed request failed")
+		h.refuse(r.Context(), w, e, http.StatusBadGateway, "relayed request failed")
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
 	reply, err := readBounded(resp.Body, maxRelayResponseBytes)
 	if err != nil {
-		h.refuse(w, e, http.StatusBadGateway, "relayed response exceeds gateway limit")
+		h.refuse(r.Context(), w, e, http.StatusBadGateway, "relayed response exceeds gateway limit")
 		return
 	}
-	e.Allowed, e.UpstreamStatus = true, resp.StatusCode
-	h.log(e)
+	e.Allowed, e.Outcome, e.UpstreamStatus = true, audit.Served, resp.StatusCode
+	h.log(r.Context(), e)
 	if contentType := resp.Header.Get("Content-Type"); contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
@@ -122,14 +131,17 @@ func (h *Relay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(reply)
 }
 
-func (h *Relay) refuse(w http.ResponseWriter, e audit.Event, status int, reason string) {
+func (h *Relay) refuse(ctx context.Context, w http.ResponseWriter, e audit.Event, status int, reason string) {
 	e.DenyReason = reason
-	h.log(e)
+	if e.Outcome == "" {
+		e.Outcome = gateway.RefusalOutcome(status)
+	}
+	h.log(ctx, e)
 	http.Error(w, reason, status)
 }
 
-func (h *Relay) log(e audit.Event) {
+func (h *Relay) log(ctx context.Context, e audit.Event) {
 	if h.AuditLogger != nil {
-		h.AuditLogger.Log(e)
+		gateway.Record(ctx, h.AuditLogger, e)
 	}
 }

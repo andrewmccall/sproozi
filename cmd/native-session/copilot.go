@@ -14,18 +14,37 @@ import (
 	"github.com/andrewmccall/sproozi/internal/harness"
 )
 
-const (
-	// copilotMCP and copilotBashEnv are launch-generated, outside the
-	// workspace and portable state.
-	copilotMCP     = "/tmp/sproozi-native/copilot-mcp.json"
-	copilotBashEnv = "/tmp/sproozi-native/copilot-bash-env"
-)
+// copilotEntry is Copilot's registry entry: its credential variables, sign-in
+// file and MCP file name.
+var copilotEntry, _ = harness.Managed(harness.NativeCopilot)
+
+// copilotMCP and copilotBashEnv are launch-generated, outside the workspace
+// and portable state.
+var copilotMCP = "/tmp/sproozi-native/" + copilotEntry.MCP.File
+
+const copilotBashEnv = "/tmp/sproozi-native/copilot-bash-env"
+
+// copilotCredential reports how a Copilot launch reaches its provider, from
+// the variables NativeBaseEnvironment set in env: the gateway-held key, a
+// gateway-held GitHub token, or neither, its own sign-in.
+func copilotCredential(env []string) harness.NativeCredential {
+	set := func(name string) bool {
+		return slices.ContainsFunc(env, func(e string) bool { return strings.HasPrefix(e, name+"=") })
+	}
+	switch {
+	case set(copilotEntry.KeyEnv):
+		return harness.CredentialKey
+	case set(copilotEntry.TokenEnv):
+		return harness.CredentialToken
+	}
+	return harness.CredentialSignIn
+}
 
 // prepareCopilotLaunch writes Copilot's launch files and returns its
 // arguments (ADR 0048). thread is the session to start or resume: the
 // supervisor names a new one itself, so it never adopts a session Copilot
-// chose. Copilot keeps its login in config.json, so trust is merged into
-// that file rather than replacing it.
+// chose. Copilot keeps its login in its registry SignInFile, config.json, so
+// trust is merged into that file rather than replacing it.
 func prepareCopilotLaunch(c config, thread string, env []string) ([]string, []string, error) {
 	if thread == "" {
 		return nil, nil, errors.New("copilot launch needs a session ID")
@@ -33,7 +52,7 @@ func prepareCopilotLaunch(c config, thread string, env []string) ([]string, []st
 	if err := os.MkdirAll(copilotHome, 0700); err != nil {
 		return nil, nil, err
 	}
-	if err := trustCopilotWorkspace(filepath.Join(copilotHome, "config.json")); err != nil {
+	if err := trustCopilotWorkspace(filepath.Join(copilotHome, copilotEntry.SignInFile)); err != nil {
 		return nil, nil, err
 	}
 	if err := linkCopilotApp(); err != nil {
@@ -67,15 +86,15 @@ func prepareCopilotLaunch(c config, thread string, env []string) ([]string, []st
 	args := []string{"--session-id", thread, "--allow-all", "--disable-builtin-mcps",
 		"--additional-mcp-config", "@" + copilotMCP, "--no-auto-update"}
 	model := c.Model
-	switch {
-	case slices.ContainsFunc(env, func(e string) bool { return strings.HasPrefix(e, "COPILOT_PROVIDER_API_KEY=") }):
+	switch copilotCredential(env) {
+	case harness.CredentialKey:
 		// A gateway-held key: bring-your-own-key mode on the OpenAI route,
 		// offline from GitHub.
 		env = append(env, "COPILOT_PROVIDER_BASE_URL=https://api.openai.com/v1", "COPILOT_PROVIDER_TYPE=openai",
 			"COPILOT_PROVIDER_WIRE_API=responses", "COPILOT_OFFLINE=true")
 		// Bring-your-own-key mode has no default model of its own.
 		model = cmp.Or(model, copilotKeyModel)
-	case !slices.ContainsFunc(env, func(e string) bool { return strings.HasPrefix(e, "COPILOT_GITHUB_TOKEN=") }):
+	case harness.CredentialSignIn:
 		// Its own sign-in: Copilot prefers GH_TOKEN, or gh's own token, to
 		// its /login, so only the agent's shell gets the gh placeholder.
 		if err = installManagedFile(copilotBashEnv, []byte("export GH_TOKEN="+nativeGHPlaceholder+"\n"), 0400); err != nil {

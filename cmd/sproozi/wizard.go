@@ -56,7 +56,7 @@ func (q *options) wizard(in *bufio.Reader, w io.Writer, inst localsetup.Installa
 		return nil
 	}
 	kind := harness.NativeKind(q.harness)
-	choices := signInChoices[kind]
+	choices := signInChoices(kind)
 	if len(choices) == 0 {
 		return nil
 	}
@@ -67,28 +67,29 @@ func (q *options) wizard(in *bufio.Reader, w io.Writer, inst localsetup.Installa
 	return ask(in, w, fmt.Sprintf("How should %s sign in to its model provider?", kind), choices, q)
 }
 
-func signIn(q *options)   { q.signIn = true }
-func useToken(q *options) { q.token = true }
-func apiKey(*options)     {}
+func signIn(q *options)     { q.signIn = true }
+func useToken(q *options)   { q.token = true }
+func apiKey(*options)       {}
+func useChatGPT(q *options) { q.chatgpt = true }
 
-// signInChoices are the ways each agent can reach its provider, most common
-// first (docs/guides/local-sessions.md#choose-how-an-agent-signs-in).
-var signInChoices = map[harness.NativeKind][]choice{
-	harness.NativeCodex: {
-		{"An OpenAI API key, held by the gateway", apiKey},
-		{"A ChatGPT plan, signed in now in your browser and held by the gateway", func(q *options) { q.chatgpt = true }},
-		{"Codex signs in itself with ChatGPT in its first session", signIn},
-	},
-	harness.NativeClaude: {
-		{"An Anthropic API key, held by the gateway", apiKey},
-		{"A sign-in token from \"claude setup-token\", held by the gateway", useToken},
-		{"Claude Code signs in itself with /login in its first session", signIn},
-	},
-	harness.NativeCopilot: {
-		{"Copilot signs in itself with /login and your Copilot plan in its first session", signIn},
-		{"A GitHub token with Copilot access, held by the gateway", useToken},
-		{"An OpenAI API key, held by the gateway (no Copilot plan needed)", apiKey},
-	},
+// signInAnswers sets the flag each registry sign-in answer stands for.
+var signInAnswers = map[harness.SignInAnswer]func(*options){
+	harness.AnswerKey: apiKey, harness.AnswerChatGPT: useChatGPT, harness.AnswerToken: useToken,
+	harness.AnswerSignIn: signIn,
+}
+
+// signInChoices are the registry's sign-in answers for kind, most common
+// first; none for a kind that is not managed.
+func signInChoices(kind harness.NativeKind) []choice {
+	h, err := harness.Managed(kind)
+	if err != nil {
+		return nil
+	}
+	choices := make([]choice, 0, len(h.SignInChoices))
+	for _, c := range h.SignInChoices {
+		choices = append(choices, choice{c.Label, signInAnswers[c.Answer]})
+	}
+	return choices
 }
 
 func configured(inst localsetup.Installation, kind harness.NativeKind) *localsetup.Harness {

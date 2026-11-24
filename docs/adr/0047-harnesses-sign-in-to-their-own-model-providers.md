@@ -50,10 +50,18 @@ would have to be repeated for each new harness.
   and never record the credential. A request with no credential is refused
   before budget is reserved. The provider's sign-in relay passes only its
   sign-in and refresh requests, unrecorded and uncharged.
+
+  Corrected 2026-11-20: the relay is uncharged but not unrecorded. It audits
+  each request's path, status and refusal reason, never its body, query or
+  tokens (`internal/endpoints/model/signin.go`).
 - **The gateway refuses a forwarded credential elsewhere.** `LeakGuard` keeps
   each run's forwarded credentials in memory until the run's maximum duration
   has passed, and refuses any inspected request to another authority whose
   URL, headers or streamed body contain one.
+
+  Corrected 2026-11-20: a URL or header refusal is now audited, naming the
+  route and never the credential
+  ([ADR 0070](0070-gateway-routes-declare-admission-and-requests-record-one-decision.md)).
 - **Budgets keep counting tokens.** Reservations, settlement and the optional
   pricing table are unchanged for every mechanism.
 - **MCP, GitHub and destination credentials stay on the gateway.**
@@ -67,6 +75,11 @@ would have to be repeated for each new harness.
 | Gateway-held sign-in token | `--token` with a key input; `providerTokenKind: token` | `openai-sign-in-token`, `anthropic-sign-in-token`, `copilot-sign-in-token` (a GitHub token) | Placeholder key |
 | Gateway-held ChatGPT plan sign-in | `--chatgpt`: browser sign-in, stored in `credentials/chatgpt-session.json` | `MODEL_AUTH_MODE=chatgpt` | Placeholder key |
 | The harness's own sign-in | `--sign-in`: a persistent login volume per installation and placement | `MODEL_AUTH_MODE=workload` and no key or token for the provider | `clientConfig.signIn`: a Secret delivered as a file and, optionally, an environment variable; no placeholder |
+
+Corrected 2026-11-20: "Placeholder key" in the Kubernetes sandbox column is
+the placeholder the harness's client sends, which the controller sets in the
+Pod only for some harnesses; see
+[ADR 0071](0071-a-pod-gets-a-key-placeholder-only-for-a-client-that-reads-it.md).
 
 A Kubernetes gateway chooses per provider: a key, then a token, then, in
 workload mode, forwarding. One gateway can hold an OpenAI key while Claude Code

@@ -1,0 +1,281 @@
+[
+  {
+    "kind": "codex",
+    "answer": 1,
+    "asked": "How should codex sign in to its model provider?\n  1) An OpenAI API key, held by the gateway\n  2) A ChatGPT plan, signed in now in your browser and held by the gateway\n  3) Codex signs in itself with ChatGPT in its first session\nChoose 1-3 [1]: \n",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "codex",
+    "answer": 2,
+    "asked": "How should codex sign in to its model provider?\n  1) An OpenAI API key, held by the gateway\n  2) A ChatGPT plan, signed in now in your browser and held by the gateway\n  3) Codex signs in itself with ChatGPT in its first session\nChoose 1-3 [1]: \n",
+    "signIn": false,
+    "token": false,
+    "chatgpt": true,
+    "error": ""
+  },
+  {
+    "kind": "codex",
+    "answer": 3,
+    "asked": "How should codex sign in to its model provider?\n  1) An OpenAI API key, held by the gateway\n  2) A ChatGPT plan, signed in now in your browser and held by the gateway\n  3) Codex signs in itself with ChatGPT in its first session\nChoose 1-3 [1]: \n",
+    "signIn": true,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "codex",
+    "answer": 4,
+    "asked": "How should codex sign in to its model provider?\n  1) An OpenAI API key, held by the gateway\n  2) A ChatGPT plan, signed in now in your browser and held by the gateway\n  3) Codex signs in itself with ChatGPT in its first session\nChoose 1-3 [1]: Type a number from 1 to 3, or press Enter for 1.\nChoose 1-3 [1]: Type a number from 1 to 3, or press Enter for 1.\nChoose 1-3 [1]: ",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": "setup stopped before an answer; give --harness, and --sign-in, --token or a key, to run it without questions"
+  },
+  {
+    "kind": "claude-code",
+    "answer": 1,
+    "asked": "How should claude-code sign in to its model provider?\n  1) An Anthropic API key, held by the gateway\n  2) A sign-in token from \"claude setup-token\", held by the gateway\n  3) Claude Code signs in itself with /login in its first session\nChoose 1-3 [1]: \n",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "claude-code",
+    "answer": 2,
+    "asked": "How should claude-code sign in to its model provider?\n  1) An Anthropic API key, held by the gateway\n  2) A sign-in token from \"claude setup-token\", held by the gateway\n  3) Claude Code signs in itself with /login in its first session\nChoose 1-3 [1]: \n",
+    "signIn": false,
+    "token": true,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "claude-code",
+    "answer": 3,
+    "asked": "How should claude-code sign in to its model provider?\n  1) An Anthropic API key, held by the gateway\n  2) A sign-in token from \"claude setup-token\", held by the gateway\n  3) Claude Code signs in itself with /login in its first session\nChoose 1-3 [1]: \n",
+    "signIn": true,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "claude-code",
+    "answer": 4,
+    "asked": "How should claude-code sign in to its model provider?\n  1) An Anthropic API key, held by the gateway\n  2) A sign-in token from \"claude setup-token\", held by the gateway\n  3) Claude Code signs in itself with /login in its first session\nChoose 1-3 [1]: Type a number from 1 to 3, or press Enter for 1.\nChoose 1-3 [1]: Type a number from 1 to 3, or press Enter for 1.\nChoose 1-3 [1]: ",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": "setup stopped before an answer; give --harness, and --sign-in, --token or a key, to run it without questions"
+  },
+  {
+    "kind": "opencode",
+    "answer": 1,
+    "asked": "",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "opencode",
+    "answer": 2,
+    "asked": "",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "opencode",
+    "answer": 3,
+    "asked": "",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "opencode",
+    "answer": 4,
+    "asked": "",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "copilot",
+    "answer": 1,
+    "asked": "How should copilot sign in to its model provider?\n  1) Copilot signs in itself with /login and your Copilot plan in its first session\n  2) A GitHub token with Copilot access, held by the gateway\n  3) An OpenAI API key, held by the gateway (no Copilot plan needed)\nChoose 1-3 [1]: \n",
+    "signIn": true,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "copilot",
+    "answer": 2,
+    "asked": "How should copilot sign in to its model provider?\n  1) Copilot signs in itself with /login and your Copilot plan in its first session\n  2) A GitHub token with Copilot access, held by the gateway\n  3) An OpenAI API key, held by the gateway (no Copilot plan needed)\nChoose 1-3 [1]: \n",
+    "signIn": false,
+    "token": true,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "copilot",
+    "answer": 3,
+    "asked": "How should copilot sign in to its model provider?\n  1) Copilot signs in itself with /login and your Copilot plan in its first session\n  2) A GitHub token with Copilot access, held by the gateway\n  3) An OpenAI API key, held by the gateway (no Copilot plan needed)\nChoose 1-3 [1]: \n",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "copilot",
+    "answer": 4,
+    "asked": "How should copilot sign in to its model provider?\n  1) Copilot signs in itself with /login and your Copilot plan in its first session\n  2) A GitHub token with Copilot access, held by the gateway\n  3) An OpenAI API key, held by the gateway (no Copilot plan needed)\nChoose 1-3 [1]: Type a number from 1 to 3, or press Enter for 1.\nChoose 1-3 [1]: Type a number from 1 to 3, or press Enter for 1.\nChoose 1-3 [1]: ",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": "setup stopped before an answer; give --harness, and --sign-in, --token or a key, to run it without questions"
+  },
+  {
+    "kind": "hermes",
+    "answer": 1,
+    "asked": "",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "hermes",
+    "answer": 2,
+    "asked": "",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "hermes",
+    "answer": 3,
+    "asked": "",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "hermes",
+    "answer": 4,
+    "asked": "",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "not-registered",
+    "answer": 1,
+    "asked": "",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "not-registered",
+    "answer": 2,
+    "asked": "",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "not-registered",
+    "answer": 3,
+    "asked": "",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "not-registered",
+    "answer": 4,
+    "asked": "",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "",
+    "answer": 1,
+    "asked": "Which agent do you want to set up?\n  1) codex: OpenAI Codex CLI\n  2) claude-code: Anthropic Claude Code\n  3) copilot: GitHub Copilot CLI\nChoose 1-3 [1]: \nHow should codex sign in to its model provider?\n  1) An OpenAI API key, held by the gateway\n  2) A ChatGPT plan, signed in now in your browser and held by the gateway\n  3) Codex signs in itself with ChatGPT in its first session\nChoose 1-3 [1]: \n",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "",
+    "answer": 2,
+    "asked": "Which agent do you want to set up?\n  1) codex: OpenAI Codex CLI\n  2) claude-code: Anthropic Claude Code\n  3) copilot: GitHub Copilot CLI\nChoose 1-3 [1]: \nHow should claude-code sign in to its model provider?\n  1) An Anthropic API key, held by the gateway\n  2) A sign-in token from \"claude setup-token\", held by the gateway\n  3) Claude Code signs in itself with /login in its first session\nChoose 1-3 [1]: \n",
+    "signIn": false,
+    "token": true,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "",
+    "answer": 3,
+    "asked": "Which agent do you want to set up?\n  1) codex: OpenAI Codex CLI\n  2) claude-code: Anthropic Claude Code\n  3) copilot: GitHub Copilot CLI\nChoose 1-3 [1]: \nHow should copilot sign in to its model provider?\n  1) Copilot signs in itself with /login and your Copilot plan in its first session\n  2) A GitHub token with Copilot access, held by the gateway\n  3) An OpenAI API key, held by the gateway (no Copilot plan needed)\nChoose 1-3 [1]: \n",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "",
+    "answer": 4,
+    "asked": "Which agent do you want to set up?\n  1) codex: OpenAI Codex CLI\n  2) claude-code: Anthropic Claude Code\n  3) copilot: GitHub Copilot CLI\nChoose 1-3 [1]: Type a number from 1 to 3, or press Enter for 1.\nChoose 1-3 [1]: Type a number from 1 to 3, or press Enter for 1.\nChoose 1-3 [1]: ",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": "setup stopped before an answer; give --harness, and --sign-in, --token or a key, to run it without questions"
+  },
+  {
+    "kind": "codex (set up)",
+    "answer": 1,
+    "asked": "How should codex sign in to its model provider?\n  1) Keep what it uses now: its own sign-in\n  2) An OpenAI API key, held by the gateway\n  3) A ChatGPT plan, signed in now in your browser and held by the gateway\n  4) Codex signs in itself with ChatGPT in its first session\nChoose 1-4 [1]: \n",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "claude-code (set up)",
+    "answer": 1,
+    "asked": "How should claude-code sign in to its model provider?\n  1) Keep what it uses now: its own sign-in\n  2) An Anthropic API key, held by the gateway\n  3) A sign-in token from \"claude setup-token\", held by the gateway\n  4) Claude Code signs in itself with /login in its first session\nChoose 1-4 [1]: \n",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  },
+  {
+    "kind": "copilot (set up)",
+    "answer": 1,
+    "asked": "How should copilot sign in to its model provider?\n  1) Keep what it uses now: its own sign-in\n  2) Copilot signs in itself with /login and your Copilot plan in its first session\n  3) A GitHub token with Copilot access, held by the gateway\n  4) An OpenAI API key, held by the gateway (no Copilot plan needed)\nChoose 1-4 [1]: \n",
+    "signIn": false,
+    "token": false,
+    "chatgpt": false,
+    "error": ""
+  }
+]

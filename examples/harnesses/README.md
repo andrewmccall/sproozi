@@ -42,12 +42,13 @@ remote-control sessions are outside these examples.
 `--setting-sources ''` and `--strict-mcp-config` restrict settings and MCP loading;
 hooks and slash-command discovery are disabled. No existing sessions are mounted.
 
-These CLIs receive harmless model-key placeholders, and the gateway holds the
-provider credential. To have a harness use its own sign-in instead, such as a
+These CLIs receive harmless model-key placeholders from their launch helper or
+command, not from the controller, and the gateway holds the provider
+credential. To have a harness use its own sign-in instead, such as a
 Claude subscription token from `claude setup-token`, add
 [`clientConfig.signIn`](../../docs/reference/agentruntime.md#harness-sign-in) to
-its runtime and set `MODEL_AUTH_MODE=workload` on the gateway; the placeholder
-key is then left out. For Claude Code, name the Secret key with
+its runtime and set `MODEL_AUTH_MODE=workload` on the gateway; `claude-launch.py`
+then leaves its placeholder key out. For Claude Code, name the Secret key with
 `env: CLAUDE_CODE_OAUTH_TOKEN`. For Copilot on its own Copilot plan, remove the
 `COPILOT_PROVIDER_*` and `COPILOT_OFFLINE` lines and name the GitHub token with
 `env: COPILOT_GITHUB_TOKEN`. The gateway certificate must cover the selected provider authority,

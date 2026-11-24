@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"path"
 	"slices"
@@ -15,12 +16,27 @@ import (
 	"github.com/andrewmccall/sproozi/internal/audit"
 )
 
+// Admission says who admits a route's requests (ADR 0070).
+type Admission uint8
+
+const (
+	// AdmitCapability, the zero value: the dispatcher checks and meters the
+	// route's Capability, which must be set.
+	AdmitCapability Admission = iota
+	// AdmitSelected: the handler selects a capability from the request and
+	// checks it itself, as named MCP does. The route has no Capability.
+	AdmitSelected
+)
+
 // Route declares the guarantee and capability of an exact upstream authority.
 // It is the single source of both: the Dispatcher enforces the capability and
 // AuditEvent copies both into every handler's record. Authentication belongs
 // to proxytransport; handlers authorize the operation.
 type Route struct {
-	Capability  string
+	Capability sprooziv1alpha1.CapabilityKind
+	// Admission says who admits a request; Validate refuses a route with a
+	// handler and no valid declaration.
+	Admission   Admission
 	Tier        audit.EnforcementTier
 	Handler     http.Handler
 	Budgets     *budget.Tracker
@@ -60,6 +76,47 @@ func (d Dispatcher) Select(authority, requestPath string) (Route, string, bool) 
 
 type Dispatcher map[string]Route
 
+// Validate refuses a route or path route that has a handler and no valid
+// admission: a capability for AdmitCapability, or none for AdmitSelected. A route without a handler is a reserved,
+// closed authority. Compositions call it before serving.
+func (d Dispatcher) Validate() error {
+	var problems []string
+	for authority, route := range d {
+		if err := route.validate(); err != nil {
+			problems = append(problems, authority+": "+err.Error())
+		}
+		for _, p := range route.Paths {
+			if err := p.Route.validate(); err != nil {
+				problems = append(problems, authority+p.Prefix+": "+err.Error())
+			}
+		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	slices.Sort(problems)
+	return fmt.Errorf("gateway: routes without a valid admission: %s", strings.Join(problems, "; "))
+}
+
+func (r Route) validate() error {
+	if r.Handler == nil {
+		return nil
+	}
+	switch r.Admission {
+	case AdmitCapability:
+		if r.Capability == "" {
+			return errors.New("serves without a capability; set Capability, or declare AdmitSelected for a handler that selects its own")
+		}
+	case AdmitSelected:
+		if r.Capability != "" {
+			return fmt.Errorf("declares capability %s, which the dispatcher would not check", r.Capability)
+		}
+	default:
+		return fmt.Errorf("has unknown admission %d", r.Admission)
+	}
+	return nil
+}
+
 type routeContextKey struct{}
 
 func (d Dispatcher) Allows(authority string) bool {
@@ -70,52 +127,49 @@ func (d Dispatcher) Allows(authority string) bool {
 // ServeHTTP preserves streaming, flushing and response lifetime. Buffering, when
 // required for validation, belongs to the individual capability implementation.
 func (d Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	identity, ok := IdentityFromContext(r.Context())
-	if !ok {
+	if _, ok := IdentityFromContext(r.Context()); !ok {
 		writeDenial(w, http.StatusUnauthorized, "authentication_error", "identity_required",
 			"gateway identity required; connect through the gateway proxy with the run's token")
 		return
 	}
-	route, _, ok := d.Select(r.Host, r.URL.Path)
+	route, key, ok := d.Select(r.Host, r.URL.Path)
+	ctx, decision := withDecision(context.WithValue(r.Context(), routeContextKey{}, route))
 	if !ok || route.Handler == nil {
-		writeDenial(w, http.StatusForbidden, "permission_error", "destination_denied",
-			"destination "+r.Host+" is not enabled at this gateway")
+		message := "destination " + r.Host + " is not enabled at this gateway"
+		if ok {
+			// A reserved authority, or one served only on other paths. An
+			// unknown authority has no route to record through; the proxy
+			// refuses and records it before dispatch.
+			e := AuditEvent(ctx, key)
+			e.DenyReason, e.Outcome = message, audit.RefusedPolicy
+			Record(ctx, route.AuditLogger, e)
+		}
+		writeDenial(w, http.StatusForbidden, "permission_error", "destination_denied", message)
 		return
 	}
-	ctx := context.WithValue(r.Context(), routeContextKey{}, route)
+	// A route without a valid declaration is refused here too, so a
+	// composition that never called Validate still cannot serve it unchecked.
+	if err := route.validate(); err != nil {
+		message := "the gateway route for " + key + " " + err.Error()
+		e := AuditEvent(ctx, key)
+		e.DenyReason, e.Outcome = message, audit.RefusedPolicy
+		Record(ctx, route.AuditLogger, e)
+		writeDenial(w, http.StatusForbidden, "permission_error", "route_undeclared", message)
+		return
+	}
 	// Named MCP routes select their capability after parsing the server name
 	// and check it with the same Permits.
-	if route.Capability != "" {
-		capability := sprooziv1alpha1.CapabilityKind(route.Capability)
-		if !identity.Permits(capability) {
-			reason := "the run does not request capability " + route.Capability +
-				"; add it to the run's capabilities"
-			if slices.Contains(identity.Capabilities, capability) {
-				reason = "policy " + identity.Policy.Name + " does not allow capability " + route.Capability +
-					"; add it to the policy's allowedCapabilities"
-			}
-			if route.AuditLogger != nil {
-				event := AuditEvent(ctx, route.Capability)
-				event.DenyReason = reason
-				route.AuditLogger.Log(event)
-			}
-			writeDenial(w, http.StatusForbidden, "permission_error", "capability_denied", reason)
+	if route.Admission == AdmitCapability {
+		var refusal *Refusal
+		if ctx, refusal = Admit(ctx, route.Capability); refusal != nil {
+			Refuse(ctx, w, refusal)
 			return
 		}
-		meter, err := identity.Meter(ctx, route.Budgets, capability)
-		if errors.Is(err, ErrBudgetUnavailable) {
-			writeDenial(w, http.StatusServiceUnavailable, "api_error", "budget_unavailable",
-				"budget accounting for "+route.Capability+" is unavailable; retry later")
-			return
-		}
-		if err != nil {
-			writeDenial(w, http.StatusForbidden, "permission_error", "allocation_denied",
-				"the "+route.Capability+" allocation for this run is missing or exhausted")
-			return
-		}
-		ctx = budget.WithMeter(ctx, meter)
 	}
 	route.Handler.ServeHTTP(w, r.WithContext(ctx))
+	// A handler that neither recorded nor declared its request unrecorded
+	// left an omission; record it for the route.
+	recordOmission(ctx, decision, route, key)
 }
 
 // writeDenial writes the one error body that both the Anthropic and OpenAI

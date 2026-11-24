@@ -159,6 +159,10 @@ tasks and
 an executor answers a task for another harness `unsupported`. Codex and Claude Code on one cluster are two executors in two
 namespaces, which the CLI chooses with `--namespace`
 ([Claude Code executor example](../../examples/portable-workflows/kubernetes/claude/kustomization.yaml)).
+An executor configured with `repositories` or `projects` for a harness it
+cannot start work for, such as Copilot, fails at start-up with
+`work: fixed owner configuration required`; configured without them, it still
+runs sessions of its harness moved to it.
 A Claude Code session started on the cluster starts Claude Code fresh, as a
 local Docker session does: the supervisor writes onboarding as complete and
 the workspace as trusted before launch, so no first-run or folder-trust
@@ -239,6 +243,15 @@ see [ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md),
 [local setup](../guides/local-sessions.md#choose-how-an-agent-signs-in) and
 [AgentRuntime sign-in](agentruntime.md#harness-sign-in). The rest of this
 section describes gateway-held credentials.
+
+With a gateway-held credential, each client sends a public placeholder key,
+which the gateway replaces. In an AgentRun Pod, the controller sets
+`OPENAI_API_KEY` only for `codex`, whose provider configuration reads it
+(`env_key`), and for a runtime that names no harness. `claude-launch.py` sets
+Claude Code's `ANTHROPIC_API_KEY`, `hermes-launch.py` sets Hermes's
+`OPENAI_API_KEY`, and the OpenCode and Copilot examples set their key in the
+launch command (`apiKey`, `COPILOT_PROVIDER_API_KEY`). A managed session's
+supervisor gives its harness the placeholder in the launch environment.
 
 Codex, Hermes and the OpenCode and Copilot examples use the existing OpenAI
 Responses route. Copilot runs in its bring-your-own-key mode

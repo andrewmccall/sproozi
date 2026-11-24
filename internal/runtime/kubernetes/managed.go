@@ -29,7 +29,6 @@ const checkpointTemporaryVolume = "checkpoint-tmp"
 const workspaceDirectory = "/workspace"
 const workspaceVolume = "workspace"
 const managedTemplateEnabledValue = "true"
-const openAIAPIKey = "OPENAI_API_KEY"
 
 func addManagedNativeContract(ctx context.Context, kube client.Client, run *api.AgentRun, template *api.AgentTemplate,
 	runtime *api.AgentRuntime, contract *corev1.ConfigMap,

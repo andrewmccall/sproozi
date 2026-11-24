@@ -191,7 +191,7 @@ func anthropicGateway(t *testing.T, limits api.EndpointBudget, client *http.Clie
 		HTTPClient: client, AuditLogger: g.audit, Logger: slog.New(slog.NewTextHandler(g.logs, nil)), Now: now})
 	identity := testExecutionGrant()
 	identity.Policy.Spec.Budgets[api.CapabilityModelInference] = limits
-	routes := gateway.Dispatcher{model.AnthropicAuthority: {Capability: string(api.CapabilityModelInference), Handler: h, Budgets: g.tracker}}
+	routes := gateway.Dispatcher{model.AnthropicAuthority: {Capability: api.CapabilityModelInference, Handler: h, Budgets: g.tracker}}
 	g.serve = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		routes.ServeHTTP(w, r.WithContext(gateway.WithIdentity(r.Context(), identity)))
 	})
@@ -592,7 +592,7 @@ func anthropicGatewayAt(t *testing.T, upstream string, client *http.Client, now 
 	}
 	identity := testExecutionGrant()
 	identity.Policy.Spec.Budgets[api.CapabilityModelInference] = api.EndpointBudget{MaxUnits: 100_000}
-	routes := gateway.Dispatcher{model.AnthropicAuthority: {Capability: string(api.CapabilityModelInference), Handler: h, Budgets: g.tracker}}
+	routes := gateway.Dispatcher{model.AnthropicAuthority: {Capability: api.CapabilityModelInference, Handler: h, Budgets: g.tracker}}
 	g.serve = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		routes.ServeHTTP(w, r.WithContext(gateway.WithIdentity(r.Context(), identity)))
 	})
@@ -773,7 +773,7 @@ func TestDrainSettlesCallsInFlight(t *testing.T) {
 		UpstreamURL: testModelUpstream, HTTPClient: client, AuditLogger: g.audit, Now: fixedClock(), Drain: drain,
 		Logger: slog.New(slog.NewTextHandler(g.logs, nil))})
 	identity := testExecutionGrant()
-	routes := gateway.Dispatcher{model.AnthropicAuthority: {Capability: string(api.CapabilityModelInference), Handler: h, Budgets: g.tracker}}
+	routes := gateway.Dispatcher{model.AnthropicAuthority: {Capability: api.CapabilityModelInference, Handler: h, Budgets: g.tracker}}
 	g.serve = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		routes.ServeHTTP(w, r.WithContext(gateway.WithIdentity(r.Context(), identity)))
 	})

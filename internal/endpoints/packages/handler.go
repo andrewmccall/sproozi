@@ -2,11 +2,10 @@
 package packages
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
-
-	"github.com/andrewmccall/sproozi/internal/budget"
 
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/gateway"
@@ -39,21 +38,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handlePackage(w http.ResponseWriter, r *http.Request, e audit.Event, identity *gateway.ExecutionGrant) {
 	decision := packagepolicy.AuthorizePath(identity.Policy.Spec.PackagesInstall, packagepolicy.Request{Method: r.Method, Host: r.URL.Hostname(), Path: r.URL.Path})
 	if !decision.Allowed {
-		h.deny(w, e, http.StatusForbidden, "package request denied: "+decision.Reason)
+		h.deny(r.Context(), w, e, http.StatusForbidden, "package request denied: "+decision.Reason)
 		return
 	}
 	if h.Config.HTTPClient == nil {
-		h.deny(w, e, http.StatusServiceUnavailable, "package gateway unavailable")
+		h.deny(r.Context(), w, e, http.StatusServiceUnavailable, "package gateway unavailable")
 		return
 	}
 	upstreamURL, err := packageUpstreamURL("https://pypi.org", r.URL.Hostname(), r.URL.Path)
 	if err != nil || r.URL.RawQuery != "" {
-		h.deny(w, e, http.StatusForbidden, "package URL is not canonical")
+		e.Outcome = audit.RefusedRequest
+		h.deny(r.Context(), w, e, http.StatusForbidden, "package URL is not canonical")
 		return
 	}
 	upstreamReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, nil)
 	if err != nil {
-		h.deny(w, e, http.StatusInternalServerError, "failed to build package request")
+		h.deny(r.Context(), w, e, http.StatusInternalServerError, "failed to build package request")
 		return
 	}
 	// Never let the generic client follow a registry redirect. Each redirect
@@ -63,33 +63,36 @@ func (h *Handler) handlePackage(w http.ResponseWriter, r *http.Request, e audit.
 	packageClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
-	if err := budget.FromContext(r.Context()).SpendRequest(r.Context()); err != nil {
-		h.deny(w, e, http.StatusTooManyRequests, err.Error())
+	if err := gateway.Spend(r.Context()); err != nil {
+		e.Outcome = gateway.SpendOutcome(err)
+		h.deny(r.Context(), w, e, http.StatusTooManyRequests, err.Error())
 		return
 	}
 	resp, err := packageClient.Do(upstreamReq)
 	if err != nil {
-		h.deny(w, e, http.StatusBadGateway, "package upstream request failed")
+		h.deny(r.Context(), w, e, http.StatusBadGateway, "package upstream request failed")
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-		h.deny(w, e, http.StatusBadGateway, "package redirect requires explicit revalidation")
+		e.Outcome = audit.RefusedPolicy
+		h.deny(r.Context(), w, e, http.StatusBadGateway, "package redirect requires explicit revalidation")
 		return
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		h.copyResponse(w, resp, nil)
-		h.auditAllowed(e, resp.StatusCode)
+		h.auditAllowed(r.Context(), e, resp.StatusCode)
 		return
 	}
 	if decision.Artifact != nil {
 		body, verifyErr := packagepolicy.VerifyArtifact(identity.Policy.Spec.PackagesInstall, decision.Artifact, resp.Body)
 		if verifyErr != nil {
-			h.deny(w, e, http.StatusBadGateway, "package artifact verification failed")
+			e.Outcome = audit.RefusedPolicy
+			h.deny(r.Context(), w, e, http.StatusBadGateway, "package artifact verification failed")
 			return
 		}
 		h.copyResponse(w, resp, body)
-		h.auditAllowed(e, resp.StatusCode)
+		h.auditAllowed(r.Context(), e, resp.StatusCode)
 		return
 	}
 	// Metadata is bounded and every advertised wheel link must be in the
@@ -97,11 +100,12 @@ func (h *Handler) handlePackage(w http.ResponseWriter, r *http.Request, e audit.
 	// where VerifyArtifact performs the byte-level digest check.
 	body, verifyErr := packagepolicy.VerifyMetadata(identity.Policy.Spec.PackagesInstall, resp.Body)
 	if verifyErr != nil {
-		h.deny(w, e, http.StatusBadGateway, "package metadata is invalid")
+		e.Outcome = audit.RefusedPolicy
+		h.deny(r.Context(), w, e, http.StatusBadGateway, "package metadata is invalid")
 		return
 	}
 	h.copyResponse(w, resp, body)
-	h.auditAllowed(e, resp.StatusCode)
+	h.auditAllowed(r.Context(), e, resp.StatusCode)
 }
 
 // packageUpstreamURL preserves the registry host selected by the client. A
@@ -132,16 +136,19 @@ func (h *Handler) copyResponse(w http.ResponseWriter, response *http.Response, b
 	w.WriteHeader(response.StatusCode)
 	_, _ = w.Write(body)
 }
-func (h *Handler) auditAllowed(e audit.Event, status int) {
-	e.Allowed = true
+func (h *Handler) auditAllowed(ctx context.Context, e audit.Event, status int) {
+	e.Allowed, e.Outcome = true, audit.Served
 	e.UpstreamStatus = status
-	h.Config.AuditLogger.Log(e)
+	gateway.Record(ctx, h.Config.AuditLogger, e)
 }
 
 // deny writes a plain-text HTTP error and logs a denied audit event.
-func (h *Handler) deny(w http.ResponseWriter, e audit.Event, status int, reason string) {
+func (h *Handler) deny(ctx context.Context, w http.ResponseWriter, e audit.Event, status int, reason string) {
 	e.Allowed = false
 	e.DenyReason = reason
-	h.Config.AuditLogger.Log(e)
+	if e.Outcome == "" {
+		e.Outcome = gateway.RefusalOutcome(status)
+	}
+	gateway.Record(ctx, h.Config.AuditLogger, e)
 	http.Error(w, reason, status)
 }

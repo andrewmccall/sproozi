@@ -155,8 +155,9 @@ var commands = []command{
 		flags: []string{"leave-running", "json", "root"}, hiddenFlags: []string{"config"}},
 	{name: cmdCredentials, operands: "set AGENT|PROVIDER | list", group: groupSetup,
 		summary: "Set or list provider keys",
-		about: "Store or replace the provider key an agent uses (codex or openai, claude-code or anthropic),\n" +
-			"or list the stored keys. Keys stay outside the agent's container and are never printed.",
+		about: "Store or replace the provider key an agent uses, named by the agent or its provider\n" +
+			"(" + credentialNameList() + "), or list the stored keys.\n" +
+			"Keys stay outside the agent's container and are never printed.",
 		verbs: []string{verbSet, verbList}, operandVerbs: []string{verbSet},
 		flags: []string{"credential-file", "credential-stdin", "skip-credential-check", "json", "root"}},
 	{name: cmdImages, operands: "status|prepare|build", group: groupSetup,
@@ -170,6 +171,12 @@ var commands = []command{
 		summary: "Show or maintain this machine's certificate authority",
 		verbs:   []string{verbStatus, verbRenew, verbRotateCA, verbReplaceCA}, flags: []string{"json", "root"}},
 	{name: cmdVersion, group: groupSetup, summary: "Show the version", flags: []string{"json"}},
+}
+
+// credentialNameList names what "credentials set" accepts: "a, b or c".
+func credentialNameList() string {
+	names := credentialNames()
+	return strings.Join(names[:len(names)-1], ", ") + " or " + names[len(names)-1]
 }
 
 // deadlineHelp says how long a session runs and where that is set.
@@ -338,8 +345,8 @@ func (c command) printUsage(w io.Writer) {
 
 // printTopUsage writes the grouped command list.
 func printTopUsage(w io.Writer) {
-	_, _ = fmt.Fprintln(w, "Sproozi runs coding agents (Codex, Claude Code) in isolated containers. Your provider\n"+
-		"keys stay outside the container, and every request the agent makes is checked.\n\n"+
+	_, _ = fmt.Fprintln(w, "Sproozi runs coding agents in isolated containers. Your provider keys stay outside\n"+
+		"the container, and every request the agent makes is checked.\n\n"+
 		"Usage: sproozi COMMAND [ARGS] [flags]")
 	width := 0
 	for _, c := range commands {

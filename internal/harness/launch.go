@@ -42,3 +42,19 @@ var HermesLaunch = launchFile("hermes-launch.py")
 // login file in step with a mounted login store, and publishes the bounded run
 // result. It needs Python 3 in the image.
 var ClaudeLaunch = launchFile("claude-launch.py")
+
+// RunKeyEnvironment is the variable in which an AgentRun Pod gets the public
+// key placeholder for a runtime with this selector, or empty for none: the
+// harness's RunKeyEnv. A runtime that names no harness runs the
+// administrator's own launch command, which Sproozi can't inspect, so it
+// keeps the OPENAI_API_KEY placeholder such runtimes have always had.
+func RunKeyEnvironment(selector string) string {
+	if selector == "" {
+		return nativeOpenAIKey
+	}
+	h, err := Lookup(selector)
+	if err != nil {
+		return ""
+	}
+	return h.RunKeyEnv
+}

@@ -72,7 +72,7 @@ func TestManagedLaunchProjectsFreshKindSpecificPlaceholderAndHarness(t *testing.
 			if err = json.Unmarshal([]byte(contract[nativeConfigKey]), &launch); err != nil {
 				t.Fatal(err)
 			}
-			key, other := openAIAPIKey, "ANTHROPIC_API_KEY"
+			key, other := "OPENAI_API_KEY", "ANTHROPIC_API_KEY"
 			if kind == harness.NativeClaude {
 				key, other = other, key
 			}

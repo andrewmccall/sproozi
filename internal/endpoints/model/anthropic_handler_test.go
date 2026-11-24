@@ -42,7 +42,7 @@ func TestAnthropicCappedNullableUsageSettlesActualConsumption(t *testing.T) {
 		ProviderAuth: modelauth.AnthropicAPIKey{Key: testAnthropicSecret}, UpstreamURL: upstream.URL,
 		HTTPClient: upstream.Client(), AuditLogger: audit.NewLogger(io.Discard),
 	})
-	routes := gateway.Dispatcher{model.AnthropicAuthority: {Capability: string(api.CapabilityModelInference), Handler: h, Budgets: tracker}}
+	routes := gateway.Dispatcher{model.AnthropicAuthority: {Capability: api.CapabilityModelInference, Handler: h, Budgets: tracker}}
 	req := httptest.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", strings.NewReader(`{"model":"claude-fixture","max_tokens":2,"cache_control":null,"messages":[{"role":"user","content":"hello"}]}`))
 	req = req.WithContext(gateway.WithIdentity(req.Context(), identity))
 	response := httptest.NewRecorder()
@@ -71,7 +71,7 @@ func TestModelRequestsWithAmbiguousJSONKeysAreDenied(t *testing.T) {
 		ProviderAuth: modelauth.AnthropicAPIKey{Key: testAnthropicSecret}, UpstreamURL: upstream.URL,
 		HTTPClient: upstream.Client(), AuditLogger: audit.NewLogger(io.Discard),
 	})
-	routes := gateway.Dispatcher{model.AnthropicAuthority: {Capability: string(api.CapabilityModelInference), Handler: h, Budgets: budget.NewTracker()}}
+	routes := gateway.Dispatcher{model.AnthropicAuthority: {Capability: api.CapabilityModelInference, Handler: h, Budgets: budget.NewTracker()}}
 	for _, tc := range []struct {
 		name, body string
 		status     int
@@ -113,7 +113,7 @@ func TestAnthropicHandlerReplacesCredentialsAndSettlesTotalBeyondOutputBound(t *
 	identity := testExecutionGrant()
 	tracker := budget.NewTracker()
 	h := model.NewAnthropicHandler(model.HandlerConfig{ProviderAuth: modelauth.AnthropicAPIKey{Key: testAnthropicSecret}, UpstreamURL: upstream.URL, HTTPClient: upstream.Client(), AuditLogger: audit.NewLogger(io.Discard)})
-	routes := gateway.Dispatcher{model.AnthropicAuthority: {Capability: string(api.CapabilityModelInference), Handler: h, Budgets: tracker}}
+	routes := gateway.Dispatcher{model.AnthropicAuthority: {Capability: api.CapabilityModelInference, Handler: h, Budgets: tracker}}
 	req := httptest.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages?beta=true", strings.NewReader(`{"model":"claude-fixture","max_tokens":2,"messages":[{"role":"user","content":"hello"}]}`))
 	req = req.WithContext(gateway.WithIdentity(req.Context(), identity))
 	req.Header.Set("x-api-key", "workload-key")

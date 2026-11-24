@@ -12,8 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andrewmccall/sproozi/internal/budget"
-
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/gateway"
@@ -89,22 +87,27 @@ func (h *Handler) authorizeAndForward(ctx context.Context, identity *gateway.Exe
 			// Arbitrary upstream errors can contain URLs or data.
 			event.DenyReason = "kubernetes request denied or failed"
 		} else if requestErr == nil && response != nil {
-			event.Allowed = true
+			event.Allowed, event.Outcome = true, audit.Served
 			event.UpstreamStatus = response.StatusCode
 		}
-		h.Config.AuditLogger.Log(event)
+		if requestErr != nil && event.Outcome == "" {
+			event.Outcome = audit.UpstreamFailed
+		}
+		gateway.Record(ctx, h.Config.AuditLogger, event)
 	}()
 	op, err := ParseOperation(req)
 	if err != nil {
+		event.Outcome = audit.RefusedRequest
 		return nil, err
 	}
 	event.Operation = "kubernetes." + op.Verb
 	event.Resource = req.URL.Path
 	if !allowed(identity, op) {
-		event.DenyReason = "operation not permitted by policy"
+		event.DenyReason, event.Outcome = "operation not permitted by policy", audit.RefusedPolicy
 		return nil, fmt.Errorf("kubernetes: operation denied")
 	}
 	if h.Config.Upstream == nil {
+		event.Outcome = audit.Unavailable
 		return nil, fmt.Errorf("kubernetes: upstream is not configured")
 	}
 	base := *h.Config.Upstream
@@ -112,6 +115,7 @@ func (h *Handler) authorizeAndForward(ctx context.Context, identity *gateway.Exe
 	base.RawQuery = req.URL.RawQuery
 	forward, err := http.NewRequestWithContext(ctx, http.MethodGet, base.String(), req.Body)
 	if err != nil {
+		event.Outcome = audit.Unavailable
 		return nil, fmt.Errorf("kubernetes: build request: %w", err)
 	}
 	for k, values := range req.Header {
@@ -156,7 +160,8 @@ func (h *Handler) authorizeAndForward(ctx context.Context, identity *gateway.Exe
 		// early; the deadline above bounds the watch instead.
 		upstreamClient.Timeout = 0
 	}
-	if err := budget.FromContext(ctx).SpendRequest(ctx); err != nil {
+	if err := gateway.Spend(ctx); err != nil {
+		event.Outcome = gateway.SpendOutcome(err)
 		cancel()
 		return nil, err
 	}

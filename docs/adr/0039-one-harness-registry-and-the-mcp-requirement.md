@@ -81,6 +81,10 @@ means Codex. Behaviour stays in code: completion observers, checkpoint formats,
 and the parsing of Codex's `-c` overrides (the registry records facts, as the
 last alternative below says).
 
+Corrected 2026-11-20: the registry entry of every managed harness also holds
+its setup wizard sign-in choices (`SignInChoices`), which were a map keyed by
+kind in `cmd/sproozi/wizard.go`.
+
 ## Alternatives
 
 - **Allow a harness without MCP, marked "no diagnose".** It would add a

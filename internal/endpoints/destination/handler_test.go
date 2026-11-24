@@ -74,7 +74,7 @@ func TestInspectedEgressEnforcesDestinationAndLiveGrant(t *testing.T) {
 			if !strings.Contains(authority, ":") {
 				authority += ":443"
 			}
-			gateway.Dispatcher{authority: {Capability: string(api.CapabilityNetworkEgress), Tier: audit.TierDestination,
+			gateway.Dispatcher{authority: {Capability: api.CapabilityNetworkEgress, Tier: audit.TierDestination,
 				AuditLogger: h.Config.AuditLogger, Handler: h}}.ServeHTTP(rr, req)
 			if rr.Code != tc.status {
 				t.Fatalf("status=%d want=%d body=%s", rr.Code, tc.status, rr.Body)

@@ -37,7 +37,7 @@ func TestDockerGrantEnforcesInitializedAllocationWithoutAgentRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := 0
-	dispatch := gateway.Dispatcher{fixtureAuthority: {Capability: string(api.CapabilityKubernetesRead), Budgets: tracker, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	dispatch := gateway.Dispatcher{fixtureAuthority: {Capability: api.CapabilityKubernetesRead, Budgets: tracker, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := budget.FromContext(r.Context()).SpendRequest(r.Context()); err != nil {
 			w.WriteHeader(http.StatusTooManyRequests)
 			return
@@ -85,7 +85,7 @@ func TestManagedDispatchDeniesMissingOrExhaustedAllocations(t *testing.T) {
 				grant.Allocations[cap] = allocation
 			}
 			calls := 0
-			dispatch := gateway.Dispatcher{fixtureAuthority: {Capability: string(cap), Budgets: budget.NewTracker(), Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ })}}
+			dispatch := gateway.Dispatcher{fixtureAuthority: {Capability: cap, Budgets: budget.NewTracker(), Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ })}}
 			r := httptest.NewRequest(http.MethodGet, "https://service.test/path", nil)
 			w := httptest.NewRecorder()
 			dispatch.ServeHTTP(w, r.WithContext(gateway.WithIdentity(r.Context(), grant)))

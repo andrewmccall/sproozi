@@ -54,7 +54,7 @@ func TestUnavailableProviderAuthentication(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "https://api.openai.com/v1/models", nil)
 			req = req.WithContext(gateway.WithIdentity(req.Context(), testExecutionGrant()))
 			response := httptest.NewRecorder()
-			gateway.Dispatcher{model.OpenAIAuthority: {Capability: string(api.CapabilityModelInference), Handler: h,
+			gateway.Dispatcher{model.OpenAIAuthority: {Capability: api.CapabilityModelInference, Handler: h,
 				Budgets: budget.NewTracker()}}.ServeHTTP(response, req)
 			want := `{"error":{"message":"` + tc.message + `","type":"server_error","code":"provider_auth_unavailable"}}`
 			if response.Code != http.StatusServiceUnavailable || strings.TrimSpace(response.Body.String()) != want {

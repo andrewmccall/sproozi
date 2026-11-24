@@ -37,6 +37,6 @@ func (h *identityHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	real := &githubgateway.Handler{Config: githubgateway.HandlerConfig{TokenProvider: h.Config.TokenProvider, AuditLogger: h.Config.AuditLogger, GitBaseURL: h.Config.GitBaseURL, APIBaseURL: h.Config.APIBaseURL, HTTPClient: h.Config.HTTPClient}}
 	// Dispatch as production does, so the route grants and audits the capability.
 	r.Host = "api.github.com"
-	gateway.Dispatcher{"api.github.com:443": {Capability: string(sprooziv1alpha1.CapabilityGitHubPullRequest),
+	gateway.Dispatcher{"api.github.com:443": {Capability: sprooziv1alpha1.CapabilityGitHubPullRequest,
 		Tier: audit.TierSemantic, Handler: real}}.ServeHTTP(w, r)
 }

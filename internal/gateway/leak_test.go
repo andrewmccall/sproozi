@@ -30,8 +30,8 @@ func leakGrant(uid string) *gateway.ExecutionGrant {
 func leakRoutes(received *bytes.Buffer, readErr *error) gateway.Dispatcher {
 	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	return gateway.Dispatcher{
-		providerAuthority: {Handler: ok, ProviderCredential: true},
-		otherAuthority: {Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		providerAuthority: {Admission: gateway.AdmitSelected, Handler: ok, ProviderCredential: true},
+		otherAuthority: {Admission: gateway.AdmitSelected, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, *readErr = io.Copy(received, r.Body)
 			w.WriteHeader(http.StatusNoContent)
 		})},
@@ -150,8 +150,8 @@ func TestLeakGuardScopesACredentialToItsPathRoute(t *testing.T) {
 		_, _ = io.Copy(&received, r.Body)
 		w.WriteHeader(http.StatusNoContent)
 	})
-	routes := gateway.Dispatcher{"api.github.test:443": {Handler: ok, Paths: []gateway.PathRoute{
-		{Prefix: "/copilot_internal/", Route: gateway.Route{Handler: ok, ProviderCredential: true}}}}}
+	routes := gateway.Dispatcher{"api.github.test:443": {Admission: gateway.AdmitSelected, Handler: ok, Paths: []gateway.PathRoute{
+		{Prefix: "/copilot_internal/", Route: gateway.Route{Admission: gateway.AdmitSelected, Handler: ok, ProviderCredential: true}}}}}
 	guard := gateway.NewLeakGuard(routes, nil)
 	r := leakRequest(fixtureExecutionUID, "https://api.github.test/copilot_internal/user", nil)
 	r.Header.Set("Authorization", "Bearer "+leakedCredential)

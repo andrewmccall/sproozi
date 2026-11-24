@@ -84,7 +84,7 @@ func TestPackageCapabilityDoesNotInheritGitHubGrant(t *testing.T) {
 	identity := protocolIdentity()
 	identity.Capabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityGitHubPullRequest}
 	identity.Policy.Spec.AllowedCapabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityGitHubPullRequest}
-	routes := gateway.Dispatcher{"pypi.org:443": {Capability: string(sprooziv1alpha1.CapabilityPackagesInstall),
+	routes := gateway.Dispatcher{"pypi.org:443": {Capability: sprooziv1alpha1.CapabilityPackagesInstall,
 		Handler: protocolHandler(&http.Client{}, &protocolAuditWriter{})}}
 	request := httptest.NewRequest(http.MethodGet, "https://pypi.org/simple/demo-tool/", nil)
 	request.Host = "pypi.org"

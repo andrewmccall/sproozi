@@ -73,6 +73,10 @@ type Event struct {
 	// DenyReason is the human-readable explanation when Allowed is false.
 	DenyReason string `json:"denyReason,omitempty"`
 
+	// Outcome says how the request ended (ADR 0070). It does not change
+	// Allowed, which keeps its own meaning.
+	Outcome Outcome `json:"outcome,omitempty"`
+
 	// Model is the model a provider accepted. It is recorded only after the
 	// provider succeeds, so it is never unvalidated workload input.
 	Model string `json:"model,omitempty"`
@@ -102,6 +106,32 @@ type Event struct {
 	// TokensRemaining is the observed remaining budget; nil means unavailable.
 	TokensRemaining *int64 `json:"tokensRemaining"`
 }
+
+// Outcome says how one request ended.
+type Outcome string
+
+const (
+	// Served: a response was relayed, whatever its status. A model call's
+	// EndReason says how it ended.
+	Served Outcome = "served"
+	// RefusedRequest: the request was malformed or unsupported.
+	RefusedRequest Outcome = "refused_request"
+	// RefusedPolicy: the run, policy or a credential rule does not allow it.
+	RefusedPolicy Outcome = "refused_policy"
+	// RefusedBudget: the allocation or budget is exhausted, or too many model
+	// calls are pending.
+	RefusedBudget Outcome = "refused_budget"
+	// Unavailable: the gateway could not account, build or authenticate the
+	// upstream request, or is stopping.
+	Unavailable Outcome = "unavailable"
+	// UpstreamFailed: nothing usable came back before anything was relayed.
+	UpstreamFailed Outcome = "upstream_failed"
+	// Cancelled: the workload left before a response was relayed.
+	Cancelled Outcome = "cancelled"
+	// Unrecorded: the handler wrote no record, so the dispatcher wrote this
+	// one for the route. Only the dispatcher writes it.
+	Unrecorded Outcome = "unrecorded"
+)
 
 // Writer is the interface satisfied by Logger; use it in handler configs so
 // the gateway handler can be unit-tested with a stub.

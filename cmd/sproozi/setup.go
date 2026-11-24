@@ -285,6 +285,18 @@ func (r doctorReport) text(w io.Writer) {
 // credentialProviders are the providers whose credentials Sproozi can store.
 var credentialProviders = []string{providerOpenAI, providerAnthropic, localsetup.ProviderCopilot}
 
+// credentialNames are the names "credentials set" accepts: each managed
+// agent, then each provider that is not also an agent's name.
+func credentialNames() []string {
+	names := harness.ManagedKindNames()
+	for _, provider := range credentialProviders {
+		if !slices.Contains(names, provider) {
+			names = append(names, provider)
+		}
+	}
+	return names
+}
+
 // credentialProvider is the stored credential an agent or provider name
 // selects: an agent's follows how it signs in, such as Copilot's GitHub
 // token with --token.
@@ -363,8 +375,7 @@ func (q *options) credentialsCommand(ctx context.Context, l localsetup.Layout,
 	}
 	provider, ok := credentialProvider(q.operand, inst)
 	if !ok {
-		names := append(harness.ManagedKindNames(), credentialProviders...)
-		return nil, usagef("credentials set takes %s", strings.Join(names, ", "))
+		return nil, usagef("credentials set takes %s", strings.Join(credentialNames(), ", "))
 	}
 	var selected *localsetup.Harness
 	for i := range inst.Harnesses {
