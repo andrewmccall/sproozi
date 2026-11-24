@@ -1240,7 +1240,7 @@ func warnSystemConfigWrites(ctx context.Context, clients authentication.Interfac
 		}
 		if review.Status.Allowed {
 			_, _ = fmt.Fprintf(out, "WARNING: the gateway can %s ConfigMaps in sproozi-system, "+
-				"which hold its own configuration; remove the Role or binding that grants it (ADR 0041)\n", verb)
+				"which hold its own configuration; remove the Role or binding that grants it (ADR 0045)\n", verb)
 			return
 		}
 	}
