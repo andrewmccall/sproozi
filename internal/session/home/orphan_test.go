@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/andrewmccall/sproozi/internal/session"
+	"github.com/andrewmccall/sproozi/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -48,7 +49,7 @@ func TestRemoveSkipsAnUnreadableJournalOfAnotherSession(t *testing.T) {
 	}
 	unreadable := uuid.NewString()
 	bad := filepath.Join(s.config.Directory, "journal", unreadable+".json")
-	if err := os.WriteFile(bad, []byte(`{"version":99,"futureField":true}`), 0600); err != nil {
+	if err := testutil.WriteFile(bad, []byte(`{"version":99,"futureField":true}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if r := exchange(t, s, Request{Action: ActionRemove, ID: id}); r.Error != "" {

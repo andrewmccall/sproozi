@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -59,6 +60,9 @@ func TestRecoveredStopStillWaitingForTheTurnStepsAgain(t *testing.T) {
 // the stop as unknown, so the driver logs it and backs off rather than
 // stepping again as if the stop were waiting.
 func TestRecoveredStopWhoseJournalCannotBeSavedBacksOff(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the save is made to fail by removing the directory's write permission, which Windows does not enforce through Chmod")
+	}
 	t.Parallel()
 	e := newDriverEnv(t, false, clockNone)
 	namedJournalState(t, string(session.PhaseUnknownStop)).build(t, e)
