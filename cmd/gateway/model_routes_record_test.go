@@ -32,8 +32,8 @@ const sweepCopilot = "copilot"
 var credentialSources = routetest.Sources{
 	"sk-openai-fixture":       openAIKeyEnv,
 	anthropicFixtureKey:       anthropicKeyEnv,
-	"openai-token-fixture":    "OPENAI_SIGN_IN_TOKEN",
-	"anthropic-token-fixture": "ANTHROPIC_SIGN_IN_TOKEN",
+	"openai-token-fixture":    openAITokenEnv,
+	"anthropic-token-fixture": anthropicTokenEnv,
 	copilotFixtureToken:       copilotTokenEnv,
 }
 

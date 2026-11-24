@@ -73,7 +73,7 @@ func handlerConfig(c reflect.Value, sources Sources) string {
 // relayRoutes lists each request a relay allows: its method and path, "*"
 // for a path prefix and "?" when a query is allowed.
 func relayRoutes(routes reflect.Value) string {
-	var allowed []string
+	allowed := make([]string, 0, routes.Len())
 	for i := range routes.Len() {
 		r := routes.Index(i)
 		route := r.FieldByName("Method").String() + " " + r.FieldByName("Path").String()

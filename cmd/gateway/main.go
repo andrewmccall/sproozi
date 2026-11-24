@@ -164,10 +164,12 @@ const memoryLimitEnv = "SPROOZI_GATEWAY_MEMORY_LIMIT"
 
 // Environment variables that select model credentials.
 const (
-	openAIKeyEnv     = "OPENAI_API_KEY"
-	copilotTokenEnv  = "COPILOT_SIGN_IN_TOKEN"
-	anthropicKeyEnv  = "ANTHROPIC_API_KEY"
-	modelAuthModeEnv = "MODEL_AUTH_MODE"
+	openAIKeyEnv      = "OPENAI_API_KEY"
+	copilotTokenEnv   = "COPILOT_SIGN_IN_TOKEN"
+	openAITokenEnv    = "OPENAI_SIGN_IN_TOKEN"
+	anthropicTokenEnv = "ANTHROPIC_SIGN_IN_TOKEN"
+	anthropicKeyEnv   = "ANTHROPIC_API_KEY"
+	modelAuthModeEnv  = "MODEL_AUTH_MODE"
 )
 
 // minContainerMemoryLimit is the smallest container memory limit the gateway
@@ -402,8 +404,8 @@ func loadSignInTokens(mode, openAIKey, anthropicKey string) (string, string, str
 	anthropic := strings.TrimSpace(os.Getenv("ANTHROPIC_SIGN_IN_TOKEN"))
 	copilot := strings.TrimSpace(os.Getenv(copilotTokenEnv))
 	for _, token := range []struct{ env, key, value, apiKey string }{
-		{"OPENAI_SIGN_IN_TOKEN", "openai-sign-in-token", openAI, openAIKey},
-		{"ANTHROPIC_SIGN_IN_TOKEN", "anthropic-sign-in-token", anthropic, anthropicKey},
+		{openAITokenEnv, "openai-sign-in-token", openAI, openAIKey},
+		{anthropicTokenEnv, "anthropic-sign-in-token", anthropic, anthropicKey},
 		{copilotTokenEnv, "copilot-sign-in-token", copilot, ""},
 	} {
 		if strings.ContainsAny(token.value, "\r\n") {
