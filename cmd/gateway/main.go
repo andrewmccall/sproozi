@@ -43,6 +43,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/budget"
 	budgetkubernetes "github.com/andrewmccall/sproozi/internal/budget/kubernetes"
+	"github.com/andrewmccall/sproozi/internal/certificates"
 	"github.com/andrewmccall/sproozi/internal/diagnose"
 	"github.com/andrewmccall/sproozi/internal/endpoints"
 	"github.com/andrewmccall/sproozi/internal/endpoints/destination"
@@ -58,7 +59,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/proxytransport"
 )
 
-const defaultHost = "sproozi-gateway.sproozi-system.svc"
+const defaultHost = certificates.GatewayHost
 
 // Startup errors name the installed object that supplies each value so an
 // administrator knows what to fix. ConfigMaps shipped by config/default carry
