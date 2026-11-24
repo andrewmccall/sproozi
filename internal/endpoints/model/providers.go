@@ -3,9 +3,10 @@ package model
 import (
 	"net/http"
 
-	"github.com/andrewmccall/sproozi/internal/modelauth"
-
+	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
+	"github.com/andrewmccall/sproozi/internal/gateway"
+	"github.com/andrewmccall/sproozi/internal/modelauth"
 )
 
 // ModelRoute is one authority that serves a provider's model calls.
@@ -106,6 +107,70 @@ var providers = map[string]Provider{
 func ProviderFor(name string) (Provider, bool) {
 	p, ok := providers[name]
 	return p, ok
+}
+
+// ServedRoute is one route a provider serves: a model.inference route on
+// Authority, or, with Prefix, a path route of an authority another
+// capability owns, such as Copilot's account requests on api.github.com. The
+// composition attaches the budget tracker and audit writer.
+type ServedRoute struct {
+	Authority string
+	Prefix    string
+	Route     gateway.Route
+}
+
+// RouteConfig is what every route of a provider is built with.
+type RouteConfig struct {
+	// Handler holds what every model handler shares. Routes sets its
+	// UpstreamURL and ProviderAuth per route.
+	Handler HandlerConfig
+	// Upstreams replaces the table's origin of a model authority, such as an
+	// administrator's private API endpoint or a fixture.
+	Upstreams map[string]string
+	// SignIn, when set, replaces the provider's sign-in relay.
+	SignIn http.Handler
+}
+
+// Routes are the routes the provider serves with auth, its one credential
+// (ADR 0047). A gateway-held key, token or ChatGPT sign-in serves the
+// provider's API authority, or every model authority of a provider with no
+// API authority, such as Copilot, with its account requests. When auth
+// forwards the harness's own sign-in, every model authority and the account
+// requests forward it, and the sign-in relay serves its sign-in and refresh.
+// No other authority is served: an authority outside the table has no route.
+func (p Provider) Routes(auth modelauth.Authenticator, c RouteConfig) []ServedRoute {
+	forwards := auth.Mode() == modelauth.WorkloadMode
+	apiRoute := !p.Models[0].SignedIn
+	route := func(handler http.Handler, credential bool) gateway.Route {
+		return gateway.Route{Capability: api.CapabilityModelInference, Tier: audit.TierSemantic, Handler: handler,
+			ProviderCredential: credential}
+	}
+	var served []ServedRoute
+	for _, m := range p.Models {
+		if m.SignedIn && !forwards && apiRoute {
+			continue
+		}
+		config := c.Handler
+		config.UpstreamURL, config.ProviderAuth = m.UpstreamURL, auth
+		if upstream, ok := c.Upstreams[m.Authority]; ok {
+			config.UpstreamURL = upstream
+		}
+		served = append(served, ServedRoute{Authority: m.Authority, Route: route(m.New(config), forwards)})
+	}
+	if p.AccountAuthority != "" && (forwards || !apiRoute) {
+		relay := p.AccountRelay(auth, c.Handler.HTTPClient, c.Handler.AuditLogger)
+		for _, prefix := range p.AccountPrefixes {
+			served = append(served, ServedRoute{Authority: p.AccountAuthority, Prefix: prefix, Route: route(relay, forwards)})
+		}
+	}
+	if forwards && p.SignInAuthority != "" {
+		relay := c.SignIn
+		if relay == nil {
+			relay = p.SignInRelay(c.Handler.HTTPClient, c.Handler.AuditLogger)
+		}
+		served = append(served, ServedRoute{Authority: p.SignInAuthority, Prefix: p.SignInPrefix, Route: route(relay, false)})
+	}
+	return served
 }
 
 // SignInRelay relays the provider's own sign-in and token refresh.

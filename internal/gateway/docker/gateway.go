@@ -132,60 +132,38 @@ func addNativeRoutes(owner *Owner, config GatewayConfig, dispatch gateway.Dispat
 	return nil
 }
 
-// modelRoutes serves the harness's provider (ADR 0047): the one its
-// mechanism reaches, such as OpenAI for Copilot with a key and GitHub's
-// Copilot service when it signs in. With a gateway-held key only the
-// provider's API authority is served. A gateway-held token also serves a
-// provider with no API authority, such as Copilot. When the harness signs in
-// itself, every model authority forwards its credential and the provider's
-// sign-in relay serves its sign-in and refresh. A provider's account requests
-// on a host another capability owns are path routes there.
+// modelRoutes serves the harness's provider, the one its mechanism reaches,
+// such as OpenAI for Copilot with a key and GitHub's Copilot service when it
+// signs in, with the provider table's routes for that credential (ADR 0047).
 func modelRoutes(config GatewayConfig, modelConfig modelgateway.HandlerConfig, tracker *budget.Tracker) (gateway.Dispatcher, error) {
 	h, _ := harness.Managed(config.Harness)
 	mode := modelConfig.ProviderAuth.Mode()
-	workload := mode == modelauth.WorkloadMode
-	provider, ok := modelgateway.ProviderFor(h.Provider(workload || mode == modelauth.TokenMode))
+	provider, ok := modelgateway.ProviderFor(h.Provider(mode == modelauth.WorkloadMode || mode == modelauth.TokenMode))
 	if !ok {
 		return nil, errors.New("docker gateway: unknown model provider")
 	}
-	route := func(handler http.Handler, forwards bool) gateway.Route {
-		return gateway.Route{Capability: api.CapabilityModelInference, Tier: audit.TierSemantic, Handler: handler,
-			Budgets: tracker, AuditLogger: config.AuditLogger, ProviderCredential: forwards}
+	if mode != modelauth.WorkloadMode && config.SignIn != nil {
+		return nil, errors.New("docker gateway: a sign-in relay needs a harness that signs in itself")
 	}
-	apiRoute := !provider.Models[0].SignedIn
+	// A configured private endpoint or fixture serves every route; the
+	// public API default gives each route its own origin.
+	var upstreams map[string]string
+	if modelConfig.UpstreamURL != provider.Models[0].UpstreamURL {
+		upstreams = map[string]string{}
+		for _, m := range provider.Models {
+			upstreams[m.Authority] = modelConfig.UpstreamURL
+		}
+	}
 	dispatch := gateway.Dispatcher{}
-	for _, m := range provider.Models {
-		if m.SignedIn && !workload && apiRoute {
-			continue
+	for _, served := range provider.Routes(modelConfig.ProviderAuth,
+		modelgateway.RouteConfig{Handler: modelConfig, Upstreams: upstreams, SignIn: config.SignIn}) {
+		route := served.Route
+		route.Budgets, route.AuditLogger = tracker, config.AuditLogger
+		if served.Prefix != "" {
+			addPath(dispatch, served.Authority, served.Prefix, route)
+		} else {
+			dispatch[served.Authority] = route
 		}
-		c := modelConfig
-		// A configured private endpoint or fixture serves every route; the
-		// public API default gives each route its own origin.
-		if c.UpstreamURL == provider.Models[0].UpstreamURL {
-			c.UpstreamURL = m.UpstreamURL
-		}
-		dispatch[m.Authority] = route(m.New(c), workload)
-	}
-	if provider.AccountAuthority != "" && (workload || !apiRoute) {
-		for _, prefix := range provider.AccountPrefixes {
-			addPath(dispatch, provider.AccountAuthority, prefix,
-				route(provider.AccountRelay(modelConfig.ProviderAuth, modelConfig.HTTPClient, config.AuditLogger), workload))
-		}
-	}
-	if !workload {
-		if config.SignIn != nil {
-			return nil, errors.New("docker gateway: a sign-in relay needs a harness that signs in itself")
-		}
-		return dispatch, nil
-	}
-	relay := config.SignIn
-	if relay == nil {
-		relay = provider.SignInRelay(modelConfig.HTTPClient, config.AuditLogger)
-	}
-	if provider.SignInPrefix != "" {
-		addPath(dispatch, provider.SignInAuthority, provider.SignInPrefix, route(relay, false))
-	} else {
-		dispatch[provider.SignInAuthority] = route(relay, false)
 	}
 	return dispatch, nil
 }
