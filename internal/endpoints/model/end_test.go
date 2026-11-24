@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -434,5 +435,77 @@ func TestRefusalsAreLogged(t *testing.T) {
 	}
 	if used, _ := c.used(t); used != 7 || c.call.phase != callSettled {
 		t.Fatalf("refused settlement charged: used=%d phase=%s", used, c.call.phase)
+	}
+}
+
+// headerHookWriter runs a hook the instant the call writes its response
+// headers to the workload, and another when it flushes them, on the call's
+// own goroutine, and keeps every status line written.
+type headerHookWriter struct {
+	*httptest.ResponseRecorder
+	beforeHeaders func()
+	afterHeaders  func() error
+	statuses      []int
+}
+
+func (w *headerHookWriter) WriteHeader(status int) {
+	if hook := w.beforeHeaders; hook != nil {
+		w.beforeHeaders = nil
+		hook()
+	}
+	w.statuses = append(w.statuses, status)
+	w.ResponseRecorder.WriteHeader(status)
+}
+
+func (w *headerHookWriter) FlushError() error {
+	if hook := w.afterHeaders; hook != nil {
+		w.afterHeaders = nil
+		return hook()
+	}
+	return nil
+}
+
+// A real relay sets headersSent when it writes the provider's response
+// headers, so a refused ending after that writes no second status line and
+// no error body into the workload's response, and one before it writes the
+// gateway's own 500.
+func TestRefusedEndingDuringRelayAnswersOnlyBeforeTheHeaders(t *testing.T) {
+	const reply = "model call ended unexpectedly"
+	for _, tc := range []struct {
+		name     string
+		hook     func(c *endTestCall, w *headerHookWriter)
+		statuses []int
+		answered bool
+	}{
+		{"before the headers", func(c *endTestCall, w *headerHookWriter) {
+			w.beforeHeaders = func() { c.call.end(ending{kind: endingUnsent}) }
+		}, []int{http.StatusInternalServerError, http.StatusOK}, true},
+		{"after the headers", func(c *endTestCall, w *headerHookWriter) {
+			w.afterHeaders = func() error {
+				c.call.end(ending{kind: endingUnsent})
+				return io.ErrClosedPipe
+			}
+		}, []int{http.StatusOK}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newEndTestCall(t, callAdmitted, callLive)
+			w := &headerHookWriter{ResponseRecorder: c.writer}
+			c.call.w = w
+			tc.hook(c, w)
+			c.call.relay(&http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}},
+				Body: io.NopCloser(strings.NewReader(`{"ok":true}`))})
+			if !slices.Equal(w.statuses, tc.statuses) {
+				t.Errorf("status lines written %v, want %v", w.statuses, tc.statuses)
+			}
+			if got := strings.Contains(c.writer.Body.String(), reply); got != tc.answered {
+				t.Errorf("workload got the fallback reply = %v, want %v (body %q)", got, tc.answered, c.writer.Body.String())
+			}
+			if len(c.events.events) != 1 || c.call.phase != callEnded {
+				t.Fatalf("recorded %d events in phase %s, want one in ended", len(c.events.events), c.call.phase)
+			}
+			if e := c.events.events[0]; e.Allowed == tc.answered {
+				t.Errorf("event allowed=%v outcome=%q, want allowed=%v", e.Allowed, e.Outcome, !tc.answered)
+			}
+		})
 	}
 }
