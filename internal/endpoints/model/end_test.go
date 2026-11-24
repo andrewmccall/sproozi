@@ -365,6 +365,13 @@ func checkRefusedEnding(t *testing.T, phase callPhase, kind endingKind, headersS
 	if status != want.status {
 		t.Errorf("reply status %d (%q), want %d", status, c.writer.Body.String(), want.status)
 	}
+	if want.status != 0 {
+		const reply = `{"error":{"message":"model call ended unexpectedly","type":"server_error","code":"upstream_error"}}` + "\n"
+		if c.writer.Body.String() != reply || e.DenyReason != "model call ended unexpectedly" {
+			t.Errorf("a fallback replied %q and audited deny reason %q, want %q saying the call ended unexpectedly",
+				c.writer.Body.String(), e.DenyReason, reply)
+		}
+	}
 }
 
 // leavingLedger cancels the call when it releases, as a workload that leaves

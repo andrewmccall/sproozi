@@ -371,7 +371,7 @@ func (c *modelCall) record(from callPhase, x ending, before audit.Event) {
 			c.finish()
 			return
 		}
-		c.h.denyReply(ctx, c.w, c.e, internalFailureReply)
+		c.h.denyReply(ctx, c.w, c.e, unexpectedEndReply)
 		return
 	}
 	switch x.kind {
@@ -428,8 +428,12 @@ func (c *modelCall) unsentReason() string {
 
 // Replies to a call that ended before its response headers.
 var (
-	// internalFailureReply is the gateway's reply when it fails itself.
+	// internalFailureReply is the gateway's reply when it cannot build the
+	// provider request.
 	internalFailureReply = errorReply{http.StatusInternalServerError, "failed to build upstream request", serverError, upstreamErrorCode}
+	// unexpectedEndReply is the reply to a call that end refused an ending
+	// for, so a reader of its audit event does not look for a URL problem.
+	unexpectedEndReply = errorReply{http.StatusInternalServerError, "model call ended unexpectedly", serverError, upstreamErrorCode}
 	gatewayStoppingReply = errorReply{http.StatusServiceUnavailable, gatewayStoppingMessage, serverError, gatewayStoppingCode}
 	upstreamFailedReply  = errorReply{http.StatusBadGateway, "upstream request failed", serverError, upstreamErrorCode}
 )
