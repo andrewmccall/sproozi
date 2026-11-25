@@ -1,5 +1,5 @@
 validateConfig units={Bounded:true Value:0} -> refused: configuration "allowances" entry "model.inference" has units bounded at 0; a bound must be positive, and leaving the entry out forbids its capability
-validateConfig costMicros={Bounded:true Value:0} -> refused: configuration "allowances" entry "model.inference" has costMicros bounded at 0; a bound must be positive, and leaving the entry out forbids its capability
+validateConfig costMicros={Bounded:true Value:0} -> refused: configuration "allowances" entry "model.inference" has costMicros bounded at 0; a bound must be positive; for no cost cap write it unbounded with value 0, and to forbid the capability leave the entry out
 validateConfig units={Bounded:true Value:1} -> accepted
 validateConfig costMicros={Bounded:true Value:1} -> accepted
 validateConfig units={Bounded:true Value:5} -> accepted

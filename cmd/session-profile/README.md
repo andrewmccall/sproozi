@@ -194,7 +194,7 @@ To change either, delete it, create it again the same way, and run
 `kubectl -n sproozi-sessions rollout restart deployment/sproozi-work`. Replace the example paths,
 template, instruction digest and approved ceilings. The unit ceiling matches the
 [home example](../sproozi/README.md); cost is explicitly unbounded here. A bounded positive cost requires corresponding gateway pricing.
-A bound must be positive; leave an allowance out to forbid its capability.
+A bound must be positive; write no cost cap as unbounded, and leave an allowance out to forbid its capability.
 
 ```json
 {

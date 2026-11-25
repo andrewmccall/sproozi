@@ -266,7 +266,8 @@ func (c Config) AllowanceProblems() []string {
 		}
 		switch {
 		case a.CostMicros.Exhausted() && modelInference:
-			p = append(p, key+`.costMicros`+zeroBound)
+			p = append(p, key+`.costMicros ("bounded": true needs a positive "value"; for no cost cap write `+
+				`"bounded": false with "value": 0; to forbid the capability leave `+key+` out)`)
 		case !a.CostMicros.Valid() && !a.CostMicros.Exhausted():
 			p = append(p, key+`.costMicros ("bounded": false with "value": 0 for no cap, or "bounded": true `+
 				`with a positive "value")`)

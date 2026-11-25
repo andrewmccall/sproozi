@@ -158,7 +158,8 @@ func validateConfig(c serverConfig) error {
 			return invalid("allowances", fmt.Sprintf("entry %q needs bounded positive units", name))
 		}
 		if a.CostMicros.Exhausted() {
-			return invalid("allowances", fmt.Sprintf("entry %q has costMicros bounded at 0; %s", name, zeroBound))
+			return invalid("allowances", fmt.Sprintf("entry %q has costMicros bounded at 0; a bound must be positive; "+
+				"for no cost cap write it unbounded with value 0, and to forbid the capability leave the entry out", name))
 		}
 		if !a.CostMicros.Valid() {
 			return invalid("allowances", fmt.Sprintf("entry %q needs costMicros bounded and positive, "+

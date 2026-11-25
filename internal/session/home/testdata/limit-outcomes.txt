@@ -1,6 +1,6 @@
 AllowanceProblems model.inference units={Bounded:true Value:0} -> allowances.model.inference.units ("bounded": true needs a positive "value"; leave allowances.model.inference out to forbid its capability)
 approvedPolicy model.inference units={Bounded:true Value:0} -> refused: home: positive unit ceilings required, except for model inference
-AllowanceProblems model.inference costMicros={Bounded:true Value:0} -> allowances.model.inference.costMicros ("bounded": true needs a positive "value"; leave allowances.model.inference out to forbid its capability)
+AllowanceProblems model.inference costMicros={Bounded:true Value:0} -> allowances.model.inference.costMicros ("bounded": true needs a positive "value"; for no cost cap write "bounded": false with "value": 0; to forbid the capability leave allowances.model.inference out)
 approvedPolicy model.inference costMicros={Bounded:true Value:0} -> refused: home: positive unit ceilings required, except for model inference
 AllowanceProblems model.inference units={Bounded:true Value:1} -> no problems
 approvedPolicy model.inference units={Bounded:true Value:1} -> accepted {MaxUnits:1 MaxCostMicros:0}

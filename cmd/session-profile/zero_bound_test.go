@@ -21,7 +21,8 @@ func TestAConfiguredZeroBoundSaysWhatToDoInstead(t *testing.T) {
 				`a bound must be positive, and leaving the entry out forbids its capability`},
 		{session.Allowance{Units: session.Limit{Bounded: true, Value: 5}, CostMicros: zero},
 			`configuration "allowances" entry "model.inference" has costMicros bounded at 0; ` +
-				`a bound must be positive, and leaving the entry out forbids its capability`},
+				`a bound must be positive; for no cost cap write it unbounded with value 0, ` +
+				`and to forbid the capability leave the entry out`},
 	} {
 		config := validServerConfig()
 		config.Allowances = map[string]session.Allowance{modelCapability: c.allowance}

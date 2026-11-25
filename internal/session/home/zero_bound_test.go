@@ -22,7 +22,8 @@ func TestAConfiguredZeroBoundSaysWhatToDoInstead(t *testing.T) {
 		{testCapability, session.Allowance{Units: zero},
 			`allowances.model.inference.units ("bounded": true needs a positive "value"; leave allowances.model.inference out to forbid its capability)`},
 		{testCapability, session.Allowance{Units: positive, CostMicros: zero},
-			`allowances.model.inference.costMicros ("bounded": true needs a positive "value"; leave allowances.model.inference out to forbid its capability)`},
+			`allowances.model.inference.costMicros ("bounded": true needs a positive "value"; for no cost cap write ` +
+				`"bounded": false with "value": 0; to forbid the capability leave allowances.model.inference out)`},
 		{"mcp.search", session.Allowance{Units: zero},
 			`allowances.mcp.search.units ("bounded": true needs a positive "value"; leave allowances.mcp.search out to forbid its capability)`},
 	} {
