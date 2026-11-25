@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"maps"
 	"os"
 	"slices"
@@ -57,9 +58,11 @@ func protocolConstants(f *ast.File) []string {
 			case *ast.Ident:
 				typed = t.Name == protocolTypeName
 			case nil:
-				// An implicit repetition keeps the previous type.
+				// An implicit repetition keeps the previous type; a value
+				// converted to providerProtocol, such as
+				// providerProtocol(2), gives the constant that type.
 				if len(v.Values) != 0 {
-					typed = false
+					typed = protocolConversion(v.Values[0])
 				}
 			default:
 				typed = false
@@ -72,6 +75,23 @@ func protocolConstants(f *ast.File) []string {
 		}
 	}
 	return names
+}
+
+// protocolConversion reports whether e converts a value to providerProtocol.
+func protocolConversion(e ast.Expr) bool {
+	for {
+		p, ok := e.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		e = p.X
+	}
+	call, ok := e.(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 {
+		return false
+	}
+	id, ok := call.Fun.(*ast.Ident)
+	return ok && id.Name == protocolTypeName
 }
 
 // allProtocolConstants names the protocol constants the package declares.
@@ -136,8 +156,8 @@ type protocolBranch struct {
 }
 
 // protocolBranches reports where f compares a value with a protocol constant
-// (== or !=) or lists one as a case, and where it asserts or switches on a
-// stream reader's type.
+// or a conversion to providerProtocol (== or !=) or lists one as a case, and
+// where it asserts or switches on a stream reader's type.
 func protocolBranches(fset *token.FileSet, file string, f *ast.File, constants []string) []protocolBranch {
 	named := func(e ast.Expr) string {
 		for {
@@ -149,6 +169,9 @@ func protocolBranches(fset *token.FileSet, file string, f *ast.File, constants [
 		}
 		if id, ok := e.(*ast.Ident); ok && slices.Contains(constants, id.Name) {
 			return id.Name
+		}
+		if protocolConversion(e) {
+			return types.ExprString(e)
 		}
 		return ""
 	}
@@ -246,5 +269,61 @@ func TestEveryProtocolHasAStreamReader(t *testing.T) {
 		if stream, err := p.newStream(responsesPath, eventStreamMediaType); stream == nil || err != nil {
 			t.Fatalf("protocol %d has no stream reader: %v", p, err)
 		}
+	}
+}
+
+// TestProtocolDetectorsFindEachForm runs the guard's own detectors on small
+// sources, one per form a protocol constant or a branch on the protocol can
+// take, so a form the scan misses shows here rather than in review.
+func TestProtocolDetectorsFindEachForm(t *testing.T) {
+	parse := func(t *testing.T, body string) (*token.FileSet, *ast.File) {
+		t.Helper()
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, "snippet.go", "package model\n"+body, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fset, f
+	}
+	for _, tc := range []struct {
+		name, src string
+		want      []string
+	}{
+		{"typed iota block", "const (\n\ta providerProtocol = iota\n\tb\n)", []string{"a", "b"}},
+		{"typed single", "const a providerProtocol = 2", []string{"a"}},
+		{"conversion", "const gemini = providerProtocol(2)", []string{"gemini"}},
+		{"conversion repeated after iota", "const (\n\ta = providerProtocol(iota)\n\tb\n)", []string{"a", "b"}},
+		{"untyped value ends the repetition", "const (\n\ta providerProtocol = iota\n\tn = 3\n)", []string{"a"}},
+		{"other type", "const a = otherType(2)", nil},
+	} {
+		t.Run("constants/"+tc.name, func(t *testing.T) {
+			_, f := parse(t, tc.src)
+			if got := protocolConstants(f); !slices.Equal(got, tc.want) {
+				t.Fatalf("protocolConstants = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	constants := []string{"openAIProtocol", "anthropicProtocol"}
+	for _, tc := range []struct {
+		name, src string
+		want      [][]string
+	}{
+		{"comparison", "func f(p providerProtocol) bool { return p == anthropicProtocol }", [][]string{{"anthropicProtocol"}}},
+		{"constant case", "func f(p providerProtocol) {\n\tswitch p {\n\tcase openAIProtocol:\n\t}\n}", [][]string{{"openAIProtocol"}}},
+		{"conversion in a comparison", "func f(p providerProtocol) bool { return p == providerProtocol(1) }",
+			[][]string{{"providerProtocol(1)"}}},
+		{"type assertion", "func f(e eventStream) { _ = e.(*anthropicStream) }", [][]string{{"stream type"}}},
+		{"unrelated", "func f(p int) bool { return p == 1 }", nil},
+	} {
+		t.Run("branches/"+tc.name, func(t *testing.T) {
+			fset, f := parse(t, tc.src)
+			var got [][]string
+			for _, b := range protocolBranches(fset, "snippet.go", f, constants) {
+				got = append(got, b.names)
+			}
+			if !slices.EqualFunc(got, tc.want, slices.Equal[[]string]) {
+				t.Fatalf("protocolBranches = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
