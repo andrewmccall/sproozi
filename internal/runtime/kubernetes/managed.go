@@ -119,6 +119,15 @@ func useSessionLogin(pod *corev1.Pod, binding *registry.Record) {
 	}
 }
 
+// BuildsManagedPod reports whether a managed Pod may still be built for a run
+// bound to the registration r: BuildManagedPodSpec refuses one that is
+// creating, cancelled or stopped. Only then does the run's admission check the
+// runtime against the managed rules; a completed stop ends its run without a
+// Pod, whatever the runtime says now.
+func BuildsManagedPod(r *registry.Record) bool {
+	return r != nil && r.Phase != registry.Creating && r.Phase != registry.Cancelled && r.Phase != registry.Stopped
+}
+
 // ValidateManagedShape checks the Pod template shape a managed session needs:
 // exactly two containers, the agent (the only workload container) and the
 // checkpoint helper; a helper with no environment, mounts, devices, lifecycle
@@ -156,7 +165,7 @@ func BuildManagedPodSpec(run *api.AgentRun, rt *api.AgentRuntime, binding *regis
 	}
 	if binding.RunUID != string(run.UID) || binding.IntendedRunName != run.Name ||
 		binding.TemplateName != run.Spec.TemplateRef.Name || deadline.At(binding.OriginalDeadline).Passed(time.Now()) ||
-		binding.Phase == registry.Creating || binding.Phase == registry.Cancelled || binding.Phase == registry.Stopped {
+		!BuildsManagedPod(binding) {
 		return nil, fmt.Errorf("managed sandbox requires a current exact registration")
 	}
 	if err := ValidateManagedShape(&rt.Spec); err != nil {

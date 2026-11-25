@@ -165,6 +165,24 @@ func TestManagedPodMountsItsSessionsNamedLogin(t *testing.T) {
 	}
 }
 
+// Admission applies the managed rules exactly in the registration phases for
+// which BuildManagedPodSpec still builds a Pod.
+func TestBuildsManagedPodMatchesThePodBuilder(t *testing.T) {
+	if kubernetes.BuildsManagedPod(nil) {
+		t.Fatal("an ordinary run builds a managed Pod")
+	}
+	want := map[registry.Phase]bool{registry.Creating: false, registry.Bound: true, registry.Prepared: true,
+		registry.Active: true, registry.Stopping: true, registry.Stopped: false, registry.Cancelled: false}
+	for phase, builds := range want {
+		run, runtime, binding := managedFixture()
+		binding.Phase = phase
+		_, err := kubernetes.BuildManagedPodSpec(run, runtime, binding)
+		if got := kubernetes.BuildsManagedPod(binding); got != builds || (err == nil) != builds {
+			t.Errorf("phase %s: BuildsManagedPod = %v, BuildManagedPodSpec error = %v; want builds = %v", phase, got, err, builds)
+		}
+	}
+}
+
 type managedShapeViolation struct {
 	mutate func(*api.AgentRuntime)
 	want   string

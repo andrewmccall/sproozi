@@ -193,9 +193,10 @@ func (r *AgentRunReconciler) resolveAdmission(ctx context.Context, run *sprooziv
 	}
 
 	// Reject a runtime that cannot launch before the run is admitted. A run
-	// bound to a session registration is managed, so its runtime must also
-	// have the shape EnsureManaged builds from.
-	if err := r.SandboxClient.ValidateRuntime(ctx, rt, binding != nil); err != nil {
+	// bound to a session registration for which a managed Pod may still be
+	// built must also have the runtime shape EnsureManaged builds from; a
+	// completed stop builds none.
+	if err := r.SandboxClient.ValidateRuntime(ctx, rt, k8sresources.BuildsManagedPod(binding)); err != nil {
 		if !errors.Is(err, k8sresources.ErrInvalidRuntime) {
 			return nil, ctrl.Result{}, err
 		}

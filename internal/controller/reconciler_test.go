@@ -1467,10 +1467,24 @@ func TestReconcilerStoppedManagedSessionPastDeadlineEndsAsStopped(t *testing.T) 
 	checkStoppedManagedSessionEnds(t, true)
 }
 
-func checkStoppedManagedSessionEnds(t *testing.T, pastDeadline bool) {
+// A stop that completed needs no Pod built, so the managed-shape rules do not
+// end it: a runtime edited into a wrong shape after its Pod was created still
+// lets the run end Succeeded with SessionStopped. (The fixture runtime above
+// has one container, so it lacks the managed shape too.)
+func TestReconcilerStoppedManagedSessionIgnoresManagedShape(t *testing.T) {
+	t.Parallel()
+	checkStoppedManagedSessionEnds(t, false, func(rt *sprooziv1alpha1.AgentRuntime) {
+		withManagedShape(rt)
+		rt.Spec.PodTemplate.Spec.Containers[1].Env = []corev1.EnvVar{{Name: "LEAK", Value: "x"}}
+	})
+}
+
+func checkStoppedManagedSessionEnds(t *testing.T, pastDeadline bool, shapes ...func(*sprooziv1alpha1.AgentRuntime)) {
 	t.Helper()
 	objs := fixtures()
-	withManagedShape(objs[0].(*sprooziv1alpha1.AgentRuntime))
+	for _, shape := range shapes {
+		shape(objs[0].(*sprooziv1alpha1.AgentRuntime))
+	}
 	tmpl := objs[2].(*sprooziv1alpha1.AgentTemplate)
 	tmpl.Annotations = map[string]string{registry.ManagedTemplateAnnotation: managedValue}
 	run := newRun(runOne)
