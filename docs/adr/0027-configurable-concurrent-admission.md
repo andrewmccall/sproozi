@@ -7,16 +7,25 @@ Corrected 2026-11-24: the runtime check at admission and the live reads under
 it moved here from ADR 0017, which was removed. Its replay-record decisions
 went with the event webhook (ADR 0043).
 
-Corrected 2026-11-25: the managed-shape rules (exactly the `agent` and
-`checkpoint` containers, a helper with no environment, mounts, devices, hooks
-or ports, and the reserved `checkpoint-tmp` volume) were not part of
-`ValidateRuntime`: they ran only when `EnsureManaged` built the Pod, so a
-managed run on a runtime without that shape was admitted and failed there on
-every reconcile until its deadline. They are now one function,
-`ValidateManagedShape`, which `ValidateRuntime` applies when the run is bound to
-a session registration and which `BuildManagedPodSpec` still calls, so
-`EnsureManaged` repeats that check from the same source rather than not at all.
-The remote executor's placement applies it before it creates a run.
+Corrected 2026-11-25: the managed rules were not part of `ValidateRuntime`.
+The managed shape (exactly the `agent` and `checkpoint` containers, a helper
+with no environment, mounts, devices, hooks or ports, and the reserved
+`checkpoint-tmp` volume) ran only when `EnsureManaged` built the Pod, and the
+harness rule (the runtime's `clientConfig.harness` names the registration's
+harness) only when the agent contract and the Pod were built. A managed run on
+a runtime that broke either was admitted and failed there on every reconcile
+until its deadline, or without end when it had none. They are now
+`ValidateManagedRuntime` (`ValidateManagedHarness`, then
+`ValidateManagedShape`). `ValidateRuntime` takes the run's session binding and
+applies them when `BuildsManagedPod` says a managed Pod may still be built, so
+not for a registration whose stop has completed, which ends its run without a
+Pod. This supersedes the statement below that "`Ensure` and `EnsureManaged` do
+not repeat the check": the agent contract and `BuildManagedPodSpec` still apply
+their parts of the managed rules, through the same functions, so they repeat
+that part rather than not at all and cannot disagree with it. The remote
+executor's placement applies the template rules and the managed rules
+(`ValidateManagedTemplate`) before it creates a run, and its `Prepare` refuses
+a start that fails them with the admission's message as the reason (ADR 0067).
 
 ## Problem and constraints
 

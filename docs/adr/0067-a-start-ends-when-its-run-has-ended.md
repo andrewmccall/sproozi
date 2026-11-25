@@ -3,6 +3,16 @@
 Status: accepted
 Date: 2026-11-17
 
+Corrected 2026-11-25: the Kubernetes placement's `Prepare` also returns
+`StartRefused` before it creates a registration or AgentRun, when the launch
+passes every check `denied` covers but its AgentRuntime cannot launch a
+sandbox (a template rule, the harness, or the managed shape; see ADR 0027's
+correction of the same date). The reason is the message the run's admission
+would give, `AgentRuntime NAME: cannot launch a sandbox: RULE`. The run would
+fail with `RuntimeInvalid` before its Pod, which this record already refuses,
+so this refuses the same start one step earlier. `Activate` and `Attach` still
+answer `denied` for such a runtime.
+
 ## Problem and constraints
 
 The Kubernetes placement's `Prepare` creates the visit's

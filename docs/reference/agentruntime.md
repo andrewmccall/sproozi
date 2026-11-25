@@ -130,13 +130,15 @@ The trust ConfigMap must be in `sproozi-agents`, immutable and contain public CA
 material only. Runtime, policy, template and run references resolve within the
 run's namespace.
 
-These rules, and for a managed run the [managed shape](#managed-native-sessions),
+These rules, and for a managed run the [managed rules](#managed-native-sessions),
 are checked when a run is admitted, not when the `AgentRuntime` is
 created, and again on every later reconcile of an active run. A runtime that breaks
 any of them fails the run with reason `RuntimeInvalid` before it is admitted,
 so it never counts against a concurrency cap. The `Ready` condition message names the runtime and the rule, for
 example `AgentRuntime codex: cannot launch a sandbox: container "agent" image
-must be digest pinned`. Fix the runtime, then create a new run.
+must be digest pinned`. Fix the runtime. Then create a new ordinary run, or
+start a managed session again from the session command that created it, such
+as `resume`.
 
 ## Ordinary run completion
 
@@ -331,12 +333,19 @@ This fragment supplements a complete managed runtime, which must have:
 - non-root UID and GID 1000, read-only root filesystems and dropped capabilities;
 - explicit resources and a bounded memory-backed workspace.
 
-The first three are the managed shape. A managed run's admission checks it with
-the [container validation rules](#container-validation-rules), so a runtime without it fails the run with
-`RuntimeInvalid` before it takes a place under a cap, for example
-`AgentRuntime codex: cannot launch a sandbox: checkpoint helper cannot receive
-credentials, mounts or workload hooks`. The remote executor also denies a launch
-whose runtime lacks it. An ordinary run on the same runtime is not checked for it.
+The first three are the managed shape. With `clientConfig.harness` naming the
+session's harness, they are the managed rules. A managed run's admission checks
+them with the [container validation rules](#container-validation-rules), so a
+runtime that breaks one fails the run with `RuntimeInvalid` before it takes a
+place under a cap, for example `AgentRuntime codex: cannot launch a sandbox:
+checkpoint helper cannot receive credentials, mounts or workload hooks` or
+`AgentRuntime codex: cannot launch a sandbox: managed runtime harness
+"claude-code" does not match the session's harness "codex"`. The remote
+executor refuses such a start with the same reason before it creates a run
+(see [placement outcomes](remote-executors.md#placement-outcomes)). An ordinary
+run on the same runtime is not checked against the managed rules, and neither is a
+managed run whose session stop has completed: it builds no Pod, so it still ends
+`Succeeded` with `SessionStopped`.
 
 The controller sets the supervisor and checkpoint-helper commands. The helper
 mounts the workspace and a private temporary volume. It gets no provider

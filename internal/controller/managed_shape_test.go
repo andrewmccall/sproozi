@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -323,8 +324,12 @@ func TestReconcilerManagedRuntimeEditedAfterAdmission(t *testing.T) {
 			if want := map[bool]int{false: 0, true: 1}[podCreated]; len(sandbox.managed) != want {
 				t.Fatalf("managed Pods %v, want %d", sandbox.managed, want)
 			}
-			if len(sandbox.Deleted) != len(sandbox.managed) {
-				t.Fatalf("deleted sandboxes %v, want the run's managed Pods %v released", sandbox.Deleted, sandbox.managed)
+			// The fake records a delete on each terminal reconcile, so check
+			// that each managed Pod was released, not how often.
+			for _, pod := range sandbox.managed {
+				if !slices.Contains(sandbox.Deleted, pod) {
+					t.Fatalf("deleted sandboxes %v, want managed Pod %s released", sandbox.Deleted, pod)
+				}
 			}
 		})
 	}
