@@ -12,6 +12,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 func managedFixture() (*api.AgentRun, *api.AgentRuntime, *registry.Record) {
@@ -158,5 +159,83 @@ func TestManagedPodMountsItsSessionsNamedLogin(t *testing.T) {
 		}) {
 			t.Fatalf("login %q: no claim %s in %+v", login, want, pod.Spec.Volumes)
 		}
+	}
+}
+
+type managedShapeViolation struct {
+	mutate func(*api.AgentRuntime)
+	want   string
+}
+
+// managedShapeViolations breaks each managed-shape rule once, with a template
+// that still passes the ordinary template check, and names the refusal.
+func managedShapeViolations() map[string]managedShapeViolation {
+	const (
+		count   = "managed runtime requires one native agent and one checkpoint helper"
+		missing = "managed runtime checkpoint helper is missing"
+		helper  = "checkpoint helper cannot receive credentials, mounts or workload hooks"
+		volume  = "checkpoint temporary volume is reserved"
+	)
+	containers := func(rt *api.AgentRuntime) []corev1.Container { return rt.Spec.PodTemplate.Spec.Containers }
+	return map[string]managedShapeViolation{
+		"extra container": {func(rt *api.AgentRuntime) {
+			extra := *containers(rt)[0].DeepCopy()
+			extra.Name = "other"
+			rt.Spec.PodTemplate.Spec.Containers = append(rt.Spec.PodTemplate.Spec.Containers, extra)
+		}, count},
+		"agent only": {func(rt *api.AgentRuntime) {
+			rt.Spec.PodTemplate.Spec.Containers = rt.Spec.PodTemplate.Spec.Containers[:1]
+		}, count},
+		"helper is a workload": {func(rt *api.AgentRuntime) {
+			rt.Spec.WorkloadContainers = append(rt.Spec.WorkloadContainers, kubernetes.CaptureContainer)
+		}, count},
+		"workload is not the agent": {func(rt *api.AgentRuntime) {
+			containers(rt)[0].Name = "worker"
+			rt.Spec.WorkloadContainers = []string{"worker"}
+		}, count},
+		"helper missing": {func(rt *api.AgentRuntime) { containers(rt)[1].Name = "sidecar" }, missing},
+		"helper env": {func(rt *api.AgentRuntime) {
+			containers(rt)[1].Env = []corev1.EnvVar{{Name: "SECRET", Value: "forbidden"}}
+		}, helper},
+		"helper mount": {func(rt *api.AgentRuntime) {
+			containers(rt)[1].VolumeMounts = []corev1.VolumeMount{{Name: "scratch", MountPath: "/scratch"}}
+		}, helper},
+		"helper device": {func(rt *api.AgentRuntime) {
+			containers(rt)[1].VolumeDevices = []corev1.VolumeDevice{{Name: "disk", DevicePath: "/dev/disk"}}
+		}, helper},
+		"helper hook": {func(rt *api.AgentRuntime) {
+			containers(rt)[1].Lifecycle = &corev1.Lifecycle{PreStop: &corev1.LifecycleHandler{Exec: &corev1.ExecAction{Command: []string{"true"}}}}
+		}, helper},
+		"helper port": {func(rt *api.AgentRuntime) {
+			containers(rt)[1].Ports = []corev1.ContainerPort{{ContainerPort: 8080}}
+		}, helper},
+		"reserved volume": {func(rt *api.AgentRuntime) {
+			size := resource.MustParse("1Mi")
+			rt.Spec.PodTemplate.Spec.Volumes = append(rt.Spec.PodTemplate.Spec.Volumes, corev1.Volume{Name: "checkpoint-tmp",
+				VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: &size}}})
+		}, volume},
+	}
+}
+
+// Building a managed Pod refuses exactly what ValidateManagedShape refuses,
+// with the same message: the rules have one copy.
+func TestManagedShapeRulesHaveOneSource(t *testing.T) {
+	run, runtime, binding := managedFixture()
+	if err := kubernetes.ValidateManagedShape(&runtime.Spec); err != nil {
+		t.Fatalf("fixture managed runtime refused: %v", err)
+	}
+	for name, violation := range managedShapeViolations() {
+		t.Run(name, func(t *testing.T) {
+			run, runtime, binding := run.DeepCopy(), runtime.DeepCopy(), *binding
+			violation.mutate(runtime)
+			if err := runtime.Spec.ValidateRuntimeTemplate(); err != nil {
+				t.Fatalf("violation also breaks the ordinary template check: %v", err)
+			}
+			shapeErr := kubernetes.ValidateManagedShape(&runtime.Spec)
+			_, buildErr := kubernetes.BuildManagedPodSpec(run, runtime, &binding)
+			if shapeErr == nil || buildErr == nil || shapeErr.Error() != violation.want || buildErr.Error() != violation.want {
+				t.Fatalf("ValidateManagedShape = %v, BuildManagedPodSpec = %v, want both %q", shapeErr, buildErr, violation.want)
+			}
+		})
 	}
 }

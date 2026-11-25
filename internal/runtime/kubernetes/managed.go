@@ -119,6 +119,34 @@ func useSessionLogin(pod *corev1.Pod, binding *registry.Record) {
 	}
 }
 
+// ValidateManagedShape checks the Pod template shape a managed session needs:
+// exactly two containers, the agent (the only workload container) and the
+// checkpoint helper; a helper with no environment, mounts, devices, lifecycle
+// hooks or ports; and no template volume with the reserved checkpoint
+// temporary volume's name. It is the one copy of these rules: building a
+// managed Pod refuses a template that fails it.
+func ValidateManagedShape(spec *api.AgentRuntimeSpec) error {
+	if len(spec.WorkloadContainers) != 1 || spec.WorkloadContainers[0] != agentContainerName ||
+		len(spec.PodTemplate.Spec.Containers) != 2 {
+		return fmt.Errorf("managed runtime requires one native agent and one checkpoint helper")
+	}
+	helper := slices.IndexFunc(spec.PodTemplate.Spec.Containers, func(c corev1.Container) bool { return c.Name == CaptureContainer })
+	if helper < 0 {
+		return fmt.Errorf("managed runtime checkpoint helper is missing")
+	}
+	configured := spec.PodTemplate.Spec.Containers[helper]
+	if len(configured.Env) != 0 || len(configured.EnvFrom) != 0 || len(configured.VolumeMounts) != 0 ||
+		len(configured.VolumeDevices) != 0 || configured.Lifecycle != nil || len(configured.Ports) != 0 {
+		return fmt.Errorf("checkpoint helper cannot receive credentials, mounts or workload hooks")
+	}
+	for _, volume := range spec.PodTemplate.Spec.Volumes {
+		if volume.Name == checkpointTemporaryVolume {
+			return fmt.Errorf("checkpoint temporary volume is reserved")
+		}
+	}
+	return nil
+}
+
 func BuildManagedPodSpec(run *api.AgentRun, rt *api.AgentRuntime, binding *registry.Record) (*corev1.Pod, error) {
 	if binding == nil {
 		return nil, fmt.Errorf("managed sandbox requires a native registration")
@@ -131,23 +159,8 @@ func BuildManagedPodSpec(run *api.AgentRun, rt *api.AgentRuntime, binding *regis
 		binding.Phase == registry.Creating || binding.Phase == registry.Cancelled || binding.Phase == registry.Stopped {
 		return nil, fmt.Errorf("managed sandbox requires a current exact registration")
 	}
-	if len(rt.Spec.WorkloadContainers) != 1 || rt.Spec.WorkloadContainers[0] != agentContainerName ||
-		len(rt.Spec.PodTemplate.Spec.Containers) != 2 {
-		return nil, fmt.Errorf("managed runtime requires one native agent and one checkpoint helper")
-	}
-	helper := slices.IndexFunc(rt.Spec.PodTemplate.Spec.Containers, func(c corev1.Container) bool { return c.Name == CaptureContainer })
-	if helper < 0 {
-		return nil, fmt.Errorf("managed runtime checkpoint helper is missing")
-	}
-	configured := rt.Spec.PodTemplate.Spec.Containers[helper]
-	if len(configured.Env) != 0 || len(configured.EnvFrom) != 0 || len(configured.VolumeMounts) != 0 ||
-		len(configured.VolumeDevices) != 0 || configured.Lifecycle != nil || len(configured.Ports) != 0 {
-		return nil, fmt.Errorf("checkpoint helper cannot receive credentials, mounts or workload hooks")
-	}
-	for _, volume := range rt.Spec.PodTemplate.Spec.Volumes {
-		if volume.Name == checkpointTemporaryVolume {
-			return nil, fmt.Errorf("checkpoint temporary volume is reserved")
-		}
+	if err := ValidateManagedShape(&rt.Spec); err != nil {
+		return nil, err
 	}
 	pod := BuildPodSpec(run, rt, run.Status.Identity.ServiceAccountName)
 	useSessionLogin(pod, binding)
