@@ -3,6 +3,8 @@ package kubernetes_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -238,41 +240,59 @@ func managedShapeViolations() map[string]managedShapeViolation {
 	}
 }
 
+// managedHarnessViolations break the harness rule: the runtime names another
+// harness than the registration, or none.
+func managedHarnessViolations() map[string]managedShapeViolation {
+	const want = `managed runtime harness %q does not match the session's harness "codex"`
+	return map[string]managedShapeViolation{
+		"another harness": {func(rt *api.AgentRuntime) { rt.Spec.ClientConfig.Harness = string(harness.NativeClaude) },
+			fmt.Sprintf(want, harness.NativeClaude)},
+		"no harness": {func(rt *api.AgentRuntime) { rt.Spec.ClientConfig.Harness = "" }, fmt.Sprintf(want, "")},
+	}
+}
+
 // Building a managed Pod and admitting a managed run refuse exactly what
-// ValidateManagedShape refuses, for the same reason: the rules have one copy,
-// so admission cannot pass a runtime that EnsureManaged then refuses. An
-// ordinary run's admission does not apply them.
-func TestManagedShapeRulesHaveOneSource(t *testing.T) {
+// ValidateManagedRuntime refuses, for the same reason: the rules have one
+// copy, so admission cannot pass a runtime that EnsureManaged then refuses. An
+// ordinary run's admission, and a stopped session's, do not apply them.
+func TestManagedRulesHaveOneSource(t *testing.T) {
 	run, runtime, binding := managedFixture()
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(testTrustConfigMap(t)).Build()
 	admitters := map[string]kubernetes.SandboxClient{"Pod": newSandboxClient(c), "fake": &kubernetes.FakeSandboxClient{}}
-	if err := kubernetes.ValidateManagedShape(&runtime.Spec); err != nil {
+	if err := kubernetes.ValidateManagedRuntime(&runtime.Spec, binding.Harness); err != nil {
 		t.Fatalf("fixture managed runtime refused: %v", err)
 	}
 	for client, admitter := range admitters {
-		if err := admitter.ValidateRuntime(context.Background(), runtime, true); err != nil {
+		if err := admitter.ValidateRuntime(context.Background(), runtime, binding); err != nil {
 			t.Fatalf("%s admission refused the fixture managed runtime: %v", client, err)
 		}
 	}
-	for name, violation := range managedShapeViolations() {
+	violations := managedShapeViolations()
+	maps.Copy(violations, managedHarnessViolations())
+	for name, violation := range violations {
 		t.Run(name, func(t *testing.T) {
 			run, runtime, binding := run.DeepCopy(), runtime.DeepCopy(), *binding
 			violation.mutate(runtime)
 			if err := runtime.Spec.ValidateRuntimeTemplate(); err != nil {
 				t.Fatalf("violation also breaks the ordinary template check: %v", err)
 			}
-			shapeErr := kubernetes.ValidateManagedShape(&runtime.Spec)
+			rulesErr := kubernetes.ValidateManagedRuntime(&runtime.Spec, binding.Harness)
 			_, buildErr := kubernetes.BuildManagedPodSpec(run, runtime, &binding)
-			if shapeErr == nil || buildErr == nil || shapeErr.Error() != violation.want || buildErr.Error() != violation.want {
-				t.Fatalf("ValidateManagedShape = %v, BuildManagedPodSpec = %v, want both %q", shapeErr, buildErr, violation.want)
+			if rulesErr == nil || buildErr == nil || rulesErr.Error() != violation.want || buildErr.Error() != violation.want {
+				t.Fatalf("ValidateManagedRuntime = %v, BuildManagedPodSpec = %v, want both %q", rulesErr, buildErr, violation.want)
 			}
+			stopped := binding
+			stopped.Phase = registry.Stopped
 			for client, admitter := range admitters {
-				err := admitter.ValidateRuntime(context.Background(), runtime, true)
+				err := admitter.ValidateRuntime(context.Background(), runtime, &binding)
 				if !errors.Is(err, kubernetes.ErrInvalidRuntime) || err.Error() != kubernetes.ErrInvalidRuntime.Error()+": "+violation.want {
 					t.Fatalf("%s managed admission = %v, want ErrInvalidRuntime for %q", client, err, violation.want)
 				}
-				if err := admitter.ValidateRuntime(context.Background(), runtime, false); err != nil {
-					t.Fatalf("%s ordinary admission applied the managed shape: %v", client, err)
+				if err := admitter.ValidateRuntime(context.Background(), runtime, nil); err != nil {
+					t.Fatalf("%s ordinary admission applied the managed rules: %v", client, err)
+				}
+				if err := admitter.ValidateRuntime(context.Background(), runtime, &stopped); err != nil {
+					t.Fatalf("%s stopped session's admission applied the managed rules: %v", client, err)
 				}
 			}
 		})

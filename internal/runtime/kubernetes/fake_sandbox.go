@@ -19,6 +19,7 @@ import (
 	"context"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 )
 
 // FakeSandboxClient is a recording SandboxClient for use in unit tests.
@@ -41,10 +42,10 @@ type FakeSandboxClient struct {
 	Deleted []string
 }
 
-// ValidateRuntime applies the Pod-backed client's template and managed-shape
+// ValidateRuntime applies the Pod-backed client's template and managed
 // checks; there is no trust bundle to read.
-func (f *FakeSandboxClient) ValidateRuntime(_ context.Context, rt *sprooziv1alpha1.AgentRuntime, managed bool) error {
-	return validateRuntimeTemplate(rt, managed)
+func (f *FakeSandboxClient) ValidateRuntime(_ context.Context, rt *sprooziv1alpha1.AgentRuntime, binding *registry.Record) error {
+	return validateRuntimeTemplate(rt, binding)
 }
 
 // Ensure records and returns RunName(run.UID).

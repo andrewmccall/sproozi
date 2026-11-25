@@ -256,8 +256,7 @@ func (p *Placement) liveProfileInput(ctx context.Context, l session.Launch, init
 	if err := p.config.Kube.Get(ctx, client.ObjectKey{Namespace: p.config.Namespace, Name: template.Spec.RuntimeRef.Name}, &runtime); err != nil {
 		return nil, err
 	}
-	if runtime.Spec.ClientConfig.Harness != string(p.config.Harness) || runtime.Spec.ValidateRuntimeTemplate() != nil ||
-		runtimekube.ValidateManagedShape(&runtime.Spec) != nil {
+	if runtimekube.ValidateManagedRuntime(&runtime.Spec, p.config.Harness) != nil || runtime.Spec.ValidateRuntimeTemplate() != nil {
 		return nil, &profile.Rejection{Code: profile.CodeDenied}
 	}
 	capabilities := make([]api.CapabilityKind, 0, len(l.Allowances))

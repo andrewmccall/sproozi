@@ -37,8 +37,8 @@ func addManagedNativeContract(ctx context.Context, kube client.Client, run *api.
 	if err != nil || binding == nil {
 		return err
 	}
-	if err := binding.Harness.Validate(); err != nil || runtime.Spec.ClientConfig.Harness != string(binding.Harness) {
-		return fmt.Errorf("managed native runtime does not match registered harness")
+	if err := ValidateManagedHarness(&runtime.Spec, binding.Harness); err != nil {
+		return err
 	}
 	thread := binding.NativeUUID
 	if binding.WorkspaceDigest != "" {
@@ -128,6 +128,28 @@ func BuildsManagedPod(r *registry.Record) bool {
 	return r != nil && r.Phase != registry.Creating && r.Phase != registry.Cancelled && r.Phase != registry.Stopped
 }
 
+// ValidateManagedRuntime checks a runtime against the managed rules for a
+// session of the given harness: ValidateManagedHarness, then
+// ValidateManagedShape. Run admission and the remote executor's placement
+// apply it; building the agent contract and the Pod apply its parts.
+func ValidateManagedRuntime(spec *api.AgentRuntimeSpec, registered harness.NativeKind) error {
+	if err := ValidateManagedHarness(spec, registered); err != nil {
+		return err
+	}
+	return ValidateManagedShape(spec)
+}
+
+// ValidateManagedHarness checks that the runtime names the session's harness,
+// which must itself be a valid one. It is the one copy of this rule: the
+// managed agent contract and Pod refuse a runtime that fails it.
+func ValidateManagedHarness(spec *api.AgentRuntimeSpec, registered harness.NativeKind) error {
+	if registered.Validate() != nil || spec.ClientConfig.Harness != string(registered) {
+		return fmt.Errorf("managed runtime harness %q does not match the session's harness %q",
+			spec.ClientConfig.Harness, registered)
+	}
+	return nil
+}
+
 // ValidateManagedShape checks the Pod template shape a managed session needs:
 // exactly two containers, the agent (the only workload container) and the
 // checkpoint helper; a helper with no environment, mounts, devices, lifecycle
@@ -160,8 +182,8 @@ func BuildManagedPodSpec(run *api.AgentRun, rt *api.AgentRuntime, binding *regis
 	if binding == nil {
 		return nil, fmt.Errorf("managed sandbox requires a native registration")
 	}
-	if err := binding.Harness.Validate(); err != nil || rt.Spec.ClientConfig.Harness != string(binding.Harness) {
-		return nil, fmt.Errorf("managed sandbox native harness mismatch")
+	if err := ValidateManagedHarness(&rt.Spec, binding.Harness); err != nil {
+		return nil, err
 	}
 	if binding.RunUID != string(run.UID) || binding.IntendedRunName != run.Name ||
 		binding.TemplateName != run.Spec.TemplateRef.Name || deadline.At(binding.OriginalDeadline).Passed(time.Now()) ||

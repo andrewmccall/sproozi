@@ -202,6 +202,42 @@ func TestReconcilerManagedRunWithWrongShapeFailsAtAdmission(t *testing.T) {
 	}
 }
 
+// A managed run whose runtime names another harness than its registration,
+// or none, must end at admission naming both. Before, it was admitted, showed
+// Ready Running, held the slot and failed building its agent contract on
+// every reconcile until its deadline, or without end when it had none.
+func TestReconcilerManagedRunWithWrongHarnessFailsAtAdmission(t *testing.T) {
+	t.Parallel()
+	for name, runtimeHarness := range map[string]string{"another harness": string(harness.NativeClaude), "no harness": ""} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			r, c, sandbox := managedShapeCluster(t, func(rt *sprooziv1alpha1.AgentRuntime) {
+				rt.Spec.ClientConfig.Harness = runtimeHarness
+			})
+			for range 3 {
+				if _, err := reconcileNamed(r, managedRunName); err != nil {
+					t.Fatalf("Reconcile() error = %v", err)
+				}
+			}
+			run := getRun(t, c, managedRunName)
+			if run.Status.Phase != sprooziv1alpha1.AgentRunPhaseFailed || run.Status.StartedAt != nil {
+				t.Fatalf("phase = %q, startedAt = %v; want Failed without admission", run.Status.Phase, run.Status.StartedAt)
+			}
+			assertReadyMessage(t, c, managedRunName, "RuntimeInvalid", "AgentRuntime "+managedRuntimeName,
+				`harness "`+runtimeHarness+`"`, `harness "`+string(harness.NativeCodex)+`"`)
+			if sa, np, cm := runObjects(t, c); sa+np+cm != 0 || len(sandbox.managed) != 0 {
+				t.Fatalf("left behind %d ServiceAccounts, %d NetworkPolicies, %d contracts, Pods %v", sa, np, cm, sandbox.managed)
+			}
+			if _, err := reconcileNamed(r, ordinaryRunName); err != nil {
+				t.Fatalf("Reconcile() error = %v", err)
+			}
+			if phase := getPhase(t, c, ordinaryRunName); phase != sprooziv1alpha1.AgentRunPhaseAdmitted {
+				t.Fatalf("next run phase = %q, want Admitted: the failed run held the cap", phase)
+			}
+		})
+	}
+}
+
 // The fixture is a correctly shaped managed runtime: its run is admitted and
 // gets its managed Pod. This keeps the test above honest.
 func TestReconcilerManagedRunWithRightShapeStarts(t *testing.T) {

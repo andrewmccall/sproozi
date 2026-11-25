@@ -567,7 +567,7 @@ func TestValidateRuntimeRejectsUnsafeTemplate(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(testTrustConfigMap(t)).Build()
 	rt := testRuntime()
 	rt.Spec.PodTemplate.Spec.HostNetwork = true
-	if err := newSandboxClient(c).ValidateRuntime(context.Background(), rt, false); !errors.Is(err, kubernetes.ErrInvalidRuntime) {
+	if err := newSandboxClient(c).ValidateRuntime(context.Background(), rt, nil); !errors.Is(err, kubernetes.ErrInvalidRuntime) {
 		t.Fatalf("ValidateRuntime error = %v, want ErrInvalidRuntime", err)
 	}
 }
@@ -595,7 +595,7 @@ func TestValidateRuntimeFailsClosedWithoutImmutableCertificateOnlyTrustBundle(t 
 				builder = builder.WithObjects(tc.configMap)
 			}
 			c := builder.Build()
-			err := newSandboxClient(c).ValidateRuntime(context.Background(), testRuntime(), false)
+			err := newSandboxClient(c).ValidateRuntime(context.Background(), testRuntime(), nil)
 			if !errors.Is(err, kubernetes.ErrInvalidRuntime) {
 				t.Fatalf("ValidateRuntime error = %v, want ErrInvalidRuntime for unavailable, mutable, or non-certificate trust material", err)
 			}
