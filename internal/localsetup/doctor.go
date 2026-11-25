@@ -76,6 +76,19 @@ func checkCredentials(ctx context.Context, r *Report, l Layout, inst Installatio
 	}
 }
 
+// tokenFix says how to supply the key for a token file that holds a
+// placeholder or nothing. "credentials set" writes the file setup records for
+// the harness, so it is the advice only for that file; a hand-edited path is
+// written directly.
+func tokenFix(inst Installation, t home.TokenProblem) string {
+	for _, h := range inst.Harnesses {
+		if h.Harness == t.Harness && h.Credential == t.Path {
+			return "run sproozi credentials set " + string(h.Harness)
+		}
+	}
+	return "write the provider API key to " + t.Path
+}
+
 // Doctor checks the installation without changing installation-owned state.
 // The restricted-path probe starts and removes temporary probe containers.
 // Provider validation lists models only and is opt-in.
@@ -102,10 +115,15 @@ func Doctor(ctx context.Context, l Layout, checkProvider bool) (r Report) {
 	config, err := home.ReadConfig(l.Config())
 	if err == nil {
 		// The service refuses to start on any of these, so each is a failure.
-		if problems := config.ReadinessProblems(); len(problems) != 0 {
-			for _, problem := range problems {
-				r.add("config", fail("config", errors.New(problem), "edit "+l.Config()+" to correct it"), "")
-			}
+		problems, tokens := config.ServeProblems(), config.ProviderTokenFindings()
+		for _, problem := range problems {
+			r.add("config", fail("config", errors.New(problem), "edit "+l.Config()+" to correct it"), "")
+		}
+		for _, token := range tokens {
+			// The configuration is fine; the key file is what to fix.
+			r.add("credential", fail("credential", errors.New(token.Message), tokenFix(inst, token)), "")
+		}
+		if len(problems)+len(tokens) != 0 {
 			return r
 		}
 	}

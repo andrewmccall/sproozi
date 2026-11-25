@@ -188,13 +188,32 @@ func (c Config) ProviderTokenProblem() string {
 // ProviderTokenProblems names the provider token file of the primary harness
 // and of each further harness that still holds a placeholder or nothing.
 func (c Config) ProviderTokenProblems() []string {
-	var p []string
-	if problem := c.ProviderTokenProblem(); problem != "" {
-		p = append(p, problem)
+	findings := c.ProviderTokenFindings()
+	p := make([]string, 0, len(findings))
+	for _, f := range findings {
+		p = append(p, f.Message)
+	}
+	return p
+}
+
+// TokenProblem is one provider token file that holds a placeholder or
+// nothing: which harness reads it, where it is and the readiness message.
+type TokenProblem struct {
+	Harness harness.NativeKind
+	Path    string
+	Message string
+}
+
+// ProviderTokenFindings is ProviderTokenProblems with the harness and path of
+// each problem, so a caller can say how to fix that file.
+func (c Config) ProviderTokenFindings() []TokenProblem {
+	var p []TokenProblem
+	if message := c.ProviderTokenProblem(); message != "" {
+		p = append(p, TokenProblem{c.Local.Harness, c.Gateway.ProviderTokenFile, message})
 	}
 	for i, h := range c.Harnesses {
-		if problem := tokenFileProblem(fmt.Sprintf("harnesses[%d].providerTokenFile", i), h.ProviderTokenFile); problem != "" {
-			p = append(p, problem)
+		if message := tokenFileProblem(fmt.Sprintf("harnesses[%d].providerTokenFile", i), h.ProviderTokenFile); message != "" {
+			p = append(p, TokenProblem{h.Harness, h.ProviderTokenFile, message})
 		}
 	}
 	return p
