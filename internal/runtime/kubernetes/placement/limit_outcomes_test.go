@@ -66,7 +66,7 @@ func TestLimitOutcomesMatchTheRecordedTable(t *testing.T) {
 	policy := api.AgentPolicySpec{AllowedCapabilities: []api.CapabilityKind{api.CapabilityModelInference}}
 	for _, ceiling := range outcomeCeilings {
 		for _, want := range outcomeWants {
-			lines = append(lines, fmt.Sprintf("limitFits want=%+v ceiling=%+v -> %t", want, ceiling, want.Fits(ceiling)))
+			lines = append(lines, fmt.Sprintf("Limit.Fits want=%+v ceiling=%+v -> %t", want, ceiling, want.Fits(ceiling)))
 			for _, dimension := range []string{"units", "costMicros"} {
 				fixed, asked := session.Allowance{Units: session.Limit{Bounded: true, Value: 5}}, session.Allowance{Units: session.Limit{Bounded: true, Value: 5}}
 				if dimension == "units" {

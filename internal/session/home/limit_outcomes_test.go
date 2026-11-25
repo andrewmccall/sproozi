@@ -56,7 +56,7 @@ func TestLimitOutcomesMatchTheRecordedTable(t *testing.T) {
 	}
 	for _, ceiling := range outcomeCeilings {
 		for _, want := range outcomeWants {
-			lines = append(lines, fmt.Sprintf("projectLimitFits want=%+v ceiling=%+v -> %t", want, ceiling, want.Fits(ceiling)))
+			lines = append(lines, fmt.Sprintf("Limit.Fits want=%+v ceiling=%+v -> %t", want, ceiling, want.Fits(ceiling)))
 		}
 	}
 	testutil.RecordedOutcomes(t, "testdata/limit-outcomes.txt", lines)

@@ -62,18 +62,18 @@ AllowanceProblems mcp.docs units={Bounded:false Value:-1} -> allowances.mcp.docs
 approvedPolicy mcp.docs units={Bounded:false Value:-1} -> refused: home: positive unit ceilings required, except for model inference
 AllowanceProblems mcp.docs costMicros={Bounded:false Value:-1} -> allowances.mcp.docs.costMicros ("bounded": false with "value": 0 for no cap, or "bounded": true with a positive "value"); allowances.mcp.docs (needs gateway.mcpAuthority and gateway.mcpRegistryFile)
 approvedPolicy mcp.docs costMicros={Bounded:false Value:-1} -> refused: home: positive unit ceilings required, except for model inference
-projectLimitFits want={Bounded:true Value:0} ceiling={Bounded:true Value:0} -> true
-projectLimitFits want={Bounded:true Value:1} ceiling={Bounded:true Value:0} -> false
-projectLimitFits want={Bounded:true Value:5} ceiling={Bounded:true Value:0} -> false
-projectLimitFits want={Bounded:true Value:6} ceiling={Bounded:true Value:0} -> false
-projectLimitFits want={Bounded:false Value:0} ceiling={Bounded:true Value:0} -> false
-projectLimitFits want={Bounded:true Value:0} ceiling={Bounded:true Value:5} -> true
-projectLimitFits want={Bounded:true Value:1} ceiling={Bounded:true Value:5} -> true
-projectLimitFits want={Bounded:true Value:5} ceiling={Bounded:true Value:5} -> true
-projectLimitFits want={Bounded:true Value:6} ceiling={Bounded:true Value:5} -> false
-projectLimitFits want={Bounded:false Value:0} ceiling={Bounded:true Value:5} -> false
-projectLimitFits want={Bounded:true Value:0} ceiling={Bounded:false Value:0} -> true
-projectLimitFits want={Bounded:true Value:1} ceiling={Bounded:false Value:0} -> true
-projectLimitFits want={Bounded:true Value:5} ceiling={Bounded:false Value:0} -> true
-projectLimitFits want={Bounded:true Value:6} ceiling={Bounded:false Value:0} -> true
-projectLimitFits want={Bounded:false Value:0} ceiling={Bounded:false Value:0} -> true
+Limit.Fits want={Bounded:true Value:0} ceiling={Bounded:true Value:0} -> true
+Limit.Fits want={Bounded:true Value:1} ceiling={Bounded:true Value:0} -> false
+Limit.Fits want={Bounded:true Value:5} ceiling={Bounded:true Value:0} -> false
+Limit.Fits want={Bounded:true Value:6} ceiling={Bounded:true Value:0} -> false
+Limit.Fits want={Bounded:false Value:0} ceiling={Bounded:true Value:0} -> false
+Limit.Fits want={Bounded:true Value:0} ceiling={Bounded:true Value:5} -> true
+Limit.Fits want={Bounded:true Value:1} ceiling={Bounded:true Value:5} -> true
+Limit.Fits want={Bounded:true Value:5} ceiling={Bounded:true Value:5} -> true
+Limit.Fits want={Bounded:true Value:6} ceiling={Bounded:true Value:5} -> false
+Limit.Fits want={Bounded:false Value:0} ceiling={Bounded:true Value:5} -> false
+Limit.Fits want={Bounded:true Value:0} ceiling={Bounded:false Value:0} -> true
+Limit.Fits want={Bounded:true Value:1} ceiling={Bounded:false Value:0} -> true
+Limit.Fits want={Bounded:true Value:5} ceiling={Bounded:false Value:0} -> true
+Limit.Fits want={Bounded:true Value:6} ceiling={Bounded:false Value:0} -> true
+Limit.Fits want={Bounded:false Value:0} ceiling={Bounded:false Value:0} -> true
