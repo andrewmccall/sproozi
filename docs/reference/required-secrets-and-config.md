@@ -283,7 +283,12 @@ positive input, cached-input and output rates before OpenAI API-key or Anthropic
 inference. OpenAI selects the standard `default` service tier and refuses explicit
 nondefault tiers under that cap. Token-only API-key requests and model discovery
 do not require a price row. Unknown consumed categories can still fail settlement
-after provider work. This table does not price all non-token provider charges or
+after provider work. Under a cost cap, Anthropic usage in a category with no
+rate, such as `cacheWrite5mMicrosPerMillionTokens` or
+`cacheWrite1hMicrosPerMillionTokens` for cache writes, is charged the call's
+whole reservation, whether the call completes or is interrupted after the
+stream reported it. Carry both cache-write rates for any model used with
+prompt caching. This table does not price all non-token provider charges or
 establish a hard spending ceiling.
 
 Prices are integer millionths of a US dollar per million tokens:
