@@ -8,19 +8,10 @@ import (
 	"strings"
 )
 
-// decodeUsage reads provider usage from a whole response body.
-func decodeUsage(body []byte, path string, streaming bool, contentType string) (responseUsage, error) {
+// decodeUsage reads provider usage from a whole JSON response body.
+func decodeUsage(body []byte, path string) (responseUsage, error) {
 	var result responseUsage
-	if streaming {
-		if err := checkStreamType(path, contentType); err != nil {
-			return result, err
-		}
-		var err error
-		result, err = decodeStreamUsage(body)
-		if err != nil {
-			return result, err
-		}
-	} else if err := json.Unmarshal(body, &result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return result, err
 	}
 	return normalizeUsage(result, path)
@@ -62,23 +53,6 @@ func normalizeUsage(result responseUsage, path string) (responseUsage, error) {
 		}
 	}
 	return result, nil
-}
-
-func decodeStreamUsage(body []byte) (responseUsage, error) {
-	normalized := bytes.ReplaceAll(body, []byte("\r\n"), []byte("\n"))
-	if !bytes.HasSuffix(normalized, []byte("\n\n")) {
-		return responseUsage{}, fmt.Errorf("truncated event stream")
-	}
-	var stream responsesStream
-	for frame := range bytes.SplitSeq(normalized, []byte("\n\n")) {
-		if err := stream.next(frame); err != nil {
-			return responseUsage{}, err
-		}
-	}
-	if stream.terminal == responseFailedEvent {
-		return responseUsage{}, fmt.Errorf("unsuccessful event stream")
-	}
-	return stream.finish()
 }
 
 // terminalStatus is the response status each terminal Responses event carries.

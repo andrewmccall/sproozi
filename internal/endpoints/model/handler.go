@@ -108,11 +108,7 @@ type Handler struct {
 	protocol providerProtocol
 }
 
-type providerProtocol uint8
-
 const (
-	openAIProtocol providerProtocol = iota
-	anthropicProtocol
 	// Provider authorities are reserved even when their provider is disabled.
 	OpenAIAuthority    = "api.openai.com:443"
 	AnthropicAuthority = "api.anthropic.com:443"

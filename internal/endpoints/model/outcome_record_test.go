@@ -45,7 +45,7 @@ const (
 )
 
 var updateRecords = flag.Bool("update-records", false,
-	"rewrite testdata/outcomes.txt and testdata/relay-outcomes.txt from the current code")
+	"rewrite the recorded outcomes in testdata from the current code")
 
 // compareRecorded compares lines with the recorded file, or rewrites it under
 // -update-records.
@@ -571,7 +571,7 @@ func runModelCase(t *testing.T, tc modelCase) string {
 	}
 	events := &recordedEvents{}
 	run.config = model.HandlerConfig{AuditLogger: events, UpstreamURL: testModelUpstream,
-		ProviderAuth: modelauth.APIKey{Key: "sk-fixture-openai-key-0123"},
+		ProviderAuth: modelauth.APIKey{Key: recordOpenAIKey},
 		Logger:       slog.New(slog.DiscardHandler), Now: run.clock.Now, Drain: run.drain}
 	if tc.anthropic {
 		run.config.ProviderAuth = modelauth.AnthropicAPIKey{Key: testAnthropicSecret}
@@ -910,6 +910,9 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 				"event: error\ndata: {\"type\":\"error\",\"code\":\"server_error\",\"message\":\"boom\"}\n\n")},
 		{name: "row 22/anthropic message_stop settles provider usage", anthropic: true, body: anthropicStreamRequest,
 			client: respond(http.StatusOK, eventStream, anthropicStream)},
+		{name: "row 22/anthropic message_stop settles provider usage under a cost cap", anthropic: true,
+			body: anthropicStreamRequest, limits: budgetOf(10_000, 1_000_000),
+			client: respond(http.StatusOK, eventStream, anthropicStream)},
 		{name: "row 22/anthropic message_stop without message_delta", anthropic: true, body: anthropicStreamRequest,
 			client: respond(http.StatusOK, eventStream, strings.Join(anthropicEvents[:12], "")+anthropicEvents[len(anthropicEvents)-1])},
 		{name: "row 22/anthropic message_stop write failed (provider usage)", anthropic: true, body: anthropicStreamRequest,
@@ -962,6 +965,14 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 				send(run, anthropicEvents[0], anthropicEvents[7])
 				run.writer.waitFor(t, "I'll list it.")
 				run.clock.Advance(2 * time.Second)
+				run.cancel()
+			}},
+		{name: "row 26/anthropic stream after message_delta, workload left (exact output)", anthropic: true,
+			body: anthropicStreamRequest, client: pipeClient(eventStream, &pipe),
+			drive: func(run *caseRun) {
+				send(run, anthropicEvents[0], anthropicEvents[7], anthropicEvents[8], anthropicEvents[len(anthropicEvents)-2])
+				run.writer.waitFor(t, "message_delta")
+				run.clock.Advance(10 * time.Second)
 				run.cancel()
 			}},
 		{name: "row 26/anthropic whole JSON, workload left (provider usage)", anthropic: true, body: messagesBody,
