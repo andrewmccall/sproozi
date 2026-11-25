@@ -568,6 +568,34 @@ func TestGrantSaveValidates(t *testing.T) {
 	}
 }
 
+// A revoked grant whose receipt used more than its allowance, or whose
+// receipt does not name exactly the allocated capabilities, is refused on
+// save and so never retained; one that used exactly its bound is kept.
+func TestGrantSaveRefusesAReceiptBeyondItsAllowance(t *testing.T) {
+	f := newOwner(t)
+	f.initialized(t)
+	use := func(units, cost int64) map[string]budget.TrustedUsage {
+		return map[string]budget.TrustedUsage{modelCapability: {Units: units, CostMicros: cost}}
+	}
+	for _, c := range []struct {
+		name    string
+		receipt map[string]budget.TrustedUsage
+		ok      bool
+	}{
+		{"units at the bound", use(5, 0), true},
+		{"cost at the bound", use(0, 50), true},
+		{"units one over the bound", use(6, 0), false},
+		{"cost one over the bound", use(0, 51), false},
+		{"a capability the allowances do not have", map[string]budget.TrustedUsage{"github.pullRequest": {}}, false},
+		{"a capability the receipt misses", map[string]budget.TrustedUsage{}, false},
+	} {
+		err := gatewaydocker.SaveRevoked(f.owner, allocationID, c.receipt)
+		if c.ok != (err == nil) {
+			t.Errorf("%s: save returned %v, want success %t", c.name, err, c.ok)
+		}
+	}
+}
+
 // An Activate replay of an active grant answers from the record and no longer
 // re-observes the container, so it succeeds after the container stopped; the
 // next Authenticate, which observes it on every request, refuses.
