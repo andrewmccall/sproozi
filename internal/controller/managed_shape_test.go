@@ -9,6 +9,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -406,9 +407,25 @@ func TestReconcilerRuntimeEditedBeforeThePodFailsTheRun(t *testing.T) {
 	}
 }
 
-// An ErrInvalidRuntime from building the Pod itself, as when the runtime is
-// edited between the check and the build, ends the run with RuntimeInvalid
-// instead of retrying for ever.
+// A managed run whose runtime is edited into a wrong managed shape before its
+// Pod is built fails before the agent contract is written, because the
+// build-time check sees the session binding and so the managed rules.
+func TestReconcilerWrongShapeEditBeforeThePodWritesNoAgentContract(t *testing.T) {
+	t.Parallel()
+	r, c, sandbox := managedShapeCluster(t, nil)
+	reconcileTimes(t, r, managedRunName, 2)
+	editRuntime(t, c, managedRuntimeName, wrongManagedShapes["helper environment"].shape)
+	reconcileTimes(t, r, managedRunName, 1)
+	run := getRun(t, c, managedRunName)
+	var cm corev1.ConfigMap
+	err := c.Get(context.Background(), types.NamespacedName{Namespace: k8sresources.AgentsNamespace, Name: k8sresources.RunName(run.UID)}, &cm)
+	if run.Status.Phase != sprooziv1alpha1.AgentRunPhaseFailed || !apierrors.IsNotFound(err) || len(sandbox.managed) != 0 {
+		t.Fatalf("phase %s, contract err %v, pods %v: want Failed with no contract written", run.Status.Phase, err, sandbox.managed)
+	}
+}
+
+// An ErrInvalidRuntime from building the Pod itself ends the run with
+// RuntimeInvalid instead of retrying for ever.
 func TestReconcilerInvalidRuntimeFromThePodBuildIsTerminal(t *testing.T) {
 	t.Parallel()
 	run := newRun(runOne)
