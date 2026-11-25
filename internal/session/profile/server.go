@@ -97,8 +97,10 @@ func NewHandler(config Config) (http.Handler, error) {
 	}
 	allowed := make(map[string]session.Allowance, len(config.Allowances))
 	for name, a := range config.Allowances {
-		// Bounded-zero exception (session.Limit.Valid): a fixed allowance
-		// may be exhausted.
+		// Fixed allowances come from the executor configuration, whose load
+		// refuses a bounded 0 (ADR 0051); this check has always also
+		// accepted an exhausted limit, and admission refuses a launch
+		// asking for one.
 		if !validName(name) || !a.Units.Valid() && !a.Units.Exhausted() || !a.CostMicros.Valid() && !a.CostMicros.Exhausted() {
 			return nil, errors.New("profile: invalid fixed allowance")
 		}

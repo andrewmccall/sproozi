@@ -42,7 +42,8 @@ func validateAllowance(a map[string]Allowance) error {
 		return errors.New("session: capability allowances required")
 	}
 	for name, limit := range a {
-		// Bounded-zero exception (Limit.Valid): a journal keeps exhausted allowances.
+		// A journal entry carries remaining allowances, so a limit is valid
+		// or exhausted (ADR 0051).
 		if !validName(name) || !limit.Units.Valid() && !limit.Units.Exhausted() || !limit.CostMicros.Valid() && !limit.CostMicros.Exhausted() {
 			return errors.New("session: invalid capability allowance")
 		}

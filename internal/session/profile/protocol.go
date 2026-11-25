@@ -363,8 +363,8 @@ func validateLaunch(l session.Launch) error {
 		return errors.New("profile: harness arguments are not supported on remote placements")
 	}
 	for capability, a := range l.Allowances {
-		// Bounded-zero exception (session.Limit.Valid): a launch carries
-		// exhausted allowances.
+		// A wire launch carries remaining allowances, so a limit is valid
+		// or exhausted (ADR 0051); admission then refuses an exhausted one.
 		if !validName(capability) || !a.Units.Valid() && !a.Units.Exhausted() || !a.CostMicros.Valid() && !a.CostMicros.Exhausted() {
 			return errors.New("profile: invalid allowance")
 		}
