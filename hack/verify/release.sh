@@ -5,6 +5,9 @@ cd "$(git rev-parse --show-toplevel)"
 # Release verification is an aggregator, not a best-effort smoke test. Every
 # gate is required and a missing live/Kind prerequisite is a failure.
 python3 hack/verify/release.py
+make lint-config
+make verify-deps
+make verify-generated
 make test lint
 make verify-fast
 make verify-protocol
