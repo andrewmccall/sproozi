@@ -1,9 +1,11 @@
 package work
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/andrewmccall/sproozi/internal/privatefs"
@@ -14,7 +16,15 @@ import (
 // path of its current execution's journal.
 func journalOf(t *testing.T) (*Owner, string, string) {
 	t.Helper()
+	return journalLogging(t, nil)
+}
+
+// journalLogging is journalOf with the owner's log in place from the start,
+// since the owner's driver reads it as soon as the session runs.
+func journalLogging(t *testing.T, log io.Writer) (*Owner, string, string) {
+	t.Helper()
 	c, _ := fixture(t)
+	c.Log = log
 	o := openOwner(t, c)
 	v := startInteractive(t, o, interactiveRequest())
 	r, err := o.read(v.ID)
@@ -33,9 +43,9 @@ func journalOf(t *testing.T) (*Owner, string, string) {
 // on every platform and for every user.
 func TestAdmissionFailsClosedForAJournalItCannotRead(t *testing.T) {
 	t.Parallel()
-	o, id, journal := journalOf(t)
+	var mu sync.Mutex
 	var log strings.Builder
-	o.config.Log = &log
+	o, id, journal := journalLogging(t, lockedLog{&mu, &log})
 	if err := os.Remove(journal); err != nil {
 		t.Fatal(err)
 	}
@@ -51,8 +61,11 @@ func TestAdmissionFailsClosedForAJournalItCannotRead(t *testing.T) {
 			t.Fatalf("admission (new session %v) with an unreadable journal: %v", newSession, err)
 		}
 	}
-	if !strings.Contains(log.String(), "Could not determine reserved storage for work session "+id+": ") {
-		t.Fatalf("the log does not name the session: %q", log.String())
+	mu.Lock()
+	logged := log.String()
+	mu.Unlock()
+	if !strings.Contains(logged, "Could not determine reserved storage for work session "+id+": ") {
+		t.Fatalf("the log does not name the session: %q", logged)
 	}
 }
 
