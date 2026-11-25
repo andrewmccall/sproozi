@@ -218,3 +218,52 @@ func TestServeProblemsNameEachHarnessEntryAndAcceptManagedCertificates(t *testin
 		t.Errorf("managed certificates reported as missing gateway files: %q", problems)
 	}
 }
+
+// A further harness's native options are checked when serve starts, with the
+// primary harness's wording and the harness entry's key, not only when a
+// session is opened.
+func TestServeProblemsCheckEveryHarnessNativeOptions(t *testing.T) {
+	c := composedConfig(t)
+	c.Harnesses = []LocalHarness{{Harness: harness.NativeCodex, Name: "local-extra", GatewayPort: 18444, Model: "gpt-fixture",
+		ProviderURL: "https://api.openai.com", ProviderTokenFile: c.Gateway.ProviderTokenFile,
+		NativeOptions: []string{"developer_instructions=\"x\""}}}
+	_, err := localConfigs(c)
+	if err == nil {
+		t.Fatal("Open's composition accepted the invalid native option")
+	}
+	want := "harnesses[0].model or nativeOptions (" + err.Error() + ")"
+	if problems := c.ServeProblems(); !slices.Contains(problems, want) {
+		t.Fatalf("problems lack %q: %q", want, problems)
+	}
+	primary := composedConfig(t)
+	primary.NativeOptions = []string{"developer_instructions=\"x\""}
+	if problems := primary.ServeProblems(); !slices.ContainsFunc(problems, func(p string) bool {
+		return strings.HasPrefix(p, "model or nativeOptions (")
+	}) {
+		t.Fatalf("primary harness no longer reported: %q", primary.ServeProblems())
+	}
+}
+
+// A further harness whose provider token file still holds the placeholder is
+// named, with its entry's key, before serve starts.
+func TestProviderTokenProblemsCheckEveryHarness(t *testing.T) {
+	c := composedConfig(t)
+	extra := filepath.Join(filepath.Dir(c.Gateway.ProviderTokenFile), "extra-token")
+	c.Harnesses = []LocalHarness{{Harness: harness.NativeClaude, Name: testClaudeLocal, GatewayPort: 18444, Model: "claude-fixture",
+		ProviderURL: "https://api.anthropic.com", ProviderTokenFile: extra}}
+	if err := testutil.WriteFile(extra, []byte("REPLACE_WITH_PROVIDER_API_KEY\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	want := "harnesses[0].providerTokenFile (replace REPLACE_WITH_PROVIDER_API_KEY in " + extra +
+		" with the provider API key)"
+	if got := c.ProviderTokenProblems(); !slices.Equal(got, []string{want}) {
+		t.Fatalf("got %q, want [%q]", got, want)
+	}
+	if err := testutil.WriteFile(extra, []byte(" \n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	want = "harnesses[0].providerTokenFile (" + extra + " is empty; write the provider API key there)"
+	if got := c.ProviderTokenProblems(); !slices.Equal(got, []string{want}) {
+		t.Fatalf("empty file: got %q, want [%q]", got, want)
+	}
+}

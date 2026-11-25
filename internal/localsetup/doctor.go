@@ -100,6 +100,15 @@ func Doctor(ctx context.Context, l Layout, checkProvider bool) (r Report) {
 		return r
 	}
 	config, err := home.ReadConfig(l.Config())
+	if err == nil {
+		// The service refuses to start on any of these, so each is a failure.
+		if problems := config.ReadinessProblems(); len(problems) != 0 {
+			for _, problem := range problems {
+				r.add("config", fail("config", errors.New(problem), "edit "+l.Config()+" to correct it"), "")
+			}
+			return r
+		}
+	}
 	r.add("config", err, "configuration "+l.Config()+" is valid")
 	if err != nil {
 		return r

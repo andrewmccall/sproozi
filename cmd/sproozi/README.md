@@ -192,8 +192,9 @@ from `providerTokenFile`; `providerTokenKind` marks a sign-in token (`token`)
 or ChatGPT plan sign-in (`chatgpt`) there instead. With no `providerTokenFile`,
 the harness signs in itself: the worker gets no placeholder and mounts its
 login volume, and the gateway forwards its sign-in
-([ADR 0047](../../docs/adr/0047-harnesses-sign-in-to-their-own-model-providers.md)). The service refuses to start while that file still holds
-a setup placeholder such as `REPLACE_WITH_PROVIDER_API_KEY`.
+([ADR 0047](../../docs/adr/0047-harnesses-sign-in-to-their-own-model-providers.md)). The service refuses to start while that file, or a further harness's
+`providerTokenFile`, still holds a setup placeholder such as
+`REPLACE_WITH_PROVIDER_API_KEY`.
 `providerURL` accepts HTTPS; HTTP is permitted only for a literal loopback IP used
 by a controlled, credential-free verification fixture. Upstream redirects and
 environment proxy settings are disabled. If a certificate, key or CA file cannot
@@ -270,8 +271,11 @@ nohup sproozi service run --config /absolute/private/config.json </dev/null >/ab
 ```
 
 `service run` checks in order and exits at the first check that fails. It first
-lists every missing or invalid setting by JSON key, including a provider token
-file that still holds the placeholder `REPLACE_WITH_PROVIDER_API_KEY`. It then
+lists every missing or invalid setting by JSON key, including invalid
+`nativeOptions` and a provider token file that still holds the placeholder
+`REPLACE_WITH_PROVIDER_API_KEY`, for every harness (a further harness's key
+starts `harnesses[N].`). `sproozi doctor` reports the same list as failed
+`config` checks. It then
 checks Docker once, before writing anything: `dockerBinary`, `dockerSocket`
 and `local.nativeImageID` must be usable. It then checks, still before writing
 anything, that the gateway port is free; if a service already answers on this

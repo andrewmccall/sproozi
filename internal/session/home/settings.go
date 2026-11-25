@@ -161,6 +161,11 @@ func (c Config) gatewayProblems() []string {
 		add(!dockerName.MatchString(h.Name), key+"name", "Docker resource name")
 		add(h.GatewayPort == 0, key+"gatewayPort", "port")
 		add(h.Model != "" && blank(h.Model), key+"model", modelWant)
+		if h.Harness.Validate() == nil {
+			if err := nativeconfig.ValidateHarness(string(h.Harness), h.Model, h.NativeOptions); err != nil {
+				p = append(p, key+"model or nativeOptions ("+err.Error()+")")
+			}
+		}
 		u, err := url.Parse(h.ProviderURL)
 		add(err != nil || u.Host == "" || !approvedProviderURL(u), key+"providerURL", "HTTPS provider URL")
 		tokenFile(key+"providerTokenFile", h.Harness, h.ProviderTokenFile)
@@ -177,16 +182,44 @@ func (c Config) gatewayProblems() []string {
 // ProviderTokenProblem names gateway.providerTokenFile when it still holds a
 // placeholder, or returns "". It ignores a file it cannot read: Open reports that.
 func (c Config) ProviderTokenProblem() string {
-	path := c.Gateway.ProviderTokenFile
+	return tokenFileProblem("gateway.providerTokenFile", c.Gateway.ProviderTokenFile)
+}
+
+// ProviderTokenProblems names the provider token file of the primary harness
+// and of each further harness that still holds a placeholder or nothing.
+func (c Config) ProviderTokenProblems() []string {
+	var p []string
+	if problem := c.ProviderTokenProblem(); problem != "" {
+		p = append(p, problem)
+	}
+	for i, h := range c.Harnesses {
+		if problem := tokenFileProblem(fmt.Sprintf("harnesses[%d].providerTokenFile", i), h.ProviderTokenFile); problem != "" {
+			p = append(p, problem)
+		}
+	}
+	return p
+}
+
+// ReadinessProblems is every problem that keeps the service from starting:
+// ServeProblems, then the provider token files' contents. Serve and doctor
+// both report it.
+func (c Config) ReadinessProblems() []string {
+	return append(c.ServeProblems(), c.ProviderTokenProblems()...)
+}
+
+// tokenFileProblem names key when the file at path holds a placeholder or
+// nothing, or returns "". An unset, relative or unreadable file is not its
+// concern.
+func tokenFileProblem(key, path string) string {
 	if path == "" || !filepath.IsAbs(path) {
 		return ""
 	}
 	data, err := privatefs.ReadFile(path, 16<<10)
 	if token := strings.TrimSpace(string(data)); err == nil && placeholderToken(token) {
-		return fmt.Sprintf("gateway.providerTokenFile (replace %s in %s with the provider API key)", token, path)
+		return fmt.Sprintf("%s (replace %s in %s with the provider API key)", key, token, path)
 	}
 	if err == nil && strings.TrimSpace(string(data)) == "" {
-		return fmt.Sprintf("gateway.providerTokenFile (%s is empty; write the provider API key there)", path)
+		return fmt.Sprintf("%s (%s is empty; write the provider API key there)", key, path)
 	}
 	return ""
 }

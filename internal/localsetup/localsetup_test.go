@@ -660,3 +660,32 @@ func TestInitSetsUpNamedLoginsForASignedInHarness(t *testing.T) {
 		t.Fatalf("a login for a gateway-held key: %v", err)
 	}
 }
+
+// doctor reports a configuration that the service refuses to start with as a
+// failed config check, naming each problem, not as a valid one.
+func TestDoctorReportsWhatServiceRunRefuses(t *testing.T) {
+	l, inst := testInstallation(t)
+	c := renderConfig(l, inst, DefaultInstructions)
+	c.Model = " "
+	if err := writeConfig(l, c, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.save(inst); err != nil {
+		t.Fatal(err)
+	}
+	read, err := home.ReadConfig(l.Config())
+	if err != nil {
+		t.Fatalf("the case must be one ReadConfig accepts: %v", err)
+	}
+	want := "model (model name the harness requests, or omit it for the harness's default)"
+	if !slices.Contains(read.ServeProblems(), want) {
+		t.Fatalf("serve does not refuse the case: %q", read.ServeProblems())
+	}
+	report := Doctor(t.Context(), l, false)
+	named := slices.ContainsFunc(report.Checks, func(c Check) bool {
+		return c.Component == "config" && !c.OK && c.Detail == want
+	})
+	if !named || report.OK {
+		t.Fatalf("doctor on a refused configuration: %+v", report)
+	}
+}
