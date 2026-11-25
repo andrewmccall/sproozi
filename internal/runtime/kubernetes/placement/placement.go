@@ -151,7 +151,7 @@ func validateConfig(config Config) error {
 		return errors.New("placement: invalid fixed configuration")
 	}
 	for _, allowance := range config.Allowances {
-		if !allowance.Units.Bounded || allowance.Units.Value <= 0 || allowance.CostMicros.Value < 0 || !allowance.CostMicros.Bounded && allowance.CostMicros.Value != 0 || allowance.CostMicros.Bounded && allowance.CostMicros.Value == 0 {
+		if !allowance.Units.Bounded || !allowance.Units.Valid() || !allowance.CostMicros.Valid() {
 			return errors.New("placement: finite positive units and explicit cost limit required")
 		}
 	}
@@ -317,15 +317,12 @@ func (p *Placement) checkLaunch(ctx context.Context, l session.Launch, initial b
 	}
 	return ceilings, runtimeInvalid, nil
 }
-func limitFits(want, cap session.Limit) bool {
-	return !cap.Bounded || want.Bounded && want.Value <= cap.Value
-}
 func (p *Placement) ceilings(l session.Launch, policy api.AgentPolicySpec) (map[api.CapabilityKind]api.EndpointBudget, error) {
 	ceilings := make(map[api.CapabilityKind]api.EndpointBudget, len(l.Allowances))
 	for name, a := range l.Allowances {
 		fixed, ok := p.config.Allowances[name]
 		capability := api.CapabilityKind(name)
-		if !ok || !slices.Contains(policy.AllowedCapabilities, capability) || !a.Units.Bounded || a.Units.Value <= 0 || a.CostMicros.Value < 0 || !a.CostMicros.Bounded && a.CostMicros.Value != 0 || a.CostMicros.Bounded && a.CostMicros.Value == 0 || !limitFits(a.Units, fixed.Units) || !limitFits(a.CostMicros, fixed.CostMicros) {
+		if !ok || !slices.Contains(policy.AllowedCapabilities, capability) || !a.Units.Bounded || !a.Units.Valid() || !a.CostMicros.Valid() || !a.Units.Fits(fixed.Units) || !a.CostMicros.Fits(fixed.CostMicros) {
 			return nil, &profile.Rejection{Code: profile.CodeDenied}
 		}
 		live := policy.Budgets[capability]

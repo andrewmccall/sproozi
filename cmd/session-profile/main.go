@@ -148,10 +148,10 @@ func validateConfig(c serverConfig) error {
 		return invalid("allowances", "must hold between 1 and 32 capabilities")
 	}
 	for name, a := range c.Allowances {
-		if !a.Units.Bounded || a.Units.Value <= 0 {
+		if !a.Units.Bounded || !a.Units.Valid() {
 			return invalid("allowances", fmt.Sprintf("entry %q needs bounded positive units", name))
 		}
-		if a.CostMicros.Bounded && a.CostMicros.Value <= 0 || !a.CostMicros.Bounded && a.CostMicros.Value != 0 {
+		if !a.CostMicros.Valid() {
 			return invalid("allowances", fmt.Sprintf("entry %q needs costMicros bounded and positive, "+
 				"or unbounded with value 0", name))
 		}

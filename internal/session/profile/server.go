@@ -97,7 +97,9 @@ func NewHandler(config Config) (http.Handler, error) {
 	}
 	allowed := make(map[string]session.Allowance, len(config.Allowances))
 	for name, a := range config.Allowances {
-		if !validName(name) || !validLimit(a.Units) || !validLimit(a.CostMicros) {
+		// Bounded-zero exception (session.Limit.Valid): a fixed allowance
+		// may be exhausted.
+		if !validName(name) || !a.Units.Valid() && !a.Units.Exhausted() || !a.CostMicros.Valid() && !a.CostMicros.Exhausted() {
 			return nil, errors.New("profile: invalid fixed allowance")
 		}
 		allowed[name] = a
@@ -277,7 +279,7 @@ func (h *handler) validateAdmission(action string, l session.Launch) error {
 		}
 		for name, want := range l.Allowances {
 			ceiling, ok := h.config.Allowances[name]
-			if !ok || !limitFits(want.Units, ceiling.Units) || !limitFits(want.CostMicros, ceiling.CostMicros) || want.Units.Bounded && want.Units.Value == 0 || want.CostMicros.Bounded && want.CostMicros.Value == 0 {
+			if !ok || !want.Units.Fits(ceiling.Units) || !want.CostMicros.Fits(ceiling.CostMicros) || want.Units.Exhausted() || want.CostMicros.Exhausted() {
 				return &Rejection{Code: CodeDenied}
 			}
 		}

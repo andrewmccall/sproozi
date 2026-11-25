@@ -37,8 +37,23 @@ type Allowance struct {
 	CostMicros Limit `json:"costMicros"`
 }
 
-// Valid reports a positive bound, or no bound with a zero value.
+// Valid is the one validity rule for a limit: a positive bound, or no bound
+// with a zero value. Every layer that checks a limit calls it.
+//
+// Bounded-zero exception: a bounded zero is refused here, yet the session
+// journal, the wire launch and the executor's fixed configuration accept it,
+// because a remaining allowance spent to its bound is one. Those three call
+// sites say so with Valid() || Exhausted().
 func (l Limit) Valid() bool { return l.Value >= 0 && l.Bounded == (l.Value > 0) }
+
+// Exhausted reports a bounded zero: nothing of this limit remains.
+func (l Limit) Exhausted() bool { return l.Bounded && l.Value == 0 }
+
+// Fits is the one fit rule for a limit: l asks for no more than ceiling
+// allows. Anything fits under no bound; under a bound, only a bound no larger.
+func (l Limit) Fits(ceiling Limit) bool {
+	return !ceiling.Bounded || l.Bounded && l.Value <= ceiling.Value
+}
 
 // Valid reports an allowance a session may receive for capability: each
 // limit is a positive bound or none. Only model inference may run without a

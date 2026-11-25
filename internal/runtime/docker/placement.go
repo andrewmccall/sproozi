@@ -142,7 +142,7 @@ func (p *Placement) validateLaunch(l session.Launch) error {
 		return errors.New("invalid initial/resume native identity")
 	}
 	for name, a := range l.Allowances {
-		if !resourceName.MatchString(name) || a.Units.Value < 0 || a.CostMicros.Value < 0 || (!a.Units.Bounded && a.Units.Value != 0) || (!a.CostMicros.Bounded && a.CostMicros.Value != 0) || (a.Units.Bounded && a.Units.Value == 0) || (a.CostMicros.Bounded && a.CostMicros.Value == 0) {
+		if !resourceName.MatchString(name) || !a.Units.Valid() || !a.CostMicros.Valid() {
 			return errors.New("invalid or exhausted Docker allowance")
 		}
 	}

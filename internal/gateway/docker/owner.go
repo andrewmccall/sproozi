@@ -323,11 +323,8 @@ func (o *Owner) validate(r record, id string) error {
 		if r.Phase != revoked || len(r.Receipt) != len(r.Launch.Allowances) {
 			return errors.New("docker gateway: invalid retained receipt")
 		}
-		for cap, a := range r.Launch.Allowances {
-			u, ok := r.Receipt[cap]
-			if !ok || u.Units < 0 || u.CostMicros < 0 || (a.Units.Bounded && u.Units > a.Units.Value) || (a.CostMicros.Bounded && u.CostMicros > a.CostMicros.Value) {
-				return errors.New("docker gateway: inconsistent retained receipt")
-			}
+		if session.CheckUsage(r.Launch.Allowances, r.Receipt) != nil {
+			return errors.New("docker gateway: inconsistent retained receipt")
 		}
 	}
 	return nil

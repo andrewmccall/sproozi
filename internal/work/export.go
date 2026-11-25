@@ -35,11 +35,8 @@ func ValidateExport(e Export, max int64) error {
 	if !CanonicalID(e.ID) || e.Harness != s.Launch.Harness || !s.ActualStopped || s.Receipt == nil || s.Receipt.Incarnation != s.Incarnation || s.Receipt.Launch.ThreadID != s.Launch.ThreadID || len(s.Receipt.Usage) != len(s.Launch.Allowances) {
 		return &profile.Rejection{Code: profile.CodeUnavailable}
 	}
-	for cap, a := range s.Launch.Allowances {
-		u, ok := s.Receipt.Usage[cap]
-		if !ok || u.Units < 0 || u.CostMicros < 0 || a.Units.Bounded && u.Units > a.Units.Value || a.CostMicros.Bounded && u.CostMicros > a.CostMicros.Value {
-			return &profile.Rejection{Code: profile.CodeUnavailable}
-		}
+	if session.CheckUsage(s.Launch.Allowances, s.Receipt.Usage) != nil {
+		return &profile.Rejection{Code: profile.CodeUnavailable}
 	}
 	a, _ := json.Marshal(s.Launch)
 	b, _ := json.Marshal(s.Receipt.Launch)
