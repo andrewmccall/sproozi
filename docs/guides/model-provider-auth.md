@@ -387,6 +387,17 @@ An interrupted call is charged an estimate, never more than its
 The time term means cancelling while the model reasons, where its output is
 hidden, still pays for that reasoning.
 
+Under a cost cap, one case is not estimated. When the stream has already
+reported a non-zero count of tokens in any category, whether input, cache read,
+five-minute or one-hour cache write, or output, and the model's pricing has no
+rate for that category, the call is charged its
+[whole reservation](#unverifiable-calls), as it would be if it had completed
+([ADR 0078](../adr/0078-an-interrupted-model-call-that-cannot-be-priced-is-charged-its-reservation.md)).
+A call that has reported no usage yet is estimated. The input, cache-read and
+output rates are required in the pricing file, so in practice the missing rate
+is a cache write: add both cache-write rates to the pricing file for every
+model that is used with prompt caching.
+
 For example, Claude Code sends a 200,000-byte request with `max_tokens`
 32,000, under a 300,000-token budget. `message_start` reports 1,500 input,
 45,000 cache-read and 2,000 cache-write tokens, so 48,500 input tokens. You
@@ -529,7 +540,9 @@ whose usage the gateway can neither read from the provider nor estimate:
   can't read its usage (audit `endReason` `parse_limit`).
 - **Under a cost cap, an Anthropic response reports tokens in a category whose
   rate the administrator didn't set**, such as a cache write. The output has
-  already reached the harness.
+  already reached the harness. A call interrupted after its stream reported
+  tokens in such a category is charged the same way, with `endReason` the
+  interrupt's own; the estimate is not used.
 
 For either kind of whole-reservation charge, the gateway logs `Charged model
 reservation in full` with `runID`, `runUID`, `endReason`, `detail`, `units`

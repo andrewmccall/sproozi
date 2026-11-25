@@ -476,9 +476,29 @@ func (h *Handler) relayWhole(w http.ResponseWriter, r *http.Request, e audit.Eve
 	h.auditModelSuccess(r.Context(), e, resp.StatusCode, 0, budget.FromContext(r.Context()), limits)
 }
 
+// deniedResponseHeaders are the provider response headers the gateway never
+// relays to a sandbox, by canonical name. A header belongs here when it
+// identifies the account, organisation or project of the credential the
+// gateway sent, which is the administrator's under a gateway-held key, or
+// when it sets client state the gateway will never send back: it strips
+// Cookie from every request. A provider's other headers, such as request IDs
+// and rate limits, stay relayed on OpenAI-protocol routes (ADR 0076).
+var deniedResponseHeaders = map[string]bool{
+	"Set-Cookie":          true,
+	"Set-Cookie2":         true,
+	"Openai-Organization": true,
+	"Openai-Project":      true,
+}
+
+// copyResponseHeaders relays the provider's response headers to the sandbox:
+// only Content-Type and Request-Id on the Messages protocol, and all but
+// deniedResponseHeaders on the OpenAI protocol.
 func (h *Handler) copyResponseHeaders(target, source http.Header) {
 	for k, vv := range source {
 		if h.protocol == anthropicProtocol && !strings.EqualFold(k, "Content-Type") && !strings.EqualFold(k, "Request-ID") {
+			continue
+		}
+		if deniedResponseHeaders[http.CanonicalHeaderKey(k)] {
 			continue
 		}
 		for _, v := range vv {
@@ -729,7 +749,10 @@ func (h *Handler) upstreamTarget(r *http.Request) string {
 }
 
 // copyProviderHeaders never forwards cookies or the gateway credential. It
-// forwards the workload's own provider credential only in workload mode.
+// forwards the workload's own provider credential only in workload mode. On
+// the OpenAI protocol it forwards every other header on purpose: harness
+// clients add feature and beta headers often, and the account selectors are
+// removed by the authenticator (ADR 0076).
 func (h *Handler) copyProviderHeaders(target, source http.Header, workloadCredential bool) {
 	for k, vv := range source {
 		name := strings.ToLower(k)

@@ -454,7 +454,8 @@ budget cut. It can't estimate an
 interrupted request that references input it can't size, a provider event over
 the 8 MiB parse limit or, under a cost cap, an Anthropic response that
 reports tokens in a category whose rate the administrator didn't set, such as a
-cache write. The charge applies only in the parts of the budget that have a
+cache write. An interrupted call is charged this way once its stream has
+reported such tokens; before that it is estimated. The charge applies only in the parts of the budget that have a
 limit. While an unbounded call streams, the gateway also performs a
 [budget cut](../../GLOSSARY.md#budget-cut): when the call's observed input plus
 its visible output bytes ÷ 4 reaches its reservation, it sends the protocol's error event,
@@ -491,7 +492,10 @@ OpenAI admission accepts only `GET /v1/models`, `POST /v1/responses` and
 retains its narrower Responses contract. Both OpenAI authentication modes remove
 workload organization, project and account selector headers before applying the
 trusted provider credential. Use a suitably scoped key; workload headers cannot
-select the provider identity.
+select the provider identity. In the other direction, OpenAI-protocol responses
+reach the sandbox without `Set-Cookie`, `Set-Cookie2`, `Openai-Organization`
+and `Openai-Project`, so the administrator's organisation ID stays on the
+gateway; see [headers on model calls](harnesses.md#headers-on-model-calls).
 
 The API-key route has no complete allowlist of billable request fields. The
 token ledger does not price provider-hosted tools, storage, image or audio work,
