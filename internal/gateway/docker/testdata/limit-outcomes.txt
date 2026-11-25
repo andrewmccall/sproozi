@@ -1,0 +1,64 @@
+validateAllocation budgets=false model.inference units={Bounded:true Value:0} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=false model.inference costMicros={Bounded:true Value:0} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=false model.inference units={Bounded:true Value:1} -> accepted; meters {MaxUnits:1 MaxCostMicros:0}
+validateAllocation budgets=false model.inference costMicros={Bounded:true Value:1} -> accepted; meters {MaxUnits:5 MaxCostMicros:1}
+validateAllocation budgets=false model.inference units={Bounded:true Value:5} -> accepted; meters {MaxUnits:5 MaxCostMicros:0}
+validateAllocation budgets=false model.inference costMicros={Bounded:true Value:5} -> accepted; meters {MaxUnits:5 MaxCostMicros:5}
+validateAllocation budgets=false model.inference units={Bounded:true Value:-1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=false model.inference costMicros={Bounded:true Value:-1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=false model.inference units={Bounded:true Value:9223372036854775807} -> accepted; meters {MaxUnits:9223372036854775807 MaxCostMicros:0}
+validateAllocation budgets=false model.inference costMicros={Bounded:true Value:9223372036854775807} -> accepted; meters {MaxUnits:5 MaxCostMicros:9223372036854775807}
+validateAllocation budgets=false model.inference units={Bounded:false Value:0} -> accepted; meters {MaxUnits:0 MaxCostMicros:0}
+validateAllocation budgets=false model.inference costMicros={Bounded:false Value:0} -> accepted; meters {MaxUnits:5 MaxCostMicros:0}
+validateAllocation budgets=false model.inference units={Bounded:false Value:1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=false model.inference costMicros={Bounded:false Value:1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=false model.inference units={Bounded:false Value:-1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=false model.inference costMicros={Bounded:false Value:-1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=false mcp.docs units={Bounded:true Value:0} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=false mcp.docs costMicros={Bounded:true Value:0} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=false mcp.docs units={Bounded:true Value:1} -> accepted; meters {MaxUnits:1 MaxCostMicros:0}
+validateAllocation budgets=false mcp.docs costMicros={Bounded:true Value:1} -> refused: docker gateway: allocation exceeds approved profile or lacks trusted pricing
+validateAllocation budgets=false mcp.docs units={Bounded:true Value:5} -> accepted; meters {MaxUnits:5 MaxCostMicros:0}
+validateAllocation budgets=false mcp.docs costMicros={Bounded:true Value:5} -> refused: docker gateway: allocation exceeds approved profile or lacks trusted pricing
+validateAllocation budgets=false mcp.docs units={Bounded:true Value:-1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=false mcp.docs costMicros={Bounded:true Value:-1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=false mcp.docs units={Bounded:true Value:9223372036854775807} -> accepted; meters {MaxUnits:9223372036854775807 MaxCostMicros:0}
+validateAllocation budgets=false mcp.docs costMicros={Bounded:true Value:9223372036854775807} -> refused: docker gateway: allocation exceeds approved profile or lacks trusted pricing
+validateAllocation budgets=false mcp.docs units={Bounded:false Value:0} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=false mcp.docs costMicros={Bounded:false Value:0} -> accepted; meters {MaxUnits:5 MaxCostMicros:0}
+validateAllocation budgets=false mcp.docs units={Bounded:false Value:1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=false mcp.docs costMicros={Bounded:false Value:1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=false mcp.docs units={Bounded:false Value:-1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=false mcp.docs costMicros={Bounded:false Value:-1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=true model.inference units={Bounded:true Value:0} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=true model.inference costMicros={Bounded:true Value:0} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=true model.inference units={Bounded:true Value:1} -> refused: docker gateway: allocation exceeds approved profile or lacks trusted pricing
+validateAllocation budgets=true model.inference costMicros={Bounded:true Value:1} -> accepted; meters {MaxUnits:5 MaxCostMicros:1}
+validateAllocation budgets=true model.inference units={Bounded:true Value:5} -> refused: docker gateway: allocation exceeds approved profile or lacks trusted pricing
+validateAllocation budgets=true model.inference costMicros={Bounded:true Value:5} -> accepted; meters {MaxUnits:5 MaxCostMicros:5}
+validateAllocation budgets=true model.inference units={Bounded:true Value:-1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=true model.inference costMicros={Bounded:true Value:-1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=true model.inference units={Bounded:true Value:9223372036854775807} -> refused: docker gateway: allocation exceeds approved profile or lacks trusted pricing
+validateAllocation budgets=true model.inference costMicros={Bounded:true Value:9223372036854775807} -> refused: docker gateway: allocation exceeds approved profile or lacks trusted pricing
+validateAllocation budgets=true model.inference units={Bounded:false Value:0} -> refused: docker gateway: allocation exceeds approved profile or lacks trusted pricing
+validateAllocation budgets=true model.inference costMicros={Bounded:false Value:0} -> refused: docker gateway: allocation exceeds approved profile or lacks trusted pricing
+validateAllocation budgets=true model.inference units={Bounded:false Value:1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=true model.inference costMicros={Bounded:false Value:1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=true model.inference units={Bounded:false Value:-1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=true model.inference costMicros={Bounded:false Value:-1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=true mcp.docs units={Bounded:true Value:0} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=true mcp.docs costMicros={Bounded:true Value:0} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=true mcp.docs units={Bounded:true Value:1} -> accepted; meters {MaxUnits:1 MaxCostMicros:0}
+validateAllocation budgets=true mcp.docs costMicros={Bounded:true Value:1} -> refused: docker gateway: allocation exceeds approved profile or lacks trusted pricing
+validateAllocation budgets=true mcp.docs units={Bounded:true Value:5} -> accepted; meters {MaxUnits:5 MaxCostMicros:0}
+validateAllocation budgets=true mcp.docs costMicros={Bounded:true Value:5} -> refused: docker gateway: allocation exceeds approved profile or lacks trusted pricing
+validateAllocation budgets=true mcp.docs units={Bounded:true Value:-1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=true mcp.docs costMicros={Bounded:true Value:-1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=true mcp.docs units={Bounded:true Value:9223372036854775807} -> refused: docker gateway: allocation exceeds approved profile or lacks trusted pricing
+validateAllocation budgets=true mcp.docs costMicros={Bounded:true Value:9223372036854775807} -> refused: docker gateway: allocation exceeds approved profile or lacks trusted pricing
+validateAllocation budgets=true mcp.docs units={Bounded:false Value:0} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=true mcp.docs costMicros={Bounded:false Value:0} -> accepted; meters {MaxUnits:5 MaxCostMicros:0}
+validateAllocation budgets=true mcp.docs units={Bounded:false Value:1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=true mcp.docs costMicros={Bounded:false Value:1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=true mcp.docs units={Bounded:false Value:-1} -> refused: docker gateway: launch capability or allocation denied
+validateAllocation budgets=true mcp.docs costMicros={Bounded:false Value:-1} -> refused: docker gateway: launch capability or allocation denied

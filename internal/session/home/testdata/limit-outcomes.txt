@@ -1,0 +1,79 @@
+AllowanceProblems model.inference units={Bounded:true Value:0} -> allowances.model.inference.units ("bounded": true with a positive "value", or "bounded": false with "value": 0 for no limit)
+approvedPolicy model.inference units={Bounded:true Value:0} -> refused: home: positive unit ceilings required, except for model inference
+AllowanceProblems model.inference costMicros={Bounded:true Value:0} -> allowances.model.inference.costMicros ("bounded": false with "value": 0 for no cap, or "bounded": true with a positive "value")
+approvedPolicy model.inference costMicros={Bounded:true Value:0} -> refused: home: positive unit ceilings required, except for model inference
+AllowanceProblems model.inference units={Bounded:true Value:1} -> no problems
+approvedPolicy model.inference units={Bounded:true Value:1} -> accepted {MaxUnits:1 MaxCostMicros:0}
+AllowanceProblems model.inference costMicros={Bounded:true Value:1} -> no problems
+approvedPolicy model.inference costMicros={Bounded:true Value:1} -> accepted {MaxUnits:5 MaxCostMicros:1}
+AllowanceProblems model.inference units={Bounded:true Value:5} -> no problems
+approvedPolicy model.inference units={Bounded:true Value:5} -> accepted {MaxUnits:5 MaxCostMicros:0}
+AllowanceProblems model.inference costMicros={Bounded:true Value:5} -> no problems
+approvedPolicy model.inference costMicros={Bounded:true Value:5} -> accepted {MaxUnits:5 MaxCostMicros:5}
+AllowanceProblems model.inference units={Bounded:true Value:-1} -> allowances.model.inference.units ("bounded": true with a positive "value", or "bounded": false with "value": 0 for no limit)
+approvedPolicy model.inference units={Bounded:true Value:-1} -> refused: home: positive unit ceilings required, except for model inference
+AllowanceProblems model.inference costMicros={Bounded:true Value:-1} -> allowances.model.inference.costMicros ("bounded": false with "value": 0 for no cap, or "bounded": true with a positive "value")
+approvedPolicy model.inference costMicros={Bounded:true Value:-1} -> refused: home: positive unit ceilings required, except for model inference
+AllowanceProblems model.inference units={Bounded:true Value:9223372036854775807} -> no problems
+approvedPolicy model.inference units={Bounded:true Value:9223372036854775807} -> accepted {MaxUnits:9223372036854775807 MaxCostMicros:0}
+AllowanceProblems model.inference costMicros={Bounded:true Value:9223372036854775807} -> no problems
+approvedPolicy model.inference costMicros={Bounded:true Value:9223372036854775807} -> accepted {MaxUnits:5 MaxCostMicros:9223372036854775807}
+AllowanceProblems model.inference units={Bounded:false Value:0} -> no problems
+approvedPolicy model.inference units={Bounded:false Value:0} -> accepted {MaxUnits:0 MaxCostMicros:0}
+AllowanceProblems model.inference costMicros={Bounded:false Value:0} -> no problems
+approvedPolicy model.inference costMicros={Bounded:false Value:0} -> accepted {MaxUnits:5 MaxCostMicros:0}
+AllowanceProblems model.inference units={Bounded:false Value:1} -> allowances.model.inference.units ("bounded": true with a positive "value", or "bounded": false with "value": 0 for no limit)
+approvedPolicy model.inference units={Bounded:false Value:1} -> refused: home: positive unit ceilings required, except for model inference
+AllowanceProblems model.inference costMicros={Bounded:false Value:1} -> allowances.model.inference.costMicros ("bounded": false with "value": 0 for no cap, or "bounded": true with a positive "value")
+approvedPolicy model.inference costMicros={Bounded:false Value:1} -> refused: home: positive unit ceilings required, except for model inference
+AllowanceProblems model.inference units={Bounded:false Value:-1} -> allowances.model.inference.units ("bounded": true with a positive "value", or "bounded": false with "value": 0 for no limit)
+approvedPolicy model.inference units={Bounded:false Value:-1} -> refused: home: positive unit ceilings required, except for model inference
+AllowanceProblems model.inference costMicros={Bounded:false Value:-1} -> allowances.model.inference.costMicros ("bounded": false with "value": 0 for no cap, or "bounded": true with a positive "value")
+approvedPolicy model.inference costMicros={Bounded:false Value:-1} -> refused: home: positive unit ceilings required, except for model inference
+AllowanceProblems mcp.docs units={Bounded:true Value:0} -> allowances.mcp.docs.units ("bounded": true with a positive "value"); allowances.mcp.docs (needs gateway.mcpAuthority and gateway.mcpRegistryFile)
+approvedPolicy mcp.docs units={Bounded:true Value:0} -> refused: home: positive unit ceilings required, except for model inference
+AllowanceProblems mcp.docs costMicros={Bounded:true Value:0} -> allowances.mcp.docs.costMicros ("bounded": false with "value": 0 for no cap, or "bounded": true with a positive "value"); allowances.mcp.docs (needs gateway.mcpAuthority and gateway.mcpRegistryFile)
+approvedPolicy mcp.docs costMicros={Bounded:true Value:0} -> refused: home: positive unit ceilings required, except for model inference
+AllowanceProblems mcp.docs units={Bounded:true Value:1} -> allowances.mcp.docs (needs gateway.mcpAuthority and gateway.mcpRegistryFile)
+approvedPolicy mcp.docs units={Bounded:true Value:1} -> refused: home: MCP allocation lacks registered broker
+AllowanceProblems mcp.docs costMicros={Bounded:true Value:1} -> allowances.mcp.docs.costMicros ("bounded": false; only model.inference supports a cost cap); allowances.mcp.docs (needs gateway.mcpAuthority and gateway.mcpRegistryFile)
+approvedPolicy mcp.docs costMicros={Bounded:true Value:1} -> refused: home: native and MCP capabilities support unit ceilings only
+AllowanceProblems mcp.docs units={Bounded:true Value:5} -> allowances.mcp.docs (needs gateway.mcpAuthority and gateway.mcpRegistryFile)
+approvedPolicy mcp.docs units={Bounded:true Value:5} -> refused: home: MCP allocation lacks registered broker
+AllowanceProblems mcp.docs costMicros={Bounded:true Value:5} -> allowances.mcp.docs.costMicros ("bounded": false; only model.inference supports a cost cap); allowances.mcp.docs (needs gateway.mcpAuthority and gateway.mcpRegistryFile)
+approvedPolicy mcp.docs costMicros={Bounded:true Value:5} -> refused: home: native and MCP capabilities support unit ceilings only
+AllowanceProblems mcp.docs units={Bounded:true Value:-1} -> allowances.mcp.docs.units ("bounded": true with a positive "value"); allowances.mcp.docs (needs gateway.mcpAuthority and gateway.mcpRegistryFile)
+approvedPolicy mcp.docs units={Bounded:true Value:-1} -> refused: home: positive unit ceilings required, except for model inference
+AllowanceProblems mcp.docs costMicros={Bounded:true Value:-1} -> allowances.mcp.docs.costMicros ("bounded": false with "value": 0 for no cap, or "bounded": true with a positive "value"); allowances.mcp.docs (needs gateway.mcpAuthority and gateway.mcpRegistryFile)
+approvedPolicy mcp.docs costMicros={Bounded:true Value:-1} -> refused: home: positive unit ceilings required, except for model inference
+AllowanceProblems mcp.docs units={Bounded:true Value:9223372036854775807} -> allowances.mcp.docs (needs gateway.mcpAuthority and gateway.mcpRegistryFile)
+approvedPolicy mcp.docs units={Bounded:true Value:9223372036854775807} -> refused: home: MCP allocation lacks registered broker
+AllowanceProblems mcp.docs costMicros={Bounded:true Value:9223372036854775807} -> allowances.mcp.docs.costMicros ("bounded": false; only model.inference supports a cost cap); allowances.mcp.docs (needs gateway.mcpAuthority and gateway.mcpRegistryFile)
+approvedPolicy mcp.docs costMicros={Bounded:true Value:9223372036854775807} -> refused: home: native and MCP capabilities support unit ceilings only
+AllowanceProblems mcp.docs units={Bounded:false Value:0} -> allowances.mcp.docs.units ("bounded": true with a positive "value"); allowances.mcp.docs (needs gateway.mcpAuthority and gateway.mcpRegistryFile)
+approvedPolicy mcp.docs units={Bounded:false Value:0} -> refused: home: positive unit ceilings required, except for model inference
+AllowanceProblems mcp.docs costMicros={Bounded:false Value:0} -> allowances.mcp.docs (needs gateway.mcpAuthority and gateway.mcpRegistryFile)
+approvedPolicy mcp.docs costMicros={Bounded:false Value:0} -> refused: home: MCP allocation lacks registered broker
+AllowanceProblems mcp.docs units={Bounded:false Value:1} -> allowances.mcp.docs.units ("bounded": true with a positive "value"); allowances.mcp.docs (needs gateway.mcpAuthority and gateway.mcpRegistryFile)
+approvedPolicy mcp.docs units={Bounded:false Value:1} -> refused: home: positive unit ceilings required, except for model inference
+AllowanceProblems mcp.docs costMicros={Bounded:false Value:1} -> allowances.mcp.docs.costMicros ("bounded": false with "value": 0 for no cap, or "bounded": true with a positive "value"); allowances.mcp.docs (needs gateway.mcpAuthority and gateway.mcpRegistryFile)
+approvedPolicy mcp.docs costMicros={Bounded:false Value:1} -> refused: home: positive unit ceilings required, except for model inference
+AllowanceProblems mcp.docs units={Bounded:false Value:-1} -> allowances.mcp.docs.units ("bounded": true with a positive "value"); allowances.mcp.docs (needs gateway.mcpAuthority and gateway.mcpRegistryFile)
+approvedPolicy mcp.docs units={Bounded:false Value:-1} -> refused: home: positive unit ceilings required, except for model inference
+AllowanceProblems mcp.docs costMicros={Bounded:false Value:-1} -> allowances.mcp.docs.costMicros ("bounded": false with "value": 0 for no cap, or "bounded": true with a positive "value"); allowances.mcp.docs (needs gateway.mcpAuthority and gateway.mcpRegistryFile)
+approvedPolicy mcp.docs costMicros={Bounded:false Value:-1} -> refused: home: positive unit ceilings required, except for model inference
+projectLimitFits want={Bounded:true Value:0} ceiling={Bounded:true Value:0} -> true
+projectLimitFits want={Bounded:true Value:1} ceiling={Bounded:true Value:0} -> false
+projectLimitFits want={Bounded:true Value:5} ceiling={Bounded:true Value:0} -> false
+projectLimitFits want={Bounded:true Value:6} ceiling={Bounded:true Value:0} -> false
+projectLimitFits want={Bounded:false Value:0} ceiling={Bounded:true Value:0} -> false
+projectLimitFits want={Bounded:true Value:0} ceiling={Bounded:true Value:5} -> true
+projectLimitFits want={Bounded:true Value:1} ceiling={Bounded:true Value:5} -> true
+projectLimitFits want={Bounded:true Value:5} ceiling={Bounded:true Value:5} -> true
+projectLimitFits want={Bounded:true Value:6} ceiling={Bounded:true Value:5} -> false
+projectLimitFits want={Bounded:false Value:0} ceiling={Bounded:true Value:5} -> false
+projectLimitFits want={Bounded:true Value:0} ceiling={Bounded:false Value:0} -> true
+projectLimitFits want={Bounded:true Value:1} ceiling={Bounded:false Value:0} -> true
+projectLimitFits want={Bounded:true Value:5} ceiling={Bounded:false Value:0} -> true
+projectLimitFits want={Bounded:true Value:6} ceiling={Bounded:false Value:0} -> true
+projectLimitFits want={Bounded:false Value:0} ceiling={Bounded:false Value:0} -> true

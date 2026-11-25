@@ -1,0 +1,136 @@
+Limit.Valid {Bounded:true Value:0} -> false
+Limit.Valid {Bounded:true Value:1} -> true
+Limit.Valid {Bounded:true Value:5} -> true
+Limit.Valid {Bounded:true Value:-1} -> false
+Limit.Valid {Bounded:true Value:9223372036854775807} -> true
+Limit.Valid {Bounded:false Value:0} -> true
+Limit.Valid {Bounded:false Value:1} -> false
+Limit.Valid {Bounded:false Value:-1} -> false
+Allowance.Valid model.inference units={Bounded:true Value:0} -> false
+Allowance.Valid model.inference costMicros={Bounded:true Value:0} -> false
+Allowance.Valid model.inference units={Bounded:true Value:1} -> true
+Allowance.Valid model.inference costMicros={Bounded:true Value:1} -> true
+Allowance.Valid model.inference units={Bounded:true Value:5} -> true
+Allowance.Valid model.inference costMicros={Bounded:true Value:5} -> true
+Allowance.Valid model.inference units={Bounded:true Value:-1} -> false
+Allowance.Valid model.inference costMicros={Bounded:true Value:-1} -> false
+Allowance.Valid model.inference units={Bounded:true Value:9223372036854775807} -> true
+Allowance.Valid model.inference costMicros={Bounded:true Value:9223372036854775807} -> true
+Allowance.Valid model.inference units={Bounded:false Value:0} -> true
+Allowance.Valid model.inference costMicros={Bounded:false Value:0} -> true
+Allowance.Valid model.inference units={Bounded:false Value:1} -> false
+Allowance.Valid model.inference costMicros={Bounded:false Value:1} -> false
+Allowance.Valid model.inference units={Bounded:false Value:-1} -> false
+Allowance.Valid model.inference costMicros={Bounded:false Value:-1} -> false
+Allowance.Valid mcp.docs units={Bounded:true Value:0} -> false
+Allowance.Valid mcp.docs costMicros={Bounded:true Value:0} -> false
+Allowance.Valid mcp.docs units={Bounded:true Value:1} -> true
+Allowance.Valid mcp.docs costMicros={Bounded:true Value:1} -> true
+Allowance.Valid mcp.docs units={Bounded:true Value:5} -> true
+Allowance.Valid mcp.docs costMicros={Bounded:true Value:5} -> true
+Allowance.Valid mcp.docs units={Bounded:true Value:-1} -> false
+Allowance.Valid mcp.docs costMicros={Bounded:true Value:-1} -> false
+Allowance.Valid mcp.docs units={Bounded:true Value:9223372036854775807} -> true
+Allowance.Valid mcp.docs costMicros={Bounded:true Value:9223372036854775807} -> true
+Allowance.Valid mcp.docs units={Bounded:false Value:0} -> false
+Allowance.Valid mcp.docs costMicros={Bounded:false Value:0} -> true
+Allowance.Valid mcp.docs units={Bounded:false Value:1} -> false
+Allowance.Valid mcp.docs costMicros={Bounded:false Value:1} -> false
+Allowance.Valid mcp.docs units={Bounded:false Value:-1} -> false
+Allowance.Valid mcp.docs costMicros={Bounded:false Value:-1} -> false
+validateAllowance units={Bounded:true Value:0} -> accepted
+validateAllowance costMicros={Bounded:true Value:0} -> accepted
+spendable units={Bounded:true Value:0} -> refused: session: allowance exhausted
+spendable costMicros={Bounded:true Value:0} -> refused: session: allowance exhausted
+CheckUsage units={Bounded:true Value:0} used=0 -> accepted
+CheckUsage costMicros={Bounded:true Value:0} used=0 -> accepted
+CheckUsage units={Bounded:true Value:0} used=1 -> refused: session: receipt exceeds units allocation
+CheckUsage costMicros={Bounded:true Value:0} used=1 -> refused: session: receipt exceeds cost allocation
+CheckUsage units={Bounded:true Value:0} used=5 -> refused: session: receipt exceeds units allocation
+CheckUsage costMicros={Bounded:true Value:0} used=5 -> refused: session: receipt exceeds cost allocation
+CheckUsage units={Bounded:true Value:0} used=6 -> refused: session: receipt exceeds units allocation
+CheckUsage costMicros={Bounded:true Value:0} used=6 -> refused: session: receipt exceeds cost allocation
+validateAllowance units={Bounded:true Value:1} -> accepted
+validateAllowance costMicros={Bounded:true Value:1} -> accepted
+spendable units={Bounded:true Value:1} -> accepted
+spendable costMicros={Bounded:true Value:1} -> accepted
+CheckUsage units={Bounded:true Value:1} used=0 -> accepted
+CheckUsage costMicros={Bounded:true Value:1} used=0 -> accepted
+CheckUsage units={Bounded:true Value:1} used=1 -> accepted
+CheckUsage costMicros={Bounded:true Value:1} used=1 -> accepted
+CheckUsage units={Bounded:true Value:1} used=5 -> refused: session: receipt exceeds units allocation
+CheckUsage costMicros={Bounded:true Value:1} used=5 -> refused: session: receipt exceeds cost allocation
+CheckUsage units={Bounded:true Value:1} used=6 -> refused: session: receipt exceeds units allocation
+CheckUsage costMicros={Bounded:true Value:1} used=6 -> refused: session: receipt exceeds cost allocation
+validateAllowance units={Bounded:true Value:5} -> accepted
+validateAllowance costMicros={Bounded:true Value:5} -> accepted
+spendable units={Bounded:true Value:5} -> accepted
+spendable costMicros={Bounded:true Value:5} -> accepted
+CheckUsage units={Bounded:true Value:5} used=0 -> accepted
+CheckUsage costMicros={Bounded:true Value:5} used=0 -> accepted
+CheckUsage units={Bounded:true Value:5} used=1 -> accepted
+CheckUsage costMicros={Bounded:true Value:5} used=1 -> accepted
+CheckUsage units={Bounded:true Value:5} used=5 -> accepted
+CheckUsage costMicros={Bounded:true Value:5} used=5 -> accepted
+CheckUsage units={Bounded:true Value:5} used=6 -> refused: session: receipt exceeds units allocation
+CheckUsage costMicros={Bounded:true Value:5} used=6 -> refused: session: receipt exceeds cost allocation
+validateAllowance units={Bounded:true Value:-1} -> refused: session: invalid capability allowance
+validateAllowance costMicros={Bounded:true Value:-1} -> refused: session: invalid capability allowance
+spendable units={Bounded:true Value:-1} -> accepted
+spendable costMicros={Bounded:true Value:-1} -> accepted
+CheckUsage units={Bounded:true Value:-1} used=0 -> refused: session: receipt exceeds units allocation
+CheckUsage costMicros={Bounded:true Value:-1} used=0 -> refused: session: receipt exceeds cost allocation
+CheckUsage units={Bounded:true Value:-1} used=1 -> refused: session: receipt exceeds units allocation
+CheckUsage costMicros={Bounded:true Value:-1} used=1 -> refused: session: receipt exceeds cost allocation
+CheckUsage units={Bounded:true Value:-1} used=5 -> refused: session: receipt exceeds units allocation
+CheckUsage costMicros={Bounded:true Value:-1} used=5 -> refused: session: receipt exceeds cost allocation
+CheckUsage units={Bounded:true Value:-1} used=6 -> refused: session: receipt exceeds units allocation
+CheckUsage costMicros={Bounded:true Value:-1} used=6 -> refused: session: receipt exceeds cost allocation
+validateAllowance units={Bounded:true Value:9223372036854775807} -> accepted
+validateAllowance costMicros={Bounded:true Value:9223372036854775807} -> accepted
+spendable units={Bounded:true Value:9223372036854775807} -> accepted
+spendable costMicros={Bounded:true Value:9223372036854775807} -> accepted
+CheckUsage units={Bounded:true Value:9223372036854775807} used=0 -> accepted
+CheckUsage costMicros={Bounded:true Value:9223372036854775807} used=0 -> accepted
+CheckUsage units={Bounded:true Value:9223372036854775807} used=1 -> accepted
+CheckUsage costMicros={Bounded:true Value:9223372036854775807} used=1 -> accepted
+CheckUsage units={Bounded:true Value:9223372036854775807} used=5 -> accepted
+CheckUsage costMicros={Bounded:true Value:9223372036854775807} used=5 -> accepted
+CheckUsage units={Bounded:true Value:9223372036854775807} used=6 -> accepted
+CheckUsage costMicros={Bounded:true Value:9223372036854775807} used=6 -> accepted
+validateAllowance units={Bounded:false Value:0} -> accepted
+validateAllowance costMicros={Bounded:false Value:0} -> accepted
+spendable units={Bounded:false Value:0} -> accepted
+spendable costMicros={Bounded:false Value:0} -> accepted
+CheckUsage units={Bounded:false Value:0} used=0 -> accepted
+CheckUsage costMicros={Bounded:false Value:0} used=0 -> accepted
+CheckUsage units={Bounded:false Value:0} used=1 -> accepted
+CheckUsage costMicros={Bounded:false Value:0} used=1 -> accepted
+CheckUsage units={Bounded:false Value:0} used=5 -> accepted
+CheckUsage costMicros={Bounded:false Value:0} used=5 -> accepted
+CheckUsage units={Bounded:false Value:0} used=6 -> accepted
+CheckUsage costMicros={Bounded:false Value:0} used=6 -> accepted
+validateAllowance units={Bounded:false Value:1} -> refused: session: invalid capability allowance
+validateAllowance costMicros={Bounded:false Value:1} -> refused: session: invalid capability allowance
+spendable units={Bounded:false Value:1} -> accepted
+spendable costMicros={Bounded:false Value:1} -> accepted
+CheckUsage units={Bounded:false Value:1} used=0 -> accepted
+CheckUsage costMicros={Bounded:false Value:1} used=0 -> accepted
+CheckUsage units={Bounded:false Value:1} used=1 -> accepted
+CheckUsage costMicros={Bounded:false Value:1} used=1 -> accepted
+CheckUsage units={Bounded:false Value:1} used=5 -> accepted
+CheckUsage costMicros={Bounded:false Value:1} used=5 -> accepted
+CheckUsage units={Bounded:false Value:1} used=6 -> accepted
+CheckUsage costMicros={Bounded:false Value:1} used=6 -> accepted
+validateAllowance units={Bounded:false Value:-1} -> refused: session: invalid capability allowance
+validateAllowance costMicros={Bounded:false Value:-1} -> refused: session: invalid capability allowance
+spendable units={Bounded:false Value:-1} -> accepted
+spendable costMicros={Bounded:false Value:-1} -> accepted
+CheckUsage units={Bounded:false Value:-1} used=0 -> accepted
+CheckUsage costMicros={Bounded:false Value:-1} used=0 -> accepted
+CheckUsage units={Bounded:false Value:-1} used=1 -> accepted
+CheckUsage costMicros={Bounded:false Value:-1} used=1 -> accepted
+CheckUsage units={Bounded:false Value:-1} used=5 -> accepted
+CheckUsage costMicros={Bounded:false Value:-1} used=5 -> accepted
+CheckUsage units={Bounded:false Value:-1} used=6 -> accepted
+CheckUsage costMicros={Bounded:false Value:-1} used=6 -> accepted
