@@ -1,0 +1,36 @@
+validateConfig units={Bounded:false Value:0} costMicros={Bounded:false Value:0} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:false Value:0} costMicros={Bounded:true Value:5} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:false Value:0} costMicros={Bounded:true Value:0} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:false Value:0} costMicros={Bounded:true Value:-1} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:false Value:0} costMicros={Bounded:false Value:1} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:false Value:0} costMicros={Bounded:false Value:-1} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:true Value:5} costMicros={Bounded:false Value:0} -> accepted
+validateConfig units={Bounded:true Value:5} costMicros={Bounded:true Value:5} -> accepted
+validateConfig units={Bounded:true Value:5} costMicros={Bounded:true Value:0} -> refused: configuration "allowances" entry "model.inference" needs costMicros bounded and positive, or unbounded with value 0
+validateConfig units={Bounded:true Value:5} costMicros={Bounded:true Value:-1} -> refused: configuration "allowances" entry "model.inference" needs costMicros bounded and positive, or unbounded with value 0
+validateConfig units={Bounded:true Value:5} costMicros={Bounded:false Value:1} -> refused: configuration "allowances" entry "model.inference" needs costMicros bounded and positive, or unbounded with value 0
+validateConfig units={Bounded:true Value:5} costMicros={Bounded:false Value:-1} -> refused: configuration "allowances" entry "model.inference" needs costMicros bounded and positive, or unbounded with value 0
+validateConfig units={Bounded:true Value:0} costMicros={Bounded:false Value:0} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:true Value:0} costMicros={Bounded:true Value:5} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:true Value:0} costMicros={Bounded:true Value:0} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:true Value:0} costMicros={Bounded:true Value:-1} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:true Value:0} costMicros={Bounded:false Value:1} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:true Value:0} costMicros={Bounded:false Value:-1} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:true Value:-1} costMicros={Bounded:false Value:0} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:true Value:-1} costMicros={Bounded:true Value:5} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:true Value:-1} costMicros={Bounded:true Value:0} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:true Value:-1} costMicros={Bounded:true Value:-1} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:true Value:-1} costMicros={Bounded:false Value:1} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:true Value:-1} costMicros={Bounded:false Value:-1} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:false Value:1} costMicros={Bounded:false Value:0} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:false Value:1} costMicros={Bounded:true Value:5} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:false Value:1} costMicros={Bounded:true Value:0} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:false Value:1} costMicros={Bounded:true Value:-1} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:false Value:1} costMicros={Bounded:false Value:1} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:false Value:1} costMicros={Bounded:false Value:-1} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:false Value:-1} costMicros={Bounded:false Value:0} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:false Value:-1} costMicros={Bounded:true Value:5} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:false Value:-1} costMicros={Bounded:true Value:0} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:false Value:-1} costMicros={Bounded:true Value:-1} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:false Value:-1} costMicros={Bounded:false Value:1} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
+validateConfig units={Bounded:false Value:-1} costMicros={Bounded:false Value:-1} -> refused: configuration "allowances" entry "model.inference" needs bounded positive units
