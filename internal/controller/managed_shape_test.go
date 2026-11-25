@@ -449,3 +449,22 @@ func TestReconcilerPolicyTighteningFailsARunningRun(t *testing.T) {
 		t.Fatal("the denied run's sandbox was not released")
 	}
 }
+
+// A valid runtime edit that would change a running run's agent contract, such
+// as another native model, leaves the run alone and it still ends when its Pod
+// does. Before ADR 0077 the controller re-ensured the immutable contract on
+// every reconcile, failed with "has different immutable contents" and never
+// saw the Pod finish.
+func TestReconcilerRunWithPodEndsAfterAContractChangingEdit(t *testing.T) {
+	t.Parallel()
+	r, c, sandbox := managedShapeCluster(t, nil)
+	reconcileTimes(t, r, managedRunName, 3)
+	editRuntime(t, c, managedRuntimeName, func(rt *sprooziv1alpha1.AgentRuntime) {
+		rt.Spec.ClientConfig.NativeSession = &sprooziv1alpha1.NativeSessionConfig{Model: "other-model"}
+	})
+	sandbox.Status = k8sresources.SandboxStatusSucceeded
+	reconcileTimes(t, r, managedRunName, 1)
+	if phase := getPhase(t, c, managedRunName); phase != sprooziv1alpha1.AgentRunPhaseSucceeded {
+		t.Fatalf("phase = %q, want Succeeded", phase)
+	}
+}
