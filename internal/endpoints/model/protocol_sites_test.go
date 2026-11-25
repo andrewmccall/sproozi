@@ -197,9 +197,12 @@ func protocolBranches(fset *token.FileSet, file string, f *ast.File, constants [
 					}
 				}
 			case *ast.CaseClause:
+				// A type switch lists types as its cases.
 				for _, e := range x.List {
 					if name := named(e); name != "" {
 						names = append(names, name)
+					} else if streamType(e) {
+						names = append(names, "stream type")
 					}
 				}
 			case *ast.TypeAssertExpr:
@@ -219,8 +222,15 @@ func protocolBranches(fset *token.FileSet, file string, f *ast.File, constants [
 // TestProtocolBranchesStayInTheirSites fails when non-test code in the
 // package branches on the provider protocol outside protocolSites, or adds a
 // branch inside one, so the next protocol cannot be half-added: each place
-// it must decide is listed. A stream reader's type is never asserted: a
-// streamed call reaches its reader only through eventStream.
+// it must decide is listed. A stream reader's type is never asserted or
+// switched on: a streamed call reaches its reader only through eventStream.
+//
+// The scan reads syntax, not types, so it does not prove the absence of:
+//   - a map or array keyed by protocol constants, such as {anthropicProtocol: …};
+//   - an ordering or untyped comparison, such as p != 0 or p > openAIProtocol;
+//   - a comparison with a variable or constant that aliases a protocol
+//     constant, such as v := anthropicProtocol; p == v;
+//   - a struct that embeds a stream reader type, reaching it without eventStream.
 func TestProtocolBranchesStayInTheirSites(t *testing.T) {
 	fset, files := parsedSources(t)
 	constants := allProtocolConstants(files)
@@ -303,7 +313,7 @@ func TestProtocolDetectorsFindEachForm(t *testing.T) {
 			}
 		})
 	}
-	constants := []string{"openAIProtocol", "anthropicProtocol"}
+	constants := protocolSitesDecidedFor
 	for _, tc := range []struct {
 		name, src string
 		want      [][]string
@@ -313,6 +323,7 @@ func TestProtocolDetectorsFindEachForm(t *testing.T) {
 		{"conversion in a comparison", "func f(p providerProtocol) bool { return p == providerProtocol(1) }",
 			[][]string{{"providerProtocol(1)"}}},
 		{"type assertion", "func f(e eventStream) { _ = e.(*anthropicStream) }", [][]string{{"stream type"}}},
+		{"type switch", "func f(e eventStream) {\n\tswitch e.(type) {\n\tcase *responsesStream:\n\t}\n}", [][]string{{"stream type"}}},
 		{"unrelated", "func f(p int) bool { return p == 1 }", nil},
 	} {
 		t.Run("branches/"+tc.name, func(t *testing.T) {
