@@ -192,18 +192,16 @@ func (r *AgentRunReconciler) resolveAdmission(ctx context.Context, run *sprooziv
 		return nil, *sessionResult, nil
 	}
 
-	// Reject a runtime that cannot launch before the run is admitted. A run
-	// bound to a session registration for which a managed Pod may still be
-	// built must also pass the managed rules EnsureAgentContract and
-	// EnsureManaged build from; a completed stop builds none.
-	if err := r.SandboxClient.ValidateRuntime(ctx, rt, binding); err != nil {
-		if !errors.Is(err, k8sresources.ErrInvalidRuntime) {
-			return nil, ctrl.Result{}, err
+	// Reject a runtime that cannot launch before the run is admitted, so it
+	// never takes a place under a cap. Runtime rules gate the building of a
+	// Pod (ADR 0077): an admitted run is checked again only when its Pod is
+	// about to be built (ensureSandbox), so an edit never ends a run that
+	// already has one.
+	if run.Status.Phase == sprooziv1alpha1.AgentRunPhaseQueued {
+		if err := r.SandboxClient.ValidateRuntime(ctx, rt, binding); err != nil {
+			result, err := r.failInvalidRuntime(ctx, run, rt, err)
+			return nil, result, err
 		}
-		logger.Info("AgentRuntime cannot launch AgentRun", "name", run.Name, "runtime", rt.Name, "error", err)
-		message := k8sresources.RuntimeInvalidMessage(rt, err)
-		_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, "RuntimeInvalid", message)
-		return nil, ctrl.Result{}, err
 	}
 
 	// Reject input the agent contract will refuse before the run is admitted.
@@ -444,11 +442,10 @@ func (r *AgentRunReconciler) handleRunning(ctx context.Context, run *sprooziv1al
 			return ctrl.Result{}, err
 		}
 	}
-	if err := k8sresources.EnsureAgentContract(ctx, r.Client, run, admitted.template, admitted.runtime); err != nil {
-		return ctrl.Result{}, err
+	sandboxName, err := r.ensureSandbox(ctx, run, admitted)
+	if errors.Is(err, k8sresources.ErrInvalidRuntime) {
+		return r.failInvalidRuntime(ctx, run, admitted.runtime, err)
 	}
-
-	sandboxName, err := r.ensureSandbox(ctx, run, admitted.runtime, admitted.binding)
 	if errors.Is(err, errRunEnded) {
 		logger.Info("Skipped sandbox Pod for ended AgentRun", "name", run.Name)
 		return ctrl.Result{RequeueAfter: time.Second}, nil
@@ -481,6 +478,20 @@ func (r *AgentRunReconciler) handleRunning(ctx context.Context, run *sprooziv1al
 		return ctrl.Result{}, nil
 	}
 	return ctrl.Result{RequeueAfter: max(left, time.Second)}, nil
+}
+
+// failInvalidRuntime fails run with reason RuntimeInvalid when err, from
+// ValidateRuntime or from building the run's Pod, says rt cannot launch a
+// sandbox. Any other error is returned for a retry.
+func (r *AgentRunReconciler) failInvalidRuntime(ctx context.Context, run *sprooziv1alpha1.AgentRun,
+	rt *sprooziv1alpha1.AgentRuntime, err error,
+) (ctrl.Result, error) {
+	if !errors.Is(err, k8sresources.ErrInvalidRuntime) {
+		return ctrl.Result{}, err
+	}
+	log.FromContext(ctx).Info("AgentRuntime cannot launch AgentRun", "name", run.Name, "runtime", rt.Name, "error", err)
+	return r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, "RuntimeInvalid",
+		k8sresources.RuntimeInvalidMessage(rt, err))
 }
 
 // waitForQuota keeps a run whose sandbox Pod a ResourceQuota rejected active,

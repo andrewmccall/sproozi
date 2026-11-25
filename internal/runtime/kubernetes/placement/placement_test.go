@@ -1474,7 +1474,9 @@ func TestPlacementRejectsEmptyMismatchedHarnessAndForeignCheckpoint(t *testing.T
 	if err := kube.Update(t.Context(), &nativeRuntime); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.liveProfile(t.Context(), l); err == nil {
+	// The runtime rules gate a new Pod (ADR 0077), so Prepare's check refuses
+	// the changed kind.
+	if _, err := p.prepareProfile(t.Context(), l, false); err == nil {
 		t.Fatal("changed runtime kind admitted")
 	}
 }
@@ -1550,8 +1552,9 @@ var launchRuntimeFaults = map[string]struct {
 
 // A launch whose runtime cannot launch a sandbox is refused by Prepare with
 // the reason a run's admission would give (ADR 0067), before a registration
-// or AgentRun exists, and its preparation can then be ended. Activate and
-// Attach, which share the check, still answer denied.
+// or AgentRun exists, and its preparation can then be ended. (Activate and
+// Attach act on a session whose Pod exists, so they do not apply the runtime
+// rules: see runtime_edit_test.go.)
 func TestPrepareRefusesARuntimeThatCannotLaunch(t *testing.T) {
 	t.Parallel()
 	for name, fault := range launchRuntimeFaults {
@@ -1573,10 +1576,6 @@ func TestPrepareRefusesARuntimeThatCannotLaunch(t *testing.T) {
 			}
 			if err := p.AbortPreparation(t.Context(), l); err != nil {
 				t.Fatalf("AbortPreparation after the refusal: %v", err)
-			}
-			var rejection *profile.Rejection
-			if _, err := p.liveProfileInput(t.Context(), l, false); !errors.As(err, &rejection) || rejection.Code != profile.CodeDenied {
-				t.Fatalf("activation check: err = %v, want denied", err)
 			}
 		})
 	}

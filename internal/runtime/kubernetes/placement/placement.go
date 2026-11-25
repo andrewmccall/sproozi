@@ -234,33 +234,39 @@ func (p *Placement) liveProfile(ctx context.Context, l session.Launch) (map[api.
 	return p.liveProfileInput(ctx, l, false)
 }
 
-// liveProfileInput checks l against the live template, policy and runtime.
-// A runtime that cannot launch a sandbox is denied, as any other failed
-// check is; only Prepare says why (prepareProfile).
+// liveProfileInput checks l against the live template and policy: the caller,
+// its instructions, capabilities, allowances and deadline. It does not apply
+// the runtime rules, which gate only the building of a Pod (ADR 0077):
+// Activate and Attach act on a session whose Pod exists, so a runtime edited
+// since does not deny or cut it.
 func (p *Placement) liveProfileInput(ctx context.Context, l session.Launch, initial bool) (map[api.CapabilityKind]api.EndpointBudget, error) {
-	ceilings, runtimeInvalid, err := p.checkLaunch(ctx, l, initial)
-	if err == nil && runtimeInvalid != "" {
-		return nil, &profile.Rejection{Code: profile.CodeDenied}
-	}
+	ceilings, _, err := p.checkLaunch(ctx, l, initial)
 	return ceilings, err
 }
 
-// prepareProfile is liveProfileInput for Prepare, which refuses a launch
-// whose runtime cannot launch a sandbox with the reason a run's admission
-// would give (ADR 0067): until an administrator fixes the runtime it can
-// never start, so its start ends.
+// prepareProfile is liveProfileInput for Prepare. A launch that has no
+// registration yet would have its Pod built from the runtime, so one whose
+// runtime cannot launch a sandbox is refused with the reason a run's admission
+// would give (ADR 0067): until an administrator fixes the runtime it can never
+// start, so its start ends. A repeated Prepare of a registered launch is not
+// refused for the runtime: the controller checks it if the Pod is still to be
+// built, and the wait reports that run's end.
 func (p *Placement) prepareProfile(ctx context.Context, l session.Launch, initial bool) (map[api.CapabilityKind]api.EndpointBudget, error) {
 	ceilings, runtimeInvalid, err := p.checkLaunch(ctx, l, initial)
-	if err == nil && runtimeInvalid != "" {
-		return nil, refuse("%s", runtimeInvalid)
+	if err != nil || runtimeInvalid == "" {
+		return ceilings, err
 	}
-	return ceilings, err
+	if local, loadErr := p.load(l); loadErr == nil && local.Reference.UID != "" {
+		return ceilings, nil
+	}
+	return nil, refuse("%s", runtimeInvalid)
 }
 
-// checkLaunch makes liveProfileInput's checks. runtimeInvalid is the reason
-// the runtime cannot launch a sandbox. It is reported only after every other
-// check has passed, so a caller the template, policy or deadline cap denies
-// gets the bare denial and learns nothing about the runtime.
+// checkLaunch makes liveProfileInput's checks and, beside them, says in
+// runtimeInvalid why the runtime cannot launch a sandbox, if it cannot. That
+// is returned only when every other check has passed, so a caller the
+// template, policy or deadline cap denies gets the bare denial and learns
+// nothing about the runtime.
 func (p *Placement) checkLaunch(ctx context.Context, l session.Launch, initial bool) (
 	ceilings map[api.CapabilityKind]api.EndpointBudget, runtimeInvalid string, err error,
 ) {
@@ -309,10 +315,7 @@ func (p *Placement) checkLaunch(ctx context.Context, l session.Launch, initial b
 	if ceilings, err = p.ceilings(l, policy.Spec); err != nil {
 		return nil, "", err
 	}
-	if runtimeInvalid != "" {
-		return nil, runtimeInvalid, nil
-	}
-	return ceilings, "", nil
+	return ceilings, runtimeInvalid, nil
 }
 func limitFits(want, cap session.Limit) bool {
 	return !cap.Bounded || want.Bounded && want.Value <= cap.Value

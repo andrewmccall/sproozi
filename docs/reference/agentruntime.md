@@ -132,9 +132,15 @@ run's namespace.
 
 These rules, and for a managed run the [managed rules](#managed-native-sessions),
 are checked when a run is admitted, not when the `AgentRuntime` is
-created, and again on every later reconcile of an active run. A runtime that breaks
-any of them fails the run with reason `RuntimeInvalid` before it is admitted,
-so it never counts against a concurrency cap. The `Ready` condition message names the runtime and the rule, for
+created, and again just before the run's Pod is built. A runtime that breaks
+any of them fails a queued run with reason `RuntimeInvalid` before it is admitted,
+so it never counts against a concurrency cap, and fails an admitted run that
+has no Pod yet when its Pod would be built. A run or session that already has
+its Pod keeps running when its runtime is edited to break a rule, and when the
+edit is reverted
+([ADR 0077](../adr/0077-runtime-rules-gate-the-building-of-a-pod.md)). To take
+running work off a runtime, ask each session's owner to stop it, which keeps a
+checkpoint, or set `spec.cancel: true` on its AgentRun. The `Ready` condition message names the runtime and the rule, for
 example `AgentRuntime codex: cannot launch a sandbox: container "agent" image
 must be digest pinned`. Fix the runtime. Then create a new ordinary run, or
 start a managed session again from the session command that created it, such
@@ -343,9 +349,10 @@ checkpoint helper cannot receive credentials, mounts or workload hooks` or
 "claude-code" does not match the session's harness "codex"`. The remote
 executor refuses such a start with the same reason before it creates a run
 (see [placement outcomes](remote-executors.md#placement-outcomes)). An ordinary
-run on the same runtime is not checked against the managed rules, and neither is a
-managed run whose session stop has completed: it builds no Pod, so it still ends
-`Succeeded` with `SessionStopped`.
+run on the same runtime is not checked against the managed rules. A managed
+session that already has its Pod is not checked again, so it can still be
+activated, attached to and stopped after such an edit, and one whose stop has
+completed builds no Pod, so it ends `Succeeded` with `SessionStopped`.
 
 The controller sets the supervisor and checkpoint-helper commands. The helper
 mounts the workspace and a private temporary volume. It gets no provider

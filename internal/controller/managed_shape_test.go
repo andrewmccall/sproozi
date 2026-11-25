@@ -2,13 +2,14 @@ package controller_test
 
 import (
 	"context"
-	"slices"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -278,59 +279,173 @@ func TestReconcilerOrdinaryRunIgnoresManagedShape(t *testing.T) {
 	}
 }
 
-// The template can change after admission, and admission is re-checked on
-// every reconcile. A managed runtime edited into a wrong shape fails its run
-// with RuntimeInvalid and releases its sandbox, whether or not the managed Pod
-// exists yet, as a runtime edited to break the ordinary template check
-// already does. Before, a run without its Pod failed in EnsureManaged on every
-// reconcile, and a run with one kept running.
-func TestReconcilerManagedRuntimeEditedAfterAdmission(t *testing.T) {
+// runtimeEdits break one runtime rule each, on a runtime that had them all
+// when the run was admitted.
+var runtimeEdits = map[string]struct {
+	edit func(*sprooziv1alpha1.AgentRuntime)
+	rule string
+}{
+	"template rule": {func(rt *sprooziv1alpha1.AgentRuntime) {
+		rt.Spec.PodTemplate.Spec.Containers[0].Image = "ghcr.io/openai/codex:latest"
+	}, `container "agent" image must be digest pinned`},
+	"managed shape": {wrongManagedShapes["helper environment"].shape, wrongManagedShapes["helper environment"].rule},
+	"harness": {func(rt *sprooziv1alpha1.AgentRuntime) { rt.Spec.ClientConfig.Harness = string(harness.NativeClaude) },
+		`managed runtime harness "claude-code" does not match the session's harness "codex"`},
+}
+
+// editRuntime applies edit to the stored runtime named name.
+func editRuntime(t *testing.T, c client.Client, name string, edit func(*sprooziv1alpha1.AgentRuntime)) {
+	t.Helper()
+	var rt sprooziv1alpha1.AgentRuntime
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: name}, &rt); err != nil {
+		t.Fatal(err)
+	}
+	edit(&rt)
+	if err := c.Update(context.Background(), &rt); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// reconcileTimes reconciles the named run n times, failing on any error.
+func reconcileTimes(t *testing.T, r *controller.AgentRunReconciler, name string, n int) {
+	t.Helper()
+	for range n {
+		if _, err := reconcileNamed(r, name); err != nil {
+			t.Fatalf("Reconcile(%s) error = %v", name, err)
+		}
+	}
+}
+
+// A run that has its Pod keeps running when its runtime is edited to break a
+// rule, and when the edit is later reverted, and still ends when its Pod
+// does: runtime rules gate the building of a Pod, not a running one (ADR
+// 0077). Before, the edit failed the run with RuntimeInvalid and released its
+// sandbox, losing a session's work since its last checkpoint.
+func TestReconcilerRunWithPodKeepsRunningWhenRuntimeEdited(t *testing.T) {
 	t.Parallel()
-	for name, podCreated := range map[string]bool{"before the Pod": false, "after the Pod": true} {
+	type tc struct {
+		run, runtime string
+		edit         func(*sprooziv1alpha1.AgentRuntime)
+	}
+	cases := map[string]tc{
+		"ordinary run, template rule": {ordinaryRunName, fixtures()[0].GetName(), runtimeEdits["template rule"].edit},
+	}
+	for name, edit := range runtimeEdits {
+		cases["managed session, "+name] = tc{managedRunName, managedRuntimeName, edit.edit}
+	}
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			r, c, sandbox := managedShapeCluster(t, nil)
-			reconciles := 2 // Queued → Admitted → Running
-			if podCreated {
-				reconciles = 3
+			r.MaxActiveRuns = 0
+			reconcileTimes(t, r, tc.run, 3) // Queued → Admitted → Running → Pod
+			pods := func() int { return len(sandbox.Ensured) + len(sandbox.managed) }
+			if run := getRun(t, c, tc.run); run.Status.Phase != sprooziv1alpha1.AgentRunPhaseRunning ||
+				run.Status.Identity.SandboxName == "" || pods() != 1 {
+				t.Fatalf("setup: phase %q sandbox %q pods %d", run.Status.Phase, run.Status.Identity.SandboxName, pods())
 			}
-			for range reconciles {
-				if _, err := reconcileNamed(r, managedRunName); err != nil {
-					t.Fatalf("Reconcile() error = %v", err)
-				}
-			}
-			if run := getRun(t, c, managedRunName); run.Status.Phase != sprooziv1alpha1.AgentRunPhaseRunning ||
-				(run.Status.Identity.SandboxName != "") != podCreated {
-				t.Fatalf("setup: phase %q sandbox %q", run.Status.Phase, run.Status.Identity.SandboxName)
-			}
-			var rt sprooziv1alpha1.AgentRuntime
-			if err := c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: managedRuntimeName}, &rt); err != nil {
+			var original sprooziv1alpha1.AgentRuntime
+			if err := c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: tc.runtime}, &original); err != nil {
 				t.Fatal(err)
 			}
-			wrongManagedShapes["helper environment"].shape(&rt)
-			if err := c.Update(context.Background(), &rt); err != nil {
-				t.Fatal(err)
-			}
-			for range 2 {
-				if _, err := reconcileNamed(r, managedRunName); err != nil {
-					t.Fatalf("Reconcile() error = %v", err)
+			stillRunning := func(when string) {
+				t.Helper()
+				run := getRun(t, c, tc.run)
+				ready := apimeta.FindStatusCondition(run.Status.Conditions, "Ready")
+				if run.Status.Phase != sprooziv1alpha1.AgentRunPhaseRunning || ready == nil || ready.Status != metav1.ConditionTrue ||
+					len(sandbox.Deleted) != 0 || pods() != 1 {
+					t.Fatalf("%s: phase %q ready %+v deleted %v pods %d; want the run running on its one Pod",
+						when, run.Status.Phase, ready, sandbox.Deleted, pods())
 				}
 			}
-			if phase := getPhase(t, c, managedRunName); phase != sprooziv1alpha1.AgentRunPhaseFailed {
-				t.Fatalf("phase = %q, want Failed", phase)
-			}
-			assertReadyMessage(t, c, managedRunName, "RuntimeInvalid", "AgentRuntime "+managedRuntimeName,
-				wrongManagedShapes["helper environment"].rule)
-			if want := map[bool]int{false: 0, true: 1}[podCreated]; len(sandbox.managed) != want {
-				t.Fatalf("managed Pods %v, want %d", sandbox.managed, want)
-			}
-			// The fake records a delete on each terminal reconcile, so check
-			// that each managed Pod was released, not how often.
-			for _, pod := range sandbox.managed {
-				if !slices.Contains(sandbox.Deleted, pod) {
-					t.Fatalf("deleted sandboxes %v, want managed Pod %s released", sandbox.Deleted, pod)
-				}
+			editRuntime(t, c, tc.runtime, tc.edit)
+			reconcileTimes(t, r, tc.run, 3)
+			stillRunning("after the edit")
+			editRuntime(t, c, tc.runtime, func(rt *sprooziv1alpha1.AgentRuntime) { rt.Spec = original.Spec })
+			reconcileTimes(t, r, tc.run, 2)
+			stillRunning("after the fix")
+			editRuntime(t, c, tc.runtime, tc.edit)
+			sandbox.Status = k8sresources.SandboxStatusSucceeded
+			reconcileTimes(t, r, tc.run, 1)
+			if phase := getPhase(t, c, tc.run); phase != sprooziv1alpha1.AgentRunPhaseSucceeded {
+				t.Fatalf("phase after its Pod finished on the edited runtime = %q, want Succeeded", phase)
 			}
 		})
+	}
+}
+
+// A run admitted on a valid runtime that is edited before its Pod is built
+// fails with RuntimeInvalid when the Pod would be built, takes no Pod and
+// releases its place, whatever rule the edit breaks.
+func TestReconcilerRuntimeEditedBeforeThePodFailsTheRun(t *testing.T) {
+	t.Parallel()
+	for name, edit := range runtimeEdits {
+		for phase, reconciles := range map[string]int{"Admitted": 1, "Running": 2} {
+			t.Run(name+" while "+phase, func(t *testing.T) {
+				t.Parallel()
+				r, c, sandbox := managedShapeCluster(t, nil)
+				reconcileTimes(t, r, managedRunName, reconciles)
+				if run := getRun(t, c, managedRunName); string(run.Status.Phase) != phase || run.Status.Identity.SandboxName != "" {
+					t.Fatalf("setup: phase %q sandbox %q", run.Status.Phase, run.Status.Identity.SandboxName)
+				}
+				editRuntime(t, c, managedRuntimeName, edit.edit)
+				reconcileTimes(t, r, managedRunName, 3)
+				if phase := getPhase(t, c, managedRunName); phase != sprooziv1alpha1.AgentRunPhaseFailed {
+					t.Fatalf("phase = %q, want Failed", phase)
+				}
+				assertReadyMessage(t, c, managedRunName, "RuntimeInvalid", "AgentRuntime "+managedRuntimeName, edit.rule)
+				if len(sandbox.managed) != 0 {
+					t.Fatalf("managed Pods %v built on the broken runtime", sandbox.managed)
+				}
+				reconcileTimes(t, r, ordinaryRunName, 1)
+				if phase := getPhase(t, c, ordinaryRunName); phase != sprooziv1alpha1.AgentRunPhaseAdmitted {
+					t.Fatalf("next run phase = %q, want Admitted: the failed run held the cap", phase)
+				}
+			})
+		}
+	}
+}
+
+// An ErrInvalidRuntime from building the Pod itself, as when the runtime is
+// edited between the check and the build, ends the run with RuntimeInvalid
+// instead of retrying for ever.
+func TestReconcilerInvalidRuntimeFromThePodBuildIsTerminal(t *testing.T) {
+	t.Parallel()
+	run := newRun(runOne)
+	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
+	sandbox := &k8sresources.FakeSandboxClient{EnsureErr: fmt.Errorf("%w: gatewayEndpoint has no host", k8sresources.ErrInvalidRuntime)}
+	r, c := newReconcilerWithSandbox(sandbox, append(fixtures(), run)...)
+	reconcileTimes(t, r, runOne, 3)
+	if phase := getPhase(t, c, runOne); phase != sprooziv1alpha1.AgentRunPhaseFailed {
+		t.Fatalf("phase = %q, want Failed", phase)
+	}
+	assertReadyMessage(t, c, runOne, "RuntimeInvalid", "AgentRuntime codex: cannot launch a sandbox: gatewayEndpoint has no host")
+}
+
+// A policy tightening still fails an active run that has its Pod (ADR 0027;
+// ADR 0077 changes only what a runtime edit does).
+func TestReconcilerPolicyTighteningFailsARunningRun(t *testing.T) {
+	t.Parallel()
+	r, c, sandbox := managedShapeCluster(t, nil)
+	r.MaxActiveRuns = 0
+	reconcileTimes(t, r, ordinaryRunName, 3)
+	if run := getRun(t, c, ordinaryRunName); run.Status.Identity.SandboxName == "" {
+		t.Fatal("setup: no Pod")
+	}
+	var pol sprooziv1alpha1.AgentPolicy
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: testPolicy}, &pol); err != nil {
+		t.Fatal(err)
+	}
+	pol.Spec.AllowedCapabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityGitHubPullRequest}
+	if err := c.Update(context.Background(), &pol); err != nil {
+		t.Fatal(err)
+	}
+	reconcileTimes(t, r, ordinaryRunName, 2)
+	if phase := getPhase(t, c, ordinaryRunName); phase != sprooziv1alpha1.AgentRunPhaseFailed {
+		t.Fatalf("phase = %q, want Failed", phase)
+	}
+	assertReadyMessage(t, c, ordinaryRunName, "CapabilityNotAllowed")
+	if len(sandbox.Deleted) == 0 {
+		t.Fatal("the denied run's sandbox was not released")
 	}
 }

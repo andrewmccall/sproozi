@@ -30,7 +30,6 @@ import (
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	k8sresources "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
-	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 )
 
 // errRunEnded refuses a sandbox for a run whose live copy is cancelled,
@@ -41,12 +40,19 @@ var errRunEnded = errors.New("AgentRun ended before its sandbox was created")
 // ensureSandbox creates the Sandbox Pod if not yet provisioned and stores its name
 // in run.Status.Identity.SandboxName. It is idempotent: if SandboxName is already set
 // it returns immediately without calling the SandboxClient.
+//
+// A run has a Pod once SandboxName is recorded; the controller never builds a
+// second one. Only before that does it check the runtime, create the agent
+// contract and build the Pod, so runtime rules gate the building of a Pod and
+// an edited runtime never touches a run that has one (ADR 0077). An error
+// wrapping ErrInvalidRuntime from any of these steps is permanent: the caller
+// fails the run with RuntimeInvalid.
 func (r *AgentRunReconciler) ensureSandbox(
 	ctx context.Context,
 	run *sprooziv1alpha1.AgentRun,
-	rt *sprooziv1alpha1.AgentRuntime,
-	binding *registry.Record,
+	admitted *admission,
 ) (string, error) {
+	rt, binding := admitted.runtime, admitted.binding
 	if run.Status.Identity.SandboxName != "" {
 		return run.Status.Identity.SandboxName, nil
 	}
@@ -71,6 +77,12 @@ func (r *AgentRunReconciler) ensureSandbox(
 		}
 	}
 
+	if err := r.SandboxClient.ValidateRuntime(ctx, rt, binding); err != nil {
+		return "", err
+	}
+	if err := k8sresources.EnsureAgentContract(ctx, r.Client, run, admitted.template, rt); err != nil {
+		return "", err
+	}
 	var name string
 	var err error
 	if binding != nil {

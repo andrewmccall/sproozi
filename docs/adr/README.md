@@ -75,7 +75,9 @@ that can't be estimated and budget cuts, limits ADR 0015's per-account serializa
 unbounded calls, and settles ADR 0015's unknown reservations after a restart
 at their recovery charge, an estimate, once their leases expire. ADR 0048 makes
 Copilot, first an AgentRun harness, a managed one. ADR 0049 replaces ADR
-0047's login storage with a live store per named login.
+0047's login storage with a live store per named login. ADR 0077 replaces
+ADR 0027's failing of an active run whose runtime is edited: runtime rules
+gate only the building of a Pod.
 
 ADR 0040 removes ADR 0014's kube-dns exception: Kubernetes sandboxes resolve
 no names.
@@ -176,6 +178,7 @@ driver settles it as it settles a task's.
 | [0073](0073-codex-harness-arguments-fail-closed.md) | Codex harness arguments fail closed: the validator reads each `-c`/`--config` key as a TOML dotted key and refuses one it cannot read, one with no `=`, a controlled key, a key below one and a table that holds one; the whole `mcp_servers` table is controlled (awaiting the owner); `-c`, `--config`, `--model` and `-m` need a separate value that is not an option; arguments are checked where a launch is created and started, not when a stored record loads. |
 | [0074](0074-account-requests-only-with-a-forwarded-sign-in-or-no-api-authority.md) | Extends ADRs 0047 and 0048. `Provider.Routes` serves a provider's account requests on another capability's host only when its credential forwards the harness's own sign-in or the provider has no API authority, so a gateway-held key or token for a provider's API never reaches another host; both gateway compositions take this rule from the one function. |
 | [0076](0076-the-model-endpoint-relays-headers-by-protocol.md) | Extends ADRs 0002 and 0047. The model endpoint forwards and relays headers by protocol: Anthropic Messages uses fixed lists in both directions; the OpenAI protocol forwards every request header that is not a credential, cookie or account selector, and relays every response header except `Set-Cookie`, `Set-Cookie2`, `Openai-Organization` and `Openai-Project`, in every credential mode. A new identifying provider header is relayed until it joins the list. |
+| [0077](0077-runtime-rules-gate-the-building-of-a-pod.md) | Partly supersedes ADR 0027. Runtime rules gate the building of a Pod: the controller checks an `AgentRuntime` when a run is admitted and just before it builds the run's Pod, and fails the run with `RuntimeInvalid` on any `ErrInvalidRuntime` from either; a run or session that has its Pod keeps running when its runtime is edited into an invalid state, and a completed stop is never checked; the remote executor's `Prepare` refuses a new launch on a broken runtime, while a repeated `Prepare`, `Activate` and `Attach` do not apply the runtime rules. |
 | [0078](0078-an-interrupted-model-call-that-cannot-be-priced-is-charged-its-reservation.md) | Extends ADR 0028. An Anthropic call under a cost cap that is interrupted after its stream reported a non-zero count in any token category the model's price has no rate for is charged its whole reservation, as a completed call is, instead of an estimate; the check asks `costAnthropic`, which prices a completed call. |
 
 ## Reserved numbers

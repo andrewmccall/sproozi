@@ -38,7 +38,7 @@ func addManagedNativeContract(ctx context.Context, kube client.Client, run *api.
 		return err
 	}
 	if err := ValidateManagedHarness(&runtime.Spec, binding.Harness); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrInvalidRuntime, err)
 	}
 	thread := binding.NativeUUID
 	if binding.WorkspaceDigest != "" {
@@ -183,7 +183,7 @@ func BuildManagedPodSpec(run *api.AgentRun, rt *api.AgentRuntime, binding *regis
 		return nil, fmt.Errorf("managed sandbox requires a native registration")
 	}
 	if err := ValidateManagedHarness(&rt.Spec, binding.Harness); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrInvalidRuntime, err)
 	}
 	if binding.RunUID != string(run.UID) || binding.IntendedRunName != run.Name ||
 		binding.TemplateName != run.Spec.TemplateRef.Name || deadline.At(binding.OriginalDeadline).Passed(time.Now()) ||
@@ -191,7 +191,7 @@ func BuildManagedPodSpec(run *api.AgentRun, rt *api.AgentRuntime, binding *regis
 		return nil, fmt.Errorf("managed sandbox requires a current exact registration")
 	}
 	if err := ValidateManagedShape(&rt.Spec); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrInvalidRuntime, err)
 	}
 	pod := BuildPodSpec(run, rt, run.Status.Identity.ServiceAccountName)
 	useSessionLogin(pod, binding)

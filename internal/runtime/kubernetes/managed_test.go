@@ -278,8 +278,12 @@ func TestManagedRulesHaveOneSource(t *testing.T) {
 			}
 			rulesErr := kubernetes.ValidateManagedRuntime(&runtime.Spec, binding.Harness)
 			_, buildErr := kubernetes.BuildManagedPodSpec(run, runtime, &binding)
-			if rulesErr == nil || buildErr == nil || rulesErr.Error() != violation.want || buildErr.Error() != violation.want {
-				t.Fatalf("ValidateManagedRuntime = %v, BuildManagedPodSpec = %v, want both %q", rulesErr, buildErr, violation.want)
+			// Building refuses permanently (ErrInvalidRuntime), so a runtime
+			// edited after admission ends the run rather than retrying.
+			wrapped := kubernetes.ErrInvalidRuntime.Error() + ": " + violation.want
+			if rulesErr == nil || rulesErr.Error() != violation.want ||
+				!errors.Is(buildErr, kubernetes.ErrInvalidRuntime) || buildErr.Error() != wrapped {
+				t.Fatalf("ValidateManagedRuntime = %v, BuildManagedPodSpec = %v, want %q and %q", rulesErr, buildErr, violation.want, wrapped)
 			}
 			stopped := binding
 			stopped.Phase = registry.Stopped

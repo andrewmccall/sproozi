@@ -58,8 +58,10 @@ Queued -> Admitted -> Running -> Succeeded | Failed | TimedOut | Cancelled
 
 While a run is `Queued`, `Admitted` or `Running`, each reconcile re-checks it
 against its live template, policy, runtime and session binding. A missing
-reference, a policy denial or an `AgentRuntime` that cannot launch a sandbox
-(`RuntimeInvalid`) moves it to `Failed`. The `Ready` condition holds the reason
+reference or a policy denial moves it to `Failed`. The runtime's own rules
+(`RuntimeInvalid`) are checked only when the run is admitted and just before
+its Pod is built, so an edit to its `AgentRuntime` never fails a run that has
+its Pod ([ADR 0077](../adr/0077-runtime-rules-gate-the-building-of-a-pod.md)). The `Ready` condition holds the reason
 and message. A queued run that fails this check is never admitted. Until its
 own reconcile fails it, it can briefly hold a place in the admission queue and
 delay later runs under the cluster cap. A run whose template or policy is
@@ -149,7 +151,7 @@ minutes and shows the executor's `unavailable` problem until `recover`
 | `ExecutionSucceeded` | `Succeeded` | The `agent` container exited with code 0. | Review any proposed PR. |
 | `TemplateNotFound`, `PolicyNotFound`, `RuntimeNotFound` | `Failed` | A referenced `AgentTemplate`, `AgentPolicy` or `AgentRuntime` is missing from the namespace. Deleting an AgentPolicy fails every non-terminal run whose template currently references it, running ones included, with `PolicyNotFound`, and stops their sandboxes. | Create the named object, or fix the reference, then create a new run. |
 | `PolicyChanged` | `Failed` | The run's template was re-pointed to another policy after admission. The message is `AgentTemplate T now references AgentPolicy B, but this run was admitted under AgentPolicy A; submit a new run`. The gateway denies the run's new connections at once and closes its open ones within the [revocation bound](security-hardening.md#protect-transport-and-identities), under 16 seconds. A run admitted before `status.policyName` existed has no recorded policy, so it isn't failed: its new connections are checked against the policy the template now references. | Submit a new run, which is admitted under the policy the template now references. |
-| `RuntimeInvalid` | `Failed` | The `AgentRuntime` cannot launch a sandbox; the message names the problem. The [runtime rules](agentruntime.md#container-validation-rules) apply to every run; a managed run's runtime must also pass the [managed rules](agentruntime.md#managed-native-sessions), unless its session stop has completed. | Fix the runtime. Then create a new ordinary run, or start a managed session again from the session command that created it. |
+| `RuntimeInvalid` | `Failed` | The `AgentRuntime` cannot launch a sandbox; the message names the problem. It is checked when the run is admitted and just before its Pod is built, never once the run has its Pod. The [runtime rules](agentruntime.md#container-validation-rules) apply to every run; a managed run's runtime must also pass the [managed rules](agentruntime.md#managed-native-sessions), unless its session stop has completed. | Fix the runtime. Then create a new ordinary run, or start a managed session again from the session command that created it. |
 | `CapabilityNotAllowed`, `EgressProfileNotAllowed`, `ResourceLimitExceeded`, `PackageScopeInvalid`, `MCPScopeInvalid` | `Failed` | The policy denied the run, template or runtime; the message names the capability, profile or limit. | Request fewer capabilities, or have an administrator change the policy or runtime. |
 | `InvalidRunInput` | `Failed` | The run, its template and its runtime cannot form a valid [agent contract](agent-contract.md): for example a task or instructions containing a NUL character, or an event context whose JSON encoding is over 16 KiB. The API server already rejects an empty or oversized task or instructions and a repeated capability when the object is created. The controller checks this before admission, so the run never takes a place under a cap. | Fix the template or submit a corrected run. |
 | `SessionBindingRejected` | `Failed` | The run does not match the visit the remote executor registered for it, or that registration no longer exists. | Start the work again from the session command that created it. |
