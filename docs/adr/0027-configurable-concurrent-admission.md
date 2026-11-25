@@ -7,6 +7,17 @@ Corrected 2026-11-24: the runtime check at admission and the live reads under
 it moved here from ADR 0017, which was removed. Its replay-record decisions
 went with the event webhook (ADR 0043).
 
+Corrected 2026-11-25: the managed-shape rules (exactly the `agent` and
+`checkpoint` containers, a helper with no environment, mounts, devices, hooks
+or ports, and the reserved `checkpoint-tmp` volume) were not part of
+`ValidateRuntime`: they ran only when `EnsureManaged` built the Pod, so a
+managed run on a runtime without that shape was admitted and failed there on
+every reconcile until its deadline. They are now one function,
+`ValidateManagedShape`, which `ValidateRuntime` applies when the run is bound to
+a session registration and which `BuildManagedPodSpec` still calls, so
+`EnsureManaged` repeats that check from the same source rather than not at all.
+The remote executor's placement applies it before it creates a run.
+
 ## Problem and constraints
 
 The controller admitted one active AgentRun per cluster. `handleQueued` listed

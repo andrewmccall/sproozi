@@ -1,6 +1,8 @@
 package kubernetes_test
 
 import (
+	"context"
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func managedFixture() (*api.AgentRun, *api.AgentRuntime, *registry.Record) {
@@ -193,7 +196,7 @@ func managedShapeViolations() map[string]managedShapeViolation {
 			containers(rt)[0].Name = "worker"
 			rt.Spec.WorkloadContainers = []string{"worker"}
 		}, count},
-		"helper missing": {func(rt *api.AgentRuntime) { containers(rt)[1].Name = "sidecar" }, missing},
+		"helper missing": {func(rt *api.AgentRuntime) { containers(rt)[1].Name = "helper" }, missing},
 		"helper env": {func(rt *api.AgentRuntime) {
 			containers(rt)[1].Env = []corev1.EnvVar{{Name: "SECRET", Value: "forbidden"}}
 		}, helper},
@@ -217,12 +220,21 @@ func managedShapeViolations() map[string]managedShapeViolation {
 	}
 }
 
-// Building a managed Pod refuses exactly what ValidateManagedShape refuses,
-// with the same message: the rules have one copy.
+// Building a managed Pod and admitting a managed run refuse exactly what
+// ValidateManagedShape refuses, for the same reason: the rules have one copy,
+// so admission cannot pass a runtime that EnsureManaged then refuses. An
+// ordinary run's admission does not apply them.
 func TestManagedShapeRulesHaveOneSource(t *testing.T) {
 	run, runtime, binding := managedFixture()
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(testTrustConfigMap(t)).Build()
+	admitters := map[string]kubernetes.SandboxClient{"Pod": newSandboxClient(c), "fake": &kubernetes.FakeSandboxClient{}}
 	if err := kubernetes.ValidateManagedShape(&runtime.Spec); err != nil {
 		t.Fatalf("fixture managed runtime refused: %v", err)
+	}
+	for client, admitter := range admitters {
+		if err := admitter.ValidateRuntime(context.Background(), runtime, true); err != nil {
+			t.Fatalf("%s admission refused the fixture managed runtime: %v", client, err)
+		}
 	}
 	for name, violation := range managedShapeViolations() {
 		t.Run(name, func(t *testing.T) {
@@ -235,6 +247,15 @@ func TestManagedShapeRulesHaveOneSource(t *testing.T) {
 			_, buildErr := kubernetes.BuildManagedPodSpec(run, runtime, &binding)
 			if shapeErr == nil || buildErr == nil || shapeErr.Error() != violation.want || buildErr.Error() != violation.want {
 				t.Fatalf("ValidateManagedShape = %v, BuildManagedPodSpec = %v, want both %q", shapeErr, buildErr, violation.want)
+			}
+			for client, admitter := range admitters {
+				err := admitter.ValidateRuntime(context.Background(), runtime, true)
+				if !errors.Is(err, kubernetes.ErrInvalidRuntime) || err.Error() != kubernetes.ErrInvalidRuntime.Error()+": "+violation.want {
+					t.Fatalf("%s managed admission = %v, want ErrInvalidRuntime for %q", client, err, violation.want)
+				}
+				if err := admitter.ValidateRuntime(context.Background(), runtime, false); err != nil {
+					t.Fatalf("%s ordinary admission applied the managed shape: %v", client, err)
+				}
 			}
 		})
 	}

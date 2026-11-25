@@ -192,8 +192,10 @@ func (r *AgentRunReconciler) resolveAdmission(ctx context.Context, run *sprooziv
 		return nil, *sessionResult, nil
 	}
 
-	// Reject a runtime that cannot launch before the run is admitted.
-	if err := r.SandboxClient.ValidateRuntime(ctx, rt); err != nil {
+	// Reject a runtime that cannot launch before the run is admitted. A run
+	// bound to a session registration is managed, so its runtime must also
+	// have the shape EnsureManaged builds from.
+	if err := r.SandboxClient.ValidateRuntime(ctx, rt, binding != nil); err != nil {
 		if !errors.Is(err, k8sresources.ErrInvalidRuntime) {
 			return nil, ctrl.Result{}, err
 		}

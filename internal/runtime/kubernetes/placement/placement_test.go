@@ -664,7 +664,9 @@ func TestStoppingRetryReusesDurableQuietHandoffAfterCaptureFailure(t *testing.T)
 func approvedRuntime() *api.AgentRuntime {
 	security := &corev1.SecurityContext{AllowPrivilegeEscalation: ptr.To(false), ReadOnlyRootFilesystem: ptr.To(true), RunAsNonRoot: ptr.To(true), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}, SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}}
 	c := corev1.Container{Name: nativeContainer, Image: "example/native@sha256:" + strings.Repeat("a", 64), SecurityContext: security, Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}}}
-	return &api.AgentRuntime{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: fixtureRuntimeName}, Spec: api.AgentRuntimeSpec{ClientConfig: api.RuntimeClientConfig{Harness: "codex"}, WorkloadContainers: []string{nativeContainer}, PodTemplate: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{c}, AutomountServiceAccountToken: ptr.To(false), SecurityContext: &corev1.PodSecurityContext{RunAsNonRoot: ptr.To(true), RunAsUser: ptr.To(int64(65532))}}}}}
+	helper := *c.DeepCopy()
+	helper.Name = sandboxpod.CaptureContainer
+	return &api.AgentRuntime{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: fixtureRuntimeName}, Spec: api.AgentRuntimeSpec{ClientConfig: api.RuntimeClientConfig{Harness: "codex"}, WorkloadContainers: []string{nativeContainer}, PodTemplate: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{c, helper}, AutomountServiceAccountToken: ptr.To(false), SecurityContext: &corev1.PodSecurityContext{RunAsNonRoot: ptr.To(true), RunAsUser: ptr.To(int64(65532))}}}}}
 }
 func fixtureArtifact(t *testing.T) ([]byte, checkpoint.Metadata) {
 	return fixtureArtifactKind(t, harness.NativeCodex)
@@ -1516,6 +1518,29 @@ func TestEnsureRunNamesTheInvalidField(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "spec.task") || !strings.Contains(err.Error(), "AgentRun run-1") {
 		t.Fatalf("ensureRun error does not name the run and field: %v", err)
+	}
+}
+
+// A placement launches only managed runs, so a runtime without the managed
+// shape is denied before a registration or AgentRun is created, as a runtime
+// failing the ordinary template check already is.
+func TestWrongManagedShapeDeniesLaunch(t *testing.T) {
+	t.Parallel()
+	p, kube, _, l, _ := setup(t)
+	if _, err := p.liveProfileInput(t.Context(), l, false); err != nil {
+		t.Fatalf("managed runtime refused: %v", err)
+	}
+	var nativeRuntime api.AgentRuntime
+	if err := kube.Get(t.Context(), client.ObjectKey{Namespace: fixtureNamespace, Name: fixtureRuntimeName}, &nativeRuntime); err != nil {
+		t.Fatal(err)
+	}
+	nativeRuntime.Spec.PodTemplate.Spec.Containers[1].Env = []corev1.EnvVar{{Name: "LEAK", Value: "x"}}
+	if err := kube.Update(t.Context(), &nativeRuntime); err != nil {
+		t.Fatal(err)
+	}
+	var rejection *profile.Rejection
+	if _, err := p.liveProfileInput(t.Context(), l, false); !errors.As(err, &rejection) || rejection.Code != profile.CodeDenied {
+		t.Fatalf("wrong managed shape: err = %v, want denied", err)
 	}
 }
 

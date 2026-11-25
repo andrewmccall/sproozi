@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
+	k8sresources "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/placement"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	sigyaml "sigs.k8s.io/yaml"
@@ -326,6 +327,36 @@ func TestSREDemoRuntimePassesRuntimeValidation(t *testing.T) {
 	}
 	if err := agentRuntime.Spec.ValidateRuntimeTemplate(); err != nil {
 		t.Fatalf("SRE demo runtime is not admissible: %v", err)
+	}
+}
+
+// Each managed example runtime has the managed shape a managed run's
+// admission requires. (Its images are placeholders until kustomize pins them,
+// so the ordinary template check is not applied to the raw file.)
+func TestManagedExampleRuntimesHaveTheManagedShape(t *testing.T) {
+	root := filepath.Join(repoRoot(t), "examples", "portable-workflows", "kubernetes")
+	for _, path := range []string{filepath.Join(root, "runtime.yaml"), filepath.Join(root, "claude", "runtime.yaml")} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := 0
+		for document := range strings.SplitSeq(string(data), "\n---") {
+			var agentRuntime sprooziv1alpha1.AgentRuntime
+			if err := sigyaml.Unmarshal([]byte(document), &agentRuntime); err != nil {
+				t.Fatalf("%s: %v", path, err)
+			}
+			if agentRuntime.Kind != "AgentRuntime" {
+				continue
+			}
+			found++
+			if err := k8sresources.ValidateManagedShape(&agentRuntime.Spec); err != nil {
+				t.Errorf("%s: runtime %s does not have the managed shape: %v", path, agentRuntime.Name, err)
+			}
+		}
+		if found != 1 {
+			t.Fatalf("%s: found %d AgentRuntimes, want 1", path, found)
+		}
 	}
 }
 

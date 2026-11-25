@@ -130,7 +130,8 @@ The trust ConfigMap must be in `sproozi-agents`, immutable and contain public CA
 material only. Runtime, policy, template and run references resolve within the
 run's namespace.
 
-These rules are checked when a run is admitted, not when the `AgentRuntime` is
+These rules, and for a managed run the [managed shape](#managed-native-sessions),
+are checked when a run is admitted, not when the `AgentRuntime` is
 created, and again on every later reconcile of an active run. A runtime that breaks
 any of them fails the run with reason `RuntimeInvalid` before it is admitted,
 so it never counts against a concurrency cap. The `Ready` condition message names the runtime and the rule, for
@@ -323,8 +324,19 @@ This fragment supplements a complete managed runtime, which must have:
 
 - exactly two containers, named `agent` and `checkpoint`, with
   `workloadContainers: [agent]`;
+- a `checkpoint` container with no `env`, `envFrom`, `volumeMounts`,
+  `volumeDevices`, `lifecycle` or `ports`;
+- no template volume named `checkpoint-tmp`, which the controller reserves for
+  the helper;
 - non-root UID and GID 1000, read-only root filesystems and dropped capabilities;
 - explicit resources and a bounded memory-backed workspace.
+
+The first three are the managed shape. A managed run's admission checks it with
+the [container validation rules](#container-validation-rules), so a runtime without it fails the run with
+`RuntimeInvalid` before it takes a place under a cap, for example
+`AgentRuntime codex: cannot launch a sandbox: checkpoint helper cannot receive
+credentials, mounts or workload hooks`. The remote executor also denies a launch
+whose runtime lacks it. An ordinary run on the same runtime is not checked for it.
 
 The controller sets the supervisor and checkpoint-helper commands. The helper
 mounts the workspace and a private temporary volume. It gets no provider

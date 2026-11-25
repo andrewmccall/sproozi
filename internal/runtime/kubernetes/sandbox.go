@@ -79,8 +79,11 @@ var ErrInvalidRuntime = errors.New("cannot launch a sandbox")
 type SandboxClient interface {
 	// ValidateRuntime checks that rt can launch a sandbox. Run admission calls
 	// it so an unlaunchable runtime fails the run before it counts against a
-	// concurrency cap. Errors wrapping ErrInvalidRuntime are permanent.
-	ValidateRuntime(ctx context.Context, rt *sprooziv1alpha1.AgentRuntime) error
+	// concurrency cap. managed is true for a run bound to a session
+	// registration, whose sandbox is built by EnsureManaged; the runtime must
+	// then also have the managed shape. Errors wrapping ErrInvalidRuntime are
+	// permanent.
+	ValidateRuntime(ctx context.Context, rt *sprooziv1alpha1.AgentRuntime, managed bool) error
 
 	// Ensure creates the Sandbox Pod if it does not already exist. Idempotent.
 	// rt must already have passed ValidateRuntime.
@@ -138,12 +141,27 @@ func (p *PodSandboxClient) WithGatewayResolver(resolve GatewayResolver) *PodSand
 	return p
 }
 
-// ValidateRuntime checks the Pod template and the trust bundle ConfigMap it mounts.
-func (p *PodSandboxClient) ValidateRuntime(ctx context.Context, rt *sprooziv1alpha1.AgentRuntime) error {
+// ValidateRuntime checks the Pod template, its managed shape when managed,
+// and the trust bundle ConfigMap it mounts.
+func (p *PodSandboxClient) ValidateRuntime(ctx context.Context, rt *sprooziv1alpha1.AgentRuntime, managed bool) error {
+	if err := validateRuntimeTemplate(rt, managed); err != nil {
+		return err
+	}
+	return validateRuntimeTrustBundle(ctx, p.c, rt)
+}
+
+// validateRuntimeTemplate is the template part of ValidateRuntime, shared by
+// every SandboxClient here so that none can apply different rules.
+func validateRuntimeTemplate(rt *sprooziv1alpha1.AgentRuntime, managed bool) error {
 	if err := rt.Spec.ValidateRuntimeTemplate(); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidRuntime, err)
 	}
-	return validateRuntimeTrustBundle(ctx, p.c, rt)
+	if managed {
+		if err := ValidateManagedShape(&rt.Spec); err != nil {
+			return fmt.Errorf("%w: %w", ErrInvalidRuntime, err)
+		}
+	}
+	return nil
 }
 
 // Ensure creates the Sandbox Pod if it does not already exist. Idempotent.

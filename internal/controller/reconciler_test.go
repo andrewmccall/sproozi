@@ -1470,6 +1470,7 @@ func TestReconcilerStoppedManagedSessionPastDeadlineEndsAsStopped(t *testing.T) 
 func checkStoppedManagedSessionEnds(t *testing.T, pastDeadline bool) {
 	t.Helper()
 	objs := fixtures()
+	withManagedShape(objs[0].(*sprooziv1alpha1.AgentRuntime))
 	tmpl := objs[2].(*sprooziv1alpha1.AgentTemplate)
 	tmpl.Annotations = map[string]string{registry.ManagedTemplateAnnotation: managedValue}
 	run := newRun(runOne)

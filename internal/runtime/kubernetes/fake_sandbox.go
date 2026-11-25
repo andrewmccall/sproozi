@@ -17,7 +17,6 @@ package kubernetes
 
 import (
 	"context"
-	"fmt"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 )
@@ -42,12 +41,10 @@ type FakeSandboxClient struct {
 	Deleted []string
 }
 
-// ValidateRuntime applies the template check; there is no trust bundle to read.
-func (f *FakeSandboxClient) ValidateRuntime(_ context.Context, rt *sprooziv1alpha1.AgentRuntime) error {
-	if err := rt.Spec.ValidateRuntimeTemplate(); err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidRuntime, err)
-	}
-	return nil
+// ValidateRuntime applies the Pod-backed client's template and managed-shape
+// checks; there is no trust bundle to read.
+func (f *FakeSandboxClient) ValidateRuntime(_ context.Context, rt *sprooziv1alpha1.AgentRuntime, managed bool) error {
+	return validateRuntimeTemplate(rt, managed)
 }
 
 // Ensure records and returns RunName(run.UID).
