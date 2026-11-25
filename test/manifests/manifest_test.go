@@ -14,7 +14,10 @@ import (
 	"testing"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/harness"
+	k8sresources "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/placement"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	sigyaml "sigs.k8s.io/yaml"
 )
@@ -326,6 +329,77 @@ func TestSREDemoRuntimePassesRuntimeValidation(t *testing.T) {
 	}
 	if err := agentRuntime.Spec.ValidateRuntimeTemplate(); err != nil {
 		t.Fatalf("SRE demo runtime is not admissible: %v", err)
+	}
+}
+
+// agentTemplateKind is the kind of an AgentTemplate document.
+const agentTemplateKind = "AgentTemplate"
+
+// Every example runtime that a managed template (one with the
+// sessions.sproozi.com/managed annotation) runs on passes the managed rules a
+// managed run's admission applies: its own harness and the managed shape.
+// (Example images are placeholders until kustomize pins them, so the ordinary
+// template check is not applied to the raw files.)
+func TestManagedExampleRuntimesPassTheManagedRules(t *testing.T) {
+	type key struct{ namespace, name string }
+	runtimes := map[key]sprooziv1alpha1.AgentRuntime{}
+	var managed []sprooziv1alpha1.AgentTemplate
+	root := filepath.Join(repoRoot(t), "examples")
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || (filepath.Ext(path) != ".yaml" && filepath.Ext(path) != ".yml") {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for document := range strings.SplitSeq(string(data), "\n---") {
+			var meta struct {
+				APIVersion string `json:"apiVersion"`
+				Kind       string `json:"kind"`
+			}
+			sproozi := sprooziv1alpha1.GroupVersion.Group + "/"
+			if sigyaml.Unmarshal([]byte(document), &meta) != nil || !strings.HasPrefix(meta.APIVersion, sproozi) {
+				continue
+			}
+			switch meta.Kind {
+			case "AgentRuntime":
+				var rt sprooziv1alpha1.AgentRuntime
+				if err := sigyaml.Unmarshal([]byte(document), &rt); err != nil {
+					return fmt.Errorf("%s: %w", path, err)
+				}
+				runtimes[key{rt.Namespace, rt.Name}] = rt
+			case agentTemplateKind:
+				var template sprooziv1alpha1.AgentTemplate
+				if err := sigyaml.Unmarshal([]byte(document), &template); err != nil {
+					return fmt.Errorf("%s: %w", path, err)
+				}
+				if template.Annotations[registry.ManagedTemplateAnnotation] == "true" {
+					managed = append(managed, template)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(managed) == 0 {
+		t.Fatal("found no managed example templates")
+	}
+	t.Logf("checked the runtimes of %d managed example templates", len(managed))
+	for _, template := range managed {
+		rt, ok := runtimes[key{template.Namespace, template.Spec.RuntimeRef.Name}]
+		if !ok {
+			t.Errorf("managed template %s/%s: runtime %s is not in the examples",
+				template.Namespace, template.Name, template.Spec.RuntimeRef.Name)
+			continue
+		}
+		own := harness.NativeKind(rt.Spec.ClientConfig.Harness)
+		if err := k8sresources.ValidateManagedRuntime(&rt.Spec, own); err != nil {
+			t.Errorf("managed template %s/%s: runtime %s fails the managed rules: %v",
+				template.Namespace, template.Name, rt.Name, err)
+		}
 	}
 }
 

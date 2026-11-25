@@ -38,6 +38,7 @@ import (
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/agentcontract"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/sandboxpod"
 )
 
@@ -79,8 +80,12 @@ var ErrInvalidRuntime = errors.New("cannot launch a sandbox")
 type SandboxClient interface {
 	// ValidateRuntime checks that rt can launch a sandbox. Run admission calls
 	// it so an unlaunchable runtime fails the run before it counts against a
-	// concurrency cap. Errors wrapping ErrInvalidRuntime are permanent.
-	ValidateRuntime(ctx context.Context, rt *sprooziv1alpha1.AgentRuntime) error
+	// concurrency cap. binding is the session registration the run is bound
+	// to, nil for an ordinary run. When BuildsManagedPod(binding), the
+	// sandbox is built by EnsureManaged and the runtime must also pass
+	// ValidateManagedRuntime for the binding's harness. Errors wrapping
+	// ErrInvalidRuntime are permanent.
+	ValidateRuntime(ctx context.Context, rt *sprooziv1alpha1.AgentRuntime, binding *registry.Record) error
 
 	// Ensure creates the Sandbox Pod if it does not already exist. Idempotent.
 	// rt must already have passed ValidateRuntime.
@@ -138,12 +143,50 @@ func (p *PodSandboxClient) WithGatewayResolver(resolve GatewayResolver) *PodSand
 	return p
 }
 
-// ValidateRuntime checks the Pod template and the trust bundle ConfigMap it mounts.
-func (p *PodSandboxClient) ValidateRuntime(ctx context.Context, rt *sprooziv1alpha1.AgentRuntime) error {
+// ValidateRuntime checks the Pod template, the managed rules when a managed
+// Pod will be built, and the trust bundle ConfigMap it mounts.
+func (p *PodSandboxClient) ValidateRuntime(ctx context.Context, rt *sprooziv1alpha1.AgentRuntime, binding *registry.Record) error {
+	if err := validateRuntimeTemplate(rt, binding); err != nil {
+		return err
+	}
+	return validateRuntimeTrustBundle(ctx, p.c, rt)
+}
+
+// validateRuntimeTemplate is the template part of ValidateRuntime, shared by
+// every SandboxClient here so that none can apply different rules.
+func validateRuntimeTemplate(rt *sprooziv1alpha1.AgentRuntime, binding *registry.Record) error {
+	if BuildsManagedPod(binding) {
+		return ValidateManagedTemplate(rt, binding.Harness)
+	}
 	if err := rt.Spec.ValidateRuntimeTemplate(); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidRuntime, err)
 	}
-	return validateRuntimeTrustBundle(ctx, p.c, rt)
+	return nil
+}
+
+// ValidateManagedTemplate is the template part of ValidateRuntime for a
+// managed Pod of the registered harness: the template rules, then
+// ValidateManagedRuntime. Errors wrap ErrInvalidRuntime. The remote
+// executor's placement applies it before it creates a run.
+func ValidateManagedTemplate(rt *sprooziv1alpha1.AgentRuntime, registered harness.NativeKind) error {
+	if err := rt.Spec.ValidateRuntimeTemplate(); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidRuntime, err)
+	}
+	if err := ValidateManagedRuntime(&rt.Spec, registered); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidRuntime, err)
+	}
+	return nil
+}
+
+// RuntimeInvalidMessage is the user-facing text for a runtime that err, from
+// ValidateRuntime or ValidateManagedRuntime, says cannot launch a sandbox: the
+// Ready message of a run failed with RuntimeInvalid, and the reason the remote
+// executor gives when it refuses such a start.
+func RuntimeInvalidMessage(rt *sprooziv1alpha1.AgentRuntime, err error) string {
+	if !errors.Is(err, ErrInvalidRuntime) {
+		err = fmt.Errorf("%w: %w", ErrInvalidRuntime, err)
+	}
+	return fmt.Sprintf("AgentRuntime %s: %v", rt.Name, err)
 }
 
 // Ensure creates the Sandbox Pod if it does not already exist. Idempotent.

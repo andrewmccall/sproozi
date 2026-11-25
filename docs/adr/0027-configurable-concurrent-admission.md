@@ -7,6 +7,36 @@ Corrected 2026-11-24: the runtime check at admission and the live reads under
 it moved here from ADR 0017, which was removed. Its replay-record decisions
 went with the event webhook (ADR 0043).
 
+Partly superseded 2026-11-25 by [ADR 0077](0077-runtime-rules-gate-the-building-of-a-pod.md):
+runtime rules gate the building of a Pod. The runtime is checked when a run is
+admitted and when its Pod is about to be built, not on every reconcile, so "a
+later edit that breaks the runtime of an active run fails that run" below no
+longer holds for a run that has its Pod; one still waiting for its Pod fails
+with `RuntimeInvalid` when the Pod would be built. A policy tightening still
+fails active runs.
+
+Corrected 2026-11-25: the managed rules were not part of `ValidateRuntime`.
+The managed shape (exactly the `agent` and `checkpoint` containers, a helper
+with no environment, mounts, devices, hooks or ports, and the reserved
+`checkpoint-tmp` volume) ran only when `EnsureManaged` built the Pod, and the
+harness rule (the runtime's `clientConfig.harness` names the registration's
+harness) only when the agent contract and the Pod were built. A managed run on
+a runtime that broke either was admitted and failed there on every reconcile
+until its deadline, or without end when it had none. They are now
+`ValidateManagedRuntime` (`ValidateManagedHarness`, then
+`ValidateManagedShape`). `ValidateRuntime` takes the run's session binding and
+applies them when `BuildsManagedPod` says a managed Pod may still be built, so
+not for a registration whose stop has completed, which ends its run without a
+Pod. This supersedes the statement below that "`Ensure` and `EnsureManaged` do
+not repeat the check": the controller checks the runtime again just before it
+builds the Pod (ADR 0077), and the agent contract and `BuildManagedPodSpec`
+apply their parts of the managed rules through the same functions, so they
+cannot disagree with it; an `ErrInvalidRuntime` from any of them fails the run
+with `RuntimeInvalid`. The remote executor's placement applies the template
+rules and the managed rules (`ValidateManagedTemplate`) before it creates a
+run, and its `Prepare` refuses a start that fails them with the admission's
+message as the reason (ADR 0067).
+
 ## Problem and constraints
 
 The controller admitted one active AgentRun per cluster. `handleQueued` listed

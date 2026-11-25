@@ -78,7 +78,8 @@ client certificate. Whatever context you use, the executor sees the
 The service and the executor upgrade together. A placement request that fails
 answers with one of these codes; status and messages never carry the
 executor's own error text. The one exception is a `refused` answer's
-`reason`, which names the AgentRun and its `Ready` condition. A session the
+`reason`, which names the AgentRun and its `Ready` condition, or the
+AgentRuntime and the rule it breaks. A session the
 executor owns also shows its owner, in its problem, the cause of an end only
 an administrator can clear, which names the agent namespace and a Pod label;
 that is the session's own owner, so it is shown.
@@ -86,12 +87,12 @@ that is the session's own owner, so it is shown.
 | Code | HTTP status | Meaning |
 | --- | --- | --- |
 | `invalid_request` | 400, 404, 413, 415 | The request is malformed or names the wrong placement. |
-| `denied` | 401, 403, 426 | The token or the Kubernetes user was refused. |
+| `denied` | 401, 403, 426 | The token or the Kubernetes user was refused, or the launch is not allowed: the template is not managed or its instructions differ from the executor's, the policy does not allow its capabilities or allowances, or its deadline is past a cap. An `activate` or `attach` is not denied for `RuntimeInvalid` because its AgentRuntime was edited since its Pod was built ([ADR 0077](../adr/0077-runtime-rules-gate-the-building-of-a-pod.md)), and an attached terminal is not cut for it. An edit that also breaks the policy's resource bounds (a limit removed or raised, a container added) still fails the run with `ResourceLimitExceeded`, and denies `activate` and `attach`. |
 | `conflict` | 409 | The request conflicts with what the executor holds for that execution. |
 | `expired` | 410 | The execution's deadline has passed. |
 | `unsupported` | 422 | The executor cannot take this launch, such as a profile it does not keep. |
 | `unavailable` | 503 | The executor could not answer. A stop is then unproven: the session becomes `unknown-stop` until `recover` or another `stop` proves it. |
-| `refused` | 409 | Only `prepare`: the executor can never prepare this launch, because what it would start from has ended, such as an AgentRun that failed, was deleted or lost its registration before its Pod. Its `reason` field says why, in at most 512 printable bytes. Repeating it never helps: the service ends the start, keeping the session's work, and `resume` continues it ([ADR 0067](../adr/0067-a-start-ends-when-its-run-has-ended.md)). A service older than this code reports it as unavailable. |
+| `refused` | 409 | Only `prepare`: the executor can never prepare this launch, because what it would start from has ended, such as an AgentRun that failed, was deleted or lost its registration before its Pod, or because, for a launch the executor has not registered yet, its AgentRuntime cannot launch a sandbox for it: it breaks a [container validation rule](agentruntime.md#container-validation-rules), names another harness than the executor's, or lacks the [managed shape](agentruntime.md#managed-native-sessions). The executor checks the runtime only after everything `denied` covers, so a denied caller never learns about it. Its `reason` field says why, in at most 512 printable bytes. Repeating it never helps: the service ends the start, keeping the session's work, and `resume` continues it ([ADR 0067](../adr/0067-a-start-ends-when-its-run-has-ended.md)). A service older than this code reports it as unavailable. |
 | `turn_pending` | 503 | A stop is still waiting for the agent's turn, about two minutes after it asked. Its `waiting` field says what for, in at most 160 printable bytes. The session stays `stopping`, as on this machine, and `stop`, `move` or `recover` again keeps waiting. |
 
 A code this Sproozi does not know counts as `unavailable`, so a stop is never

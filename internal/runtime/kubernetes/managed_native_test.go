@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -101,8 +102,12 @@ func TestManagedLaunchProjectsFreshKindSpecificPlaceholderAndHarness(t *testing.
 			}
 			rt.Spec.ClientConfig.SignIn = nil
 			rt.Spec.ClientConfig.Harness = "mismatched"
-			if err = addManagedNativeContract(t.Context(), kube, run, template, rt, &corev1.ConfigMap{Data: map[string]string{}}); err == nil {
-				t.Fatal("launch accepted client/registration mismatch")
+			err = addManagedNativeContract(t.Context(), kube, run, template, rt, &corev1.ConfigMap{Data: map[string]string{}})
+			// The contract refuses the mismatch with the one harness rule that
+			// admission applies, so the two cannot disagree.
+			if want := ValidateManagedHarness(&rt.Spec, kind); !errors.Is(err, ErrInvalidRuntime) || want == nil ||
+				err.Error() != ErrInvalidRuntime.Error()+": "+want.Error() {
+				t.Fatalf("launch with client/registration mismatch: err = %v, want %v", err, want)
 			}
 		})
 	}

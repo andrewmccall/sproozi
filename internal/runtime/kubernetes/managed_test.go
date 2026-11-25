@@ -1,6 +1,10 @@
 package kubernetes_test
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -12,6 +16,8 @@ import (
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func managedFixture() (*api.AgentRun, *api.AgentRuntime, *registry.Record) {
@@ -158,5 +164,141 @@ func TestManagedPodMountsItsSessionsNamedLogin(t *testing.T) {
 		}) {
 			t.Fatalf("login %q: no claim %s in %+v", login, want, pod.Spec.Volumes)
 		}
+	}
+}
+
+// Admission applies the managed rules exactly in the registration phases for
+// which BuildManagedPodSpec still builds a Pod.
+func TestBuildsManagedPodMatchesThePodBuilder(t *testing.T) {
+	if kubernetes.BuildsManagedPod(nil) {
+		t.Fatal("an ordinary run builds a managed Pod")
+	}
+	want := map[registry.Phase]bool{registry.Creating: false, registry.Bound: true, registry.Prepared: true,
+		registry.Active: true, registry.Stopping: true, registry.Stopped: false, registry.Cancelled: false}
+	for phase, builds := range want {
+		run, runtime, binding := managedFixture()
+		binding.Phase = phase
+		_, err := kubernetes.BuildManagedPodSpec(run, runtime, binding)
+		if got := kubernetes.BuildsManagedPod(binding); got != builds || (err == nil) != builds {
+			t.Errorf("phase %s: BuildsManagedPod = %v, BuildManagedPodSpec error = %v; want builds = %v", phase, got, err, builds)
+		}
+	}
+}
+
+type managedShapeViolation struct {
+	mutate func(*api.AgentRuntime)
+	want   string
+}
+
+// managedShapeViolations breaks each managed-shape rule once, with a template
+// that still passes the ordinary template check, and names the refusal.
+func managedShapeViolations() map[string]managedShapeViolation {
+	const (
+		count   = "managed runtime requires one native agent and one checkpoint helper"
+		missing = "managed runtime checkpoint helper is missing"
+		helper  = "checkpoint helper cannot receive credentials, mounts or workload hooks"
+		volume  = "checkpoint temporary volume is reserved"
+	)
+	containers := func(rt *api.AgentRuntime) []corev1.Container { return rt.Spec.PodTemplate.Spec.Containers }
+	return map[string]managedShapeViolation{
+		"extra container": {func(rt *api.AgentRuntime) {
+			extra := *containers(rt)[0].DeepCopy()
+			extra.Name = "other"
+			rt.Spec.PodTemplate.Spec.Containers = append(rt.Spec.PodTemplate.Spec.Containers, extra)
+		}, count},
+		"agent only": {func(rt *api.AgentRuntime) {
+			rt.Spec.PodTemplate.Spec.Containers = rt.Spec.PodTemplate.Spec.Containers[:1]
+		}, count},
+		"helper is a workload": {func(rt *api.AgentRuntime) {
+			rt.Spec.WorkloadContainers = append(rt.Spec.WorkloadContainers, kubernetes.CaptureContainer)
+		}, count},
+		"workload is not the agent": {func(rt *api.AgentRuntime) {
+			containers(rt)[0].Name = "worker"
+			rt.Spec.WorkloadContainers = []string{"worker"}
+		}, count},
+		"helper missing": {func(rt *api.AgentRuntime) { containers(rt)[1].Name = "helper" }, missing},
+		"helper env": {func(rt *api.AgentRuntime) {
+			containers(rt)[1].Env = []corev1.EnvVar{{Name: "SECRET", Value: "forbidden"}}
+		}, helper},
+		"helper mount": {func(rt *api.AgentRuntime) {
+			containers(rt)[1].VolumeMounts = []corev1.VolumeMount{{Name: "scratch", MountPath: "/scratch"}}
+		}, helper},
+		"helper device": {func(rt *api.AgentRuntime) {
+			containers(rt)[1].VolumeDevices = []corev1.VolumeDevice{{Name: "disk", DevicePath: "/dev/disk"}}
+		}, helper},
+		"helper hook": {func(rt *api.AgentRuntime) {
+			containers(rt)[1].Lifecycle = &corev1.Lifecycle{PreStop: &corev1.LifecycleHandler{Exec: &corev1.ExecAction{Command: []string{"true"}}}}
+		}, helper},
+		"helper port": {func(rt *api.AgentRuntime) {
+			containers(rt)[1].Ports = []corev1.ContainerPort{{ContainerPort: 8080}}
+		}, helper},
+		"reserved volume": {func(rt *api.AgentRuntime) {
+			size := resource.MustParse("1Mi")
+			rt.Spec.PodTemplate.Spec.Volumes = append(rt.Spec.PodTemplate.Spec.Volumes, corev1.Volume{Name: "checkpoint-tmp",
+				VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: &size}}})
+		}, volume},
+	}
+}
+
+// managedHarnessViolations break the harness rule: the runtime names another
+// harness than the registration, or none.
+func managedHarnessViolations() map[string]managedShapeViolation {
+	const want = `managed runtime harness %q does not match the session's harness "codex"`
+	return map[string]managedShapeViolation{
+		"another harness": {func(rt *api.AgentRuntime) { rt.Spec.ClientConfig.Harness = string(harness.NativeClaude) },
+			fmt.Sprintf(want, harness.NativeClaude)},
+		"no harness": {func(rt *api.AgentRuntime) { rt.Spec.ClientConfig.Harness = "" }, fmt.Sprintf(want, "")},
+	}
+}
+
+// Building a managed Pod and admitting a managed run refuse exactly what
+// ValidateManagedRuntime refuses, for the same reason: the rules have one
+// copy, so admission cannot pass a runtime that EnsureManaged then refuses. An
+// ordinary run's admission, and a stopped session's, do not apply them.
+func TestManagedRulesHaveOneSource(t *testing.T) {
+	run, runtime, binding := managedFixture()
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(testTrustConfigMap(t)).Build()
+	admitters := map[string]kubernetes.SandboxClient{"Pod": newSandboxClient(c), "fake": &kubernetes.FakeSandboxClient{}}
+	if err := kubernetes.ValidateManagedRuntime(&runtime.Spec, binding.Harness); err != nil {
+		t.Fatalf("fixture managed runtime refused: %v", err)
+	}
+	for client, admitter := range admitters {
+		if err := admitter.ValidateRuntime(context.Background(), runtime, binding); err != nil {
+			t.Fatalf("%s admission refused the fixture managed runtime: %v", client, err)
+		}
+	}
+	violations := managedShapeViolations()
+	maps.Copy(violations, managedHarnessViolations())
+	for name, violation := range violations {
+		t.Run(name, func(t *testing.T) {
+			run, runtime, binding := run.DeepCopy(), runtime.DeepCopy(), *binding
+			violation.mutate(runtime)
+			if err := runtime.Spec.ValidateRuntimeTemplate(); err != nil {
+				t.Fatalf("violation also breaks the ordinary template check: %v", err)
+			}
+			rulesErr := kubernetes.ValidateManagedRuntime(&runtime.Spec, binding.Harness)
+			_, buildErr := kubernetes.BuildManagedPodSpec(run, runtime, &binding)
+			// Building refuses permanently (ErrInvalidRuntime), so a runtime
+			// edited after admission ends the run rather than retrying.
+			wrapped := kubernetes.ErrInvalidRuntime.Error() + ": " + violation.want
+			if rulesErr == nil || rulesErr.Error() != violation.want ||
+				!errors.Is(buildErr, kubernetes.ErrInvalidRuntime) || buildErr.Error() != wrapped {
+				t.Fatalf("ValidateManagedRuntime = %v, BuildManagedPodSpec = %v, want %q and %q", rulesErr, buildErr, violation.want, wrapped)
+			}
+			stopped := binding
+			stopped.Phase = registry.Stopped
+			for client, admitter := range admitters {
+				err := admitter.ValidateRuntime(context.Background(), runtime, &binding)
+				if !errors.Is(err, kubernetes.ErrInvalidRuntime) || err.Error() != kubernetes.ErrInvalidRuntime.Error()+": "+violation.want {
+					t.Fatalf("%s managed admission = %v, want ErrInvalidRuntime for %q", client, err, violation.want)
+				}
+				if err := admitter.ValidateRuntime(context.Background(), runtime, nil); err != nil {
+					t.Fatalf("%s ordinary admission applied the managed rules: %v", client, err)
+				}
+				if err := admitter.ValidateRuntime(context.Background(), runtime, &stopped); err != nil {
+					t.Fatalf("%s stopped session's admission applied the managed rules: %v", client, err)
+				}
+			}
+		})
 	}
 }
