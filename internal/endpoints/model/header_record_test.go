@@ -24,6 +24,7 @@ const (
 	jsonMediaType       = "application/json"
 	contentTypeHeader   = "Content-Type"
 	chatCompletionsCall = "chat completions"
+	nonSuccessCall      = "non-2xx"
 	copilotChatPath     = "/chat/completions"
 )
 
@@ -77,7 +78,7 @@ func headerCalls() map[string][]headerCall {
 		{name: chatCompletionsCall, method: http.MethodPost, path: chatPath, body: chatBody, status: http.StatusOK, answer: chatSuccess},
 		{name: chatCompletionsCall + ", gateway-held key", method: http.MethodPost, path: chatPath, body: chatBody,
 			status: http.StatusOK, answer: chatSuccess, apiKey: true},
-		{name: "non-2xx", method: http.MethodPost, path: chatPath, body: chatBody,
+		{name: nonSuccessCall, method: http.MethodPost, path: chatPath, body: chatBody,
 			status: http.StatusTooManyRequests, answer: `{"error":{"message":"slow down"}}`},
 		{name: "model discovery", method: http.MethodGet, path: testModelsPath, status: http.StatusOK, answer: `{"data":[]}`},
 	}
@@ -85,7 +86,7 @@ func headerCalls() map[string][]headerCall {
 		{name: "messages", method: http.MethodPost, path: testMessagesPath, body: messagesBody, status: http.StatusOK, answer: anthropicSuccess},
 		{name: "messages, gateway-held key", method: http.MethodPost, path: testMessagesPath, body: messagesBody,
 			status: http.StatusOK, answer: anthropicSuccess, apiKey: true},
-		{name: "non-2xx", method: http.MethodPost, path: testMessagesPath, body: messagesBody,
+		{name: nonSuccessCall, method: http.MethodPost, path: testMessagesPath, body: messagesBody,
 			status: http.StatusTooManyRequests, answer: `{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`},
 	}
 	copilot := []headerCall{
