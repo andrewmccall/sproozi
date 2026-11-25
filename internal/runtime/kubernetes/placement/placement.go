@@ -234,37 +234,67 @@ func (p *Placement) liveProfile(ctx context.Context, l session.Launch) (map[api.
 	return p.liveProfileInput(ctx, l, false)
 }
 
+// liveProfileInput checks l against the live template, policy and runtime.
+// A runtime that cannot launch a sandbox is denied, as any other failed
+// check is; only Prepare says why (prepareProfile).
 func (p *Placement) liveProfileInput(ctx context.Context, l session.Launch, initial bool) (map[api.CapabilityKind]api.EndpointBudget, error) {
+	ceilings, runtimeInvalid, err := p.checkLaunch(ctx, l, initial)
+	if err == nil && runtimeInvalid != "" {
+		return nil, &profile.Rejection{Code: profile.CodeDenied}
+	}
+	return ceilings, err
+}
+
+// prepareProfile is liveProfileInput for Prepare, which refuses a launch
+// whose runtime cannot launch a sandbox with the reason a run's admission
+// would give (ADR 0067): until an administrator fixes the runtime it can
+// never start, so its start ends.
+func (p *Placement) prepareProfile(ctx context.Context, l session.Launch, initial bool) (map[api.CapabilityKind]api.EndpointBudget, error) {
+	ceilings, runtimeInvalid, err := p.checkLaunch(ctx, l, initial)
+	if err == nil && runtimeInvalid != "" {
+		return nil, refuse("%s", runtimeInvalid)
+	}
+	return ceilings, err
+}
+
+// checkLaunch makes liveProfileInput's checks. runtimeInvalid is the reason
+// the runtime cannot launch a sandbox. It is reported only after every other
+// check has passed, so a caller the template, policy or deadline cap denies
+// gets the bare denial and learns nothing about the runtime.
+func (p *Placement) checkLaunch(ctx context.Context, l session.Launch, initial bool) (
+	ceilings map[api.CapabilityKind]api.EndpointBudget, runtimeInvalid string, err error,
+) {
 	if err := p.validateInput(l, initial); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if deadline.At(l.Deadline).Passed(time.Now()) {
-		return nil, &profile.Rejection{Code: profile.CodeExpired}
+		return nil, "", &profile.Rejection{Code: profile.CodeExpired}
 	}
 	var template api.AgentTemplate
 	var policy api.AgentPolicy
 	var runtime api.AgentRuntime
 	if err := p.config.Kube.Get(ctx, client.ObjectKey{Namespace: p.config.Namespace, Name: p.config.TemplateName}, &template); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if template.Annotations[registry.ManagedTemplateAnnotation] != "true" || registry.InstructionsDigest(template.Spec.Instructions) != l.InstructionDigest {
-		return nil, &profile.Rejection{Code: profile.CodeDenied}
+		return nil, "", &profile.Rejection{Code: profile.CodeDenied}
 	}
 	if err := p.config.Kube.Get(ctx, client.ObjectKey{Namespace: p.config.Namespace, Name: template.Spec.PolicyRef.Name}, &policy); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if err := p.config.Kube.Get(ctx, client.ObjectKey{Namespace: p.config.Namespace, Name: template.Spec.RuntimeRef.Name}, &runtime); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	if runtimekube.ValidateManagedRuntime(&runtime.Spec, p.config.Harness) != nil || runtime.Spec.ValidateRuntimeTemplate() != nil {
-		return nil, &profile.Rejection{Code: profile.CodeDenied}
+	if err := runtimekube.ValidateManagedTemplate(&runtime, p.config.Harness); err != nil {
+		// Reported last: see checkLaunch.
+		runtimeInvalid = runtimekube.RuntimeInvalidMessage(&runtime, err)
 	}
 	capabilities := make([]api.CapabilityKind, 0, len(l.Allowances))
 	for name := range l.Allowances {
 		capabilities = append(capabilities, api.CapabilityKind(name))
 	}
 	if policyengine.Evaluate(policy.Spec, template.Spec, api.AgentRunSpec{Capabilities: capabilities}, runtime.Spec) != nil {
-		return nil, &profile.Rejection{Code: profile.CodeDenied}
+		return nil, "", &profile.Rejection{Code: profile.CodeDenied}
 	}
 	// The executor's maxDuration and the policy's maxExecutionDuration each
 	// cap the deadline when set; under either cap a launch must have one.
@@ -274,9 +304,15 @@ func (p *Placement) liveProfileInput(ctx context.Context, l session.Launch, init
 		duration = limit
 	}
 	if !deadline.At(l.Deadline).Fits(time.Now(), duration) {
-		return nil, &profile.Rejection{Code: profile.CodeDenied}
+		return nil, "", &profile.Rejection{Code: profile.CodeDenied}
 	}
-	return p.ceilings(l, policy.Spec)
+	if ceilings, err = p.ceilings(l, policy.Spec); err != nil {
+		return nil, "", err
+	}
+	if runtimeInvalid != "" {
+		return nil, runtimeInvalid, nil
+	}
+	return ceilings, "", nil
 }
 func limitFits(want, cap session.Limit) bool {
 	return !cap.Bounded || want.Bounded && want.Value <= cap.Value
@@ -340,7 +376,7 @@ func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) 
 	if l.ThreadID == "" && l.CheckpointDigest == "" {
 		return p.prepareWorkspace(ctx, l, data)
 	}
-	ceilings, err := p.liveProfile(ctx, l)
+	ceilings, err := p.prepareProfile(ctx, l, false)
 	if err != nil {
 		return session.Incarnation{}, err
 	}
@@ -394,7 +430,7 @@ func (p *Placement) prepareWorkspace(ctx context.Context, l session.Launch, data
 	} else if loadErr != nil && !os.IsNotExist(loadErr) {
 		return session.Incarnation{}, loadErr
 	}
-	ceilings, err := p.liveProfileInput(ctx, l, true)
+	ceilings, err := p.prepareProfile(ctx, l, true)
 	if err != nil {
 		return session.Incarnation{}, err
 	}

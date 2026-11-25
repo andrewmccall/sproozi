@@ -1521,26 +1521,100 @@ func TestEnsureRunNamesTheInvalidField(t *testing.T) {
 	}
 }
 
-// A placement launches only managed runs, so a runtime without the managed
-// shape is denied before a registration or AgentRun is created, as a runtime
-// failing the ordinary template check already is.
-func TestWrongManagedShapeDeniesLaunch(t *testing.T) {
+// editFixture applies edit to the stored fixture object named name.
+func editFixture[T client.Object](t *testing.T, kube client.Client, name string, object T, edit func(T)) {
+	t.Helper()
+	if err := kube.Get(t.Context(), client.ObjectKey{Namespace: fixtureNamespace, Name: name}, object); err != nil {
+		t.Fatal(err)
+	}
+	edit(object)
+	if err := kube.Update(t.Context(), object); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// launchRuntimeFaults break the runtime a launch would run on, each with the
+// reason the run's admission would give.
+var launchRuntimeFaults = map[string]struct {
+	edit   func(*api.AgentRuntime)
+	reason string
+}{
+	"managed shape": {func(rt *api.AgentRuntime) {
+		rt.Spec.PodTemplate.Spec.Containers[1].Env = []corev1.EnvVar{{Name: "LEAK", Value: "x"}}
+	}, "AgentRuntime native: cannot launch a sandbox: checkpoint helper cannot receive credentials, mounts or workload hooks"},
+	"harness": {func(rt *api.AgentRuntime) { rt.Spec.ClientConfig.Harness = string(harness.NativeClaude) },
+		`AgentRuntime native: cannot launch a sandbox: managed runtime harness "claude-code" does not match the session's harness "codex"`},
+	"template rule": {func(rt *api.AgentRuntime) { rt.Spec.PodTemplate.Spec.Containers[0].Image = "example/native:latest" },
+		`AgentRuntime native: cannot launch a sandbox: container "agent" image must be digest pinned`},
+}
+
+// A launch whose runtime cannot launch a sandbox is refused by Prepare with
+// the reason a run's admission would give (ADR 0067), before a registration
+// or AgentRun exists, and its preparation can then be ended. Activate and
+// Attach, which share the check, still answer denied.
+func TestPrepareRefusesARuntimeThatCannotLaunch(t *testing.T) {
 	t.Parallel()
-	p, kube, _, l, _ := setup(t)
-	if _, err := p.liveProfileInput(t.Context(), l, false); err != nil {
-		t.Fatalf("managed runtime refused: %v", err)
+	for name, fault := range launchRuntimeFaults {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			p, kube, _, l, data := setup(t)
+			editFixture(t, kube, fixtureRuntimeName, &api.AgentRuntime{}, fault.edit)
+			_, err := p.Prepare(t.Context(), l, data)
+			var refused *session.StartRefused
+			if !errors.As(err, &refused) || refused.Reason != fault.reason {
+				t.Fatalf("Prepare error = %v, want a start refusal with reason %q", err, fault.reason)
+			}
+			if kube.runCreates != 0 {
+				t.Fatalf("refused launch created %d AgentRuns", kube.runCreates)
+			}
+			var cm corev1.ConfigMap
+			if err := kube.Get(t.Context(), client.ObjectKey{Namespace: fixtureNamespace, Name: registry.NameForRun(runName(l))}, &cm); !apierrors.IsNotFound(err) {
+				t.Fatalf("refused launch left a registration: %v", err)
+			}
+			if err := p.AbortPreparation(t.Context(), l); err != nil {
+				t.Fatalf("AbortPreparation after the refusal: %v", err)
+			}
+			var rejection *profile.Rejection
+			if _, err := p.liveProfileInput(t.Context(), l, false); !errors.As(err, &rejection) || rejection.Code != profile.CodeDenied {
+				t.Fatalf("activation check: err = %v, want denied", err)
+			}
+		})
 	}
-	var nativeRuntime api.AgentRuntime
-	if err := kube.Get(t.Context(), client.ObjectKey{Namespace: fixtureNamespace, Name: fixtureRuntimeName}, &nativeRuntime); err != nil {
-		t.Fatal(err)
+}
+
+// Authorization is decided before a runtime's rules are reported: a launch
+// the policy or the deadline cap denies gets the bare denial even when its
+// runtime is also broken, so a denied caller learns nothing about it.
+func TestPrepareDeniesBeforeReportingTheRuntime(t *testing.T) {
+	t.Parallel()
+	denials := map[string]func(*testing.T, *admissionClient, *session.Launch){
+		"policy": func(t *testing.T, kube *admissionClient, _ *session.Launch) {
+			editFixture(t, kube, fixturePolicy, &api.AgentPolicy{}, func(policy *api.AgentPolicy) {
+				policy.Spec.AllowedCapabilities = []api.CapabilityKind{api.CapabilityKubernetesRead}
+			})
+		},
+		"deadline cap": func(_ *testing.T, _ *admissionClient, l *session.Launch) {
+			l.Deadline = time.Now().Add(2 * time.Hour).UTC()
+		},
+		"instructions": func(t *testing.T, kube *admissionClient, _ *session.Launch) {
+			editFixture(t, kube, fixtureTemplate, &api.AgentTemplate{}, func(template *api.AgentTemplate) {
+				template.Spec.Instructions = "Other instructions"
+			})
+		},
 	}
-	nativeRuntime.Spec.PodTemplate.Spec.Containers[1].Env = []corev1.EnvVar{{Name: "LEAK", Value: "x"}}
-	if err := kube.Update(t.Context(), &nativeRuntime); err != nil {
-		t.Fatal(err)
-	}
-	var rejection *profile.Rejection
-	if _, err := p.liveProfileInput(t.Context(), l, false); !errors.As(err, &rejection) || rejection.Code != profile.CodeDenied {
-		t.Fatalf("wrong managed shape: err = %v, want denied", err)
+	for name, deny := range denials {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			p, kube, _, l, data := setup(t)
+			editFixture(t, kube, fixtureRuntimeName, &api.AgentRuntime{}, launchRuntimeFaults["managed shape"].edit)
+			deny(t, kube, &l)
+			_, err := p.Prepare(t.Context(), l, data)
+			var rejection *profile.Rejection
+			var refused *session.StartRefused
+			if errors.As(err, &refused) || !errors.As(err, &rejection) || rejection.Code != profile.CodeDenied {
+				t.Fatalf("Prepare error = %v, want the bare denial", err)
+			}
+		})
 	}
 }
 

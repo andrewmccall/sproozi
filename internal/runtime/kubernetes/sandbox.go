@@ -155,13 +155,25 @@ func (p *PodSandboxClient) ValidateRuntime(ctx context.Context, rt *sprooziv1alp
 // validateRuntimeTemplate is the template part of ValidateRuntime, shared by
 // every SandboxClient here so that none can apply different rules.
 func validateRuntimeTemplate(rt *sprooziv1alpha1.AgentRuntime, binding *registry.Record) error {
+	if BuildsManagedPod(binding) {
+		return ValidateManagedTemplate(rt, binding.Harness)
+	}
 	if err := rt.Spec.ValidateRuntimeTemplate(); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidRuntime, err)
 	}
-	if BuildsManagedPod(binding) {
-		if err := ValidateManagedRuntime(&rt.Spec, binding.Harness); err != nil {
-			return fmt.Errorf("%w: %w", ErrInvalidRuntime, err)
-		}
+	return nil
+}
+
+// ValidateManagedTemplate is the template part of ValidateRuntime for a
+// managed Pod of the registered harness: the template rules, then
+// ValidateManagedRuntime. Errors wrap ErrInvalidRuntime. The remote
+// executor's placement applies it before it creates a run.
+func ValidateManagedTemplate(rt *sprooziv1alpha1.AgentRuntime, registered harness.NativeKind) error {
+	if err := rt.Spec.ValidateRuntimeTemplate(); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidRuntime, err)
+	}
+	if err := ValidateManagedRuntime(&rt.Spec, registered); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidRuntime, err)
 	}
 	return nil
 }
