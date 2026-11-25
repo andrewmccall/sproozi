@@ -72,15 +72,11 @@ func (s *Service) executionProjectApproval(r session.Record) error {
 	}
 	for name, want := range r.Ceiling {
 		ceiling, ok := ceilings[name]
-		if !ok || !projectLimitFits(want.Units, ceiling.Units) || !projectLimitFits(want.CostMicros, ceiling.CostMicros) {
+		if !ok || !want.Units.Fits(ceiling.Units) || !want.CostMicros.Fits(ceiling.CostMicros) {
 			return fmt.Errorf("home: retained execution capability %q exceeds current Project approval; cancel it before a fresh resume", name)
 		}
 	}
 	return nil
-}
-
-func projectLimitFits(want, ceiling session.Limit) bool {
-	return !ceiling.Bounded || want.Bounded && want.Value <= ceiling.Value
 }
 
 // A retained stop or cancellation only fences/accounts; it needs no new grant.

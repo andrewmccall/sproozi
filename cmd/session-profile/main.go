@@ -147,11 +147,21 @@ func validateConfig(c serverConfig) error {
 	if len(c.Allowances) == 0 || len(c.Allowances) > 32 {
 		return invalid("allowances", "must hold between 1 and 32 capabilities")
 	}
+	// A bound of 0 is an exhausted allowance, never a configured one
+	// (ADR 0051): leaving the entry out is what forbids a capability.
+	zeroBound := "a bound must be positive, and leaving the entry out forbids its capability"
 	for name, a := range c.Allowances {
-		if !a.Units.Bounded || a.Units.Value <= 0 {
+		if a.Units.Exhausted() {
+			return invalid("allowances", fmt.Sprintf("entry %q has units bounded at 0; %s", name, zeroBound))
+		}
+		if !a.Units.Bounded || !a.Units.Valid() {
 			return invalid("allowances", fmt.Sprintf("entry %q needs bounded positive units", name))
 		}
-		if a.CostMicros.Bounded && a.CostMicros.Value <= 0 || !a.CostMicros.Bounded && a.CostMicros.Value != 0 {
+		if a.CostMicros.Exhausted() {
+			return invalid("allowances", fmt.Sprintf("entry %q has costMicros bounded at 0; a bound must be positive; "+
+				"for no cost cap write it unbounded with value 0, and to forbid the capability leave the entry out", name))
+		}
+		if !a.CostMicros.Valid() {
 			return invalid("allowances", fmt.Sprintf("entry %q needs costMicros bounded and positive, "+
 				"or unbounded with value 0", name))
 		}

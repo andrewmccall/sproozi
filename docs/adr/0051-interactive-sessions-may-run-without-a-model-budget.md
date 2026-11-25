@@ -28,6 +28,17 @@ unit limit. Every other capability, such as `mcp.NAME` or a native gateway,
 still needs a positive unit bound, because its units count calls the
 administrator approved.
 
+Corrected 2026-11-25: a configured limit is a positive bound or none. In a
+journal entry and a wire launch, which carry the allowance a session has left,
+a limit bounded at 0 records an allowance that has been used up
+(`session.Limit.Exhausted`); a launch holding one is refused, and a receipt is
+checked against its allowance by `session.Limit.Fits` through
+`session.CheckUsage`. The configuration checks (`AllowanceProblems` in
+`internal/session/home/settings.go` and the allowance check of
+`cmd/session-profile`) refuse a configured bound of 0 and say what to write
+instead: a positive bound, `"bounded": false` for no cost cap, or leave the
+allowance out to forbid the capability.
+
 `sproozi init` writes `"model.inference": {}` with neither limit. An existing
 configuration still holding the earlier default of exactly 200,000 bounded
 units with no cost cap becomes no limit when setup runs again; any other value

@@ -1,0 +1,77 @@
+validateLaunch units={Bounded:true Value:0} -> accepted
+NewHandler units={Bounded:true Value:0} -> accepted
+validateLaunch costMicros={Bounded:true Value:0} -> accepted
+NewHandler costMicros={Bounded:true Value:0} -> accepted
+validateLaunch units={Bounded:true Value:1} -> accepted
+NewHandler units={Bounded:true Value:1} -> accepted
+validateLaunch costMicros={Bounded:true Value:1} -> accepted
+NewHandler costMicros={Bounded:true Value:1} -> accepted
+validateLaunch units={Bounded:true Value:5} -> accepted
+NewHandler units={Bounded:true Value:5} -> accepted
+validateLaunch costMicros={Bounded:true Value:5} -> accepted
+NewHandler costMicros={Bounded:true Value:5} -> accepted
+validateLaunch units={Bounded:true Value:-1} -> refused: profile: invalid allowance
+NewHandler units={Bounded:true Value:-1} -> refused: profile: invalid fixed allowance
+validateLaunch costMicros={Bounded:true Value:-1} -> refused: profile: invalid allowance
+NewHandler costMicros={Bounded:true Value:-1} -> refused: profile: invalid fixed allowance
+validateLaunch units={Bounded:true Value:9223372036854775807} -> accepted
+NewHandler units={Bounded:true Value:9223372036854775807} -> accepted
+validateLaunch costMicros={Bounded:true Value:9223372036854775807} -> accepted
+NewHandler costMicros={Bounded:true Value:9223372036854775807} -> accepted
+validateLaunch units={Bounded:false Value:0} -> accepted
+NewHandler units={Bounded:false Value:0} -> accepted
+validateLaunch costMicros={Bounded:false Value:0} -> accepted
+NewHandler costMicros={Bounded:false Value:0} -> accepted
+validateLaunch units={Bounded:false Value:1} -> refused: profile: invalid allowance
+NewHandler units={Bounded:false Value:1} -> refused: profile: invalid fixed allowance
+validateLaunch costMicros={Bounded:false Value:1} -> refused: profile: invalid allowance
+NewHandler costMicros={Bounded:false Value:1} -> refused: profile: invalid fixed allowance
+validateLaunch units={Bounded:false Value:-1} -> refused: profile: invalid allowance
+NewHandler units={Bounded:false Value:-1} -> refused: profile: invalid fixed allowance
+validateLaunch costMicros={Bounded:false Value:-1} -> refused: profile: invalid allowance
+NewHandler costMicros={Bounded:false Value:-1} -> refused: profile: invalid fixed allowance
+Limit.Fits want={Bounded:true Value:0} ceiling={Bounded:true Value:0} -> true
+validateAdmission units want={Bounded:true Value:0} ceiling={Bounded:true Value:0} -> rejected: denied
+validateAdmission costMicros want={Bounded:true Value:0} ceiling={Bounded:true Value:0} -> rejected: denied
+Limit.Fits want={Bounded:true Value:1} ceiling={Bounded:true Value:0} -> false
+validateAdmission units want={Bounded:true Value:1} ceiling={Bounded:true Value:0} -> rejected: denied
+validateAdmission costMicros want={Bounded:true Value:1} ceiling={Bounded:true Value:0} -> rejected: denied
+Limit.Fits want={Bounded:true Value:5} ceiling={Bounded:true Value:0} -> false
+validateAdmission units want={Bounded:true Value:5} ceiling={Bounded:true Value:0} -> rejected: denied
+validateAdmission costMicros want={Bounded:true Value:5} ceiling={Bounded:true Value:0} -> rejected: denied
+Limit.Fits want={Bounded:true Value:6} ceiling={Bounded:true Value:0} -> false
+validateAdmission units want={Bounded:true Value:6} ceiling={Bounded:true Value:0} -> rejected: denied
+validateAdmission costMicros want={Bounded:true Value:6} ceiling={Bounded:true Value:0} -> rejected: denied
+Limit.Fits want={Bounded:false Value:0} ceiling={Bounded:true Value:0} -> false
+validateAdmission units want={Bounded:false Value:0} ceiling={Bounded:true Value:0} -> rejected: denied
+validateAdmission costMicros want={Bounded:false Value:0} ceiling={Bounded:true Value:0} -> rejected: denied
+Limit.Fits want={Bounded:true Value:0} ceiling={Bounded:true Value:5} -> true
+validateAdmission units want={Bounded:true Value:0} ceiling={Bounded:true Value:5} -> rejected: denied
+validateAdmission costMicros want={Bounded:true Value:0} ceiling={Bounded:true Value:5} -> rejected: denied
+Limit.Fits want={Bounded:true Value:1} ceiling={Bounded:true Value:5} -> true
+validateAdmission units want={Bounded:true Value:1} ceiling={Bounded:true Value:5} -> accepted
+validateAdmission costMicros want={Bounded:true Value:1} ceiling={Bounded:true Value:5} -> accepted
+Limit.Fits want={Bounded:true Value:5} ceiling={Bounded:true Value:5} -> true
+validateAdmission units want={Bounded:true Value:5} ceiling={Bounded:true Value:5} -> accepted
+validateAdmission costMicros want={Bounded:true Value:5} ceiling={Bounded:true Value:5} -> accepted
+Limit.Fits want={Bounded:true Value:6} ceiling={Bounded:true Value:5} -> false
+validateAdmission units want={Bounded:true Value:6} ceiling={Bounded:true Value:5} -> rejected: denied
+validateAdmission costMicros want={Bounded:true Value:6} ceiling={Bounded:true Value:5} -> rejected: denied
+Limit.Fits want={Bounded:false Value:0} ceiling={Bounded:true Value:5} -> false
+validateAdmission units want={Bounded:false Value:0} ceiling={Bounded:true Value:5} -> rejected: denied
+validateAdmission costMicros want={Bounded:false Value:0} ceiling={Bounded:true Value:5} -> rejected: denied
+Limit.Fits want={Bounded:true Value:0} ceiling={Bounded:false Value:0} -> true
+validateAdmission units want={Bounded:true Value:0} ceiling={Bounded:false Value:0} -> rejected: denied
+validateAdmission costMicros want={Bounded:true Value:0} ceiling={Bounded:false Value:0} -> rejected: denied
+Limit.Fits want={Bounded:true Value:1} ceiling={Bounded:false Value:0} -> true
+validateAdmission units want={Bounded:true Value:1} ceiling={Bounded:false Value:0} -> accepted
+validateAdmission costMicros want={Bounded:true Value:1} ceiling={Bounded:false Value:0} -> accepted
+Limit.Fits want={Bounded:true Value:5} ceiling={Bounded:false Value:0} -> true
+validateAdmission units want={Bounded:true Value:5} ceiling={Bounded:false Value:0} -> accepted
+validateAdmission costMicros want={Bounded:true Value:5} ceiling={Bounded:false Value:0} -> accepted
+Limit.Fits want={Bounded:true Value:6} ceiling={Bounded:false Value:0} -> true
+validateAdmission units want={Bounded:true Value:6} ceiling={Bounded:false Value:0} -> accepted
+validateAdmission costMicros want={Bounded:true Value:6} ceiling={Bounded:false Value:0} -> accepted
+Limit.Fits want={Bounded:false Value:0} ceiling={Bounded:false Value:0} -> true
+validateAdmission units want={Bounded:false Value:0} ceiling={Bounded:false Value:0} -> accepted
+validateAdmission costMicros want={Bounded:false Value:0} ceiling={Bounded:false Value:0} -> accepted

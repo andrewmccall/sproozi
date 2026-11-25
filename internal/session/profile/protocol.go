@@ -363,13 +363,14 @@ func validateLaunch(l session.Launch) error {
 		return errors.New("profile: harness arguments are not supported on remote placements")
 	}
 	for capability, a := range l.Allowances {
-		if !validName(capability) || !validLimit(a.Units) || !validLimit(a.CostMicros) {
+		// A wire launch carries remaining allowances, so a limit is valid
+		// or exhausted (ADR 0051); admission then refuses an exhausted one.
+		if !validName(capability) || !a.Units.Valid() && !a.Units.Exhausted() || !a.CostMicros.Valid() && !a.CostMicros.Exhausted() {
 			return errors.New("profile: invalid allowance")
 		}
 	}
 	return nil
 }
-func validLimit(l session.Limit) bool { return l.Value >= 0 && (l.Bounded || l.Value == 0) }
 func incarnationValid(i session.Incarnation) bool {
 	return validName(i.ExecutionID) && validName(i.ResourceUID)
 }
@@ -379,9 +380,6 @@ func sameLaunch(a, b session.Launch) bool {
 	x, errA := json.Marshal(a)
 	y, errB := json.Marshal(b)
 	return errA == nil && errB == nil && bytes.Equal(x, y)
-}
-func limitFits(want, ceiling session.Limit) bool {
-	return !ceiling.Bounded || want.Bounded && want.Value <= ceiling.Value
 }
 func ensureAlive(at time.Time) error {
 	if deadline.At(at).Passed(time.Now()) {

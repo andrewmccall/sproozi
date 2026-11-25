@@ -32,3 +32,16 @@ func SaveRetained(o *Owner, id, phase string, receipt bool) error {
 	}
 	return o.save(r)
 }
+
+// SaveRevoked saves the retained grant id as revoked with the given receipt,
+// through the owner's validating save.
+func SaveRevoked(o *Owner, id string, receipt map[string]budget.TrustedUsage) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	r, err := o.load(id)
+	if err != nil {
+		return err
+	}
+	r.Phase, r.Receipt = revoked, receipt
+	return o.save(r)
+}

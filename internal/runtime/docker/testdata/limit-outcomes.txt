@@ -1,0 +1,16 @@
+validateLaunch units={Bounded:true Value:0} -> refused: invalid or exhausted Docker allowance
+validateLaunch costMicros={Bounded:true Value:0} -> refused: invalid or exhausted Docker allowance
+validateLaunch units={Bounded:true Value:1} -> accepted
+validateLaunch costMicros={Bounded:true Value:1} -> accepted
+validateLaunch units={Bounded:true Value:5} -> accepted
+validateLaunch costMicros={Bounded:true Value:5} -> accepted
+validateLaunch units={Bounded:true Value:-1} -> refused: invalid or exhausted Docker allowance
+validateLaunch costMicros={Bounded:true Value:-1} -> refused: invalid or exhausted Docker allowance
+validateLaunch units={Bounded:true Value:9223372036854775807} -> accepted
+validateLaunch costMicros={Bounded:true Value:9223372036854775807} -> accepted
+validateLaunch units={Bounded:false Value:0} -> accepted
+validateLaunch costMicros={Bounded:false Value:0} -> accepted
+validateLaunch units={Bounded:false Value:1} -> refused: invalid or exhausted Docker allowance
+validateLaunch costMicros={Bounded:false Value:1} -> refused: invalid or exhausted Docker allowance
+validateLaunch units={Bounded:false Value:-1} -> refused: invalid or exhausted Docker allowance
+validateLaunch costMicros={Bounded:false Value:-1} -> refused: invalid or exhausted Docker allowance

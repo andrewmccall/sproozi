@@ -37,13 +37,14 @@ func validDigest(s string) bool {
 func validIncarnation(i Incarnation) bool {
 	return validName(i.ExecutionID) && validName(i.ResourceUID)
 }
-func validLimit(l Limit) bool { return l.Value >= 0 && (l.Bounded || l.Value == 0) }
 func validateAllowance(a map[string]Allowance) error {
 	if len(a) == 0 || len(a) > 32 {
 		return errors.New("session: capability allowances required")
 	}
 	for name, limit := range a {
-		if !validName(name) || !validLimit(limit.Units) || !validLimit(limit.CostMicros) {
+		// A journal entry carries remaining allowances, so a limit is valid
+		// or exhausted (ADR 0051).
+		if !validName(name) || !limit.Units.Valid() && !limit.Units.Exhausted() || !limit.CostMicros.Valid() && !limit.CostMicros.Exhausted() {
 			return errors.New("session: invalid capability allowance")
 		}
 	}
@@ -120,10 +121,10 @@ func CheckUsage(allowances map[string]Allowance, usage map[string]budget.Trusted
 		if !ok || used.Units < 0 || used.CostMicros < 0 {
 			return errors.New("session: invalid trusted usage")
 		}
-		if ceiling.Units.Bounded && used.Units > ceiling.Units.Value {
+		if !(Limit{Bounded: true, Value: used.Units}).Fits(ceiling.Units) {
 			return errors.New("session: receipt exceeds units allocation")
 		}
-		if ceiling.CostMicros.Bounded && used.CostMicros > ceiling.CostMicros.Value {
+		if !(Limit{Bounded: true, Value: used.CostMicros}).Fits(ceiling.CostMicros) {
 			return errors.New("session: receipt exceeds cost allocation")
 		}
 	}
@@ -328,7 +329,7 @@ func validateOperations(r Record) error {
 
 func spendable(a map[string]Allowance) error {
 	for _, v := range a {
-		if v.Units.Bounded && v.Units.Value == 0 || v.CostMicros.Bounded && v.CostMicros.Value == 0 {
+		if v.Units.Exhausted() || v.CostMicros.Exhausted() {
 			return errors.New("session: allowance exhausted")
 		}
 	}

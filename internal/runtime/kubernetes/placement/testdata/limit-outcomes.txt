@@ -1,0 +1,61 @@
+validateConfig units={Bounded:true Value:0} -> refused: placement: finite positive units and explicit cost limit required
+validateConfig costMicros={Bounded:true Value:0} -> refused: placement: finite positive units and explicit cost limit required
+validateConfig units={Bounded:true Value:1} -> accepted
+validateConfig costMicros={Bounded:true Value:1} -> accepted
+validateConfig units={Bounded:true Value:5} -> accepted
+validateConfig costMicros={Bounded:true Value:5} -> accepted
+validateConfig units={Bounded:true Value:-1} -> refused: placement: finite positive units and explicit cost limit required
+validateConfig costMicros={Bounded:true Value:-1} -> refused: placement: finite positive units and explicit cost limit required
+validateConfig units={Bounded:true Value:9223372036854775807} -> accepted
+validateConfig costMicros={Bounded:true Value:9223372036854775807} -> accepted
+validateConfig units={Bounded:false Value:0} -> refused: placement: finite positive units and explicit cost limit required
+validateConfig costMicros={Bounded:false Value:0} -> accepted
+validateConfig units={Bounded:false Value:1} -> refused: placement: finite positive units and explicit cost limit required
+validateConfig costMicros={Bounded:false Value:1} -> refused: placement: finite positive units and explicit cost limit required
+validateConfig units={Bounded:false Value:-1} -> refused: placement: finite positive units and explicit cost limit required
+validateConfig costMicros={Bounded:false Value:-1} -> refused: placement: finite positive units and explicit cost limit required
+Limit.Fits want={Bounded:true Value:0} ceiling={Bounded:true Value:0} -> true
+ceilings units want={Bounded:true Value:0} ceiling={Bounded:true Value:0} -> rejected: denied
+ceilings costMicros want={Bounded:true Value:0} ceiling={Bounded:true Value:0} -> rejected: denied
+Limit.Fits want={Bounded:true Value:1} ceiling={Bounded:true Value:0} -> false
+ceilings units want={Bounded:true Value:1} ceiling={Bounded:true Value:0} -> rejected: denied
+ceilings costMicros want={Bounded:true Value:1} ceiling={Bounded:true Value:0} -> rejected: denied
+Limit.Fits want={Bounded:true Value:5} ceiling={Bounded:true Value:0} -> false
+ceilings units want={Bounded:true Value:5} ceiling={Bounded:true Value:0} -> rejected: denied
+ceilings costMicros want={Bounded:true Value:5} ceiling={Bounded:true Value:0} -> rejected: denied
+Limit.Fits want={Bounded:true Value:6} ceiling={Bounded:true Value:0} -> false
+ceilings units want={Bounded:true Value:6} ceiling={Bounded:true Value:0} -> rejected: denied
+ceilings costMicros want={Bounded:true Value:6} ceiling={Bounded:true Value:0} -> rejected: denied
+Limit.Fits want={Bounded:false Value:0} ceiling={Bounded:true Value:0} -> false
+ceilings units want={Bounded:false Value:0} ceiling={Bounded:true Value:0} -> rejected: denied
+ceilings costMicros want={Bounded:false Value:0} ceiling={Bounded:true Value:0} -> rejected: denied
+Limit.Fits want={Bounded:true Value:0} ceiling={Bounded:true Value:5} -> true
+ceilings units want={Bounded:true Value:0} ceiling={Bounded:true Value:5} -> rejected: denied
+ceilings costMicros want={Bounded:true Value:0} ceiling={Bounded:true Value:5} -> rejected: denied
+Limit.Fits want={Bounded:true Value:1} ceiling={Bounded:true Value:5} -> true
+ceilings units want={Bounded:true Value:1} ceiling={Bounded:true Value:5} -> accepted {MaxUnits:1 MaxCostMicros:0}
+ceilings costMicros want={Bounded:true Value:1} ceiling={Bounded:true Value:5} -> accepted {MaxUnits:5 MaxCostMicros:1}
+Limit.Fits want={Bounded:true Value:5} ceiling={Bounded:true Value:5} -> true
+ceilings units want={Bounded:true Value:5} ceiling={Bounded:true Value:5} -> accepted {MaxUnits:5 MaxCostMicros:0}
+ceilings costMicros want={Bounded:true Value:5} ceiling={Bounded:true Value:5} -> accepted {MaxUnits:5 MaxCostMicros:5}
+Limit.Fits want={Bounded:true Value:6} ceiling={Bounded:true Value:5} -> false
+ceilings units want={Bounded:true Value:6} ceiling={Bounded:true Value:5} -> rejected: denied
+ceilings costMicros want={Bounded:true Value:6} ceiling={Bounded:true Value:5} -> rejected: denied
+Limit.Fits want={Bounded:false Value:0} ceiling={Bounded:true Value:5} -> false
+ceilings units want={Bounded:false Value:0} ceiling={Bounded:true Value:5} -> rejected: denied
+ceilings costMicros want={Bounded:false Value:0} ceiling={Bounded:true Value:5} -> rejected: denied
+Limit.Fits want={Bounded:true Value:0} ceiling={Bounded:false Value:0} -> true
+ceilings units want={Bounded:true Value:0} ceiling={Bounded:false Value:0} -> rejected: denied
+ceilings costMicros want={Bounded:true Value:0} ceiling={Bounded:false Value:0} -> rejected: denied
+Limit.Fits want={Bounded:true Value:1} ceiling={Bounded:false Value:0} -> true
+ceilings units want={Bounded:true Value:1} ceiling={Bounded:false Value:0} -> accepted {MaxUnits:1 MaxCostMicros:0}
+ceilings costMicros want={Bounded:true Value:1} ceiling={Bounded:false Value:0} -> accepted {MaxUnits:5 MaxCostMicros:1}
+Limit.Fits want={Bounded:true Value:5} ceiling={Bounded:false Value:0} -> true
+ceilings units want={Bounded:true Value:5} ceiling={Bounded:false Value:0} -> accepted {MaxUnits:5 MaxCostMicros:0}
+ceilings costMicros want={Bounded:true Value:5} ceiling={Bounded:false Value:0} -> accepted {MaxUnits:5 MaxCostMicros:5}
+Limit.Fits want={Bounded:true Value:6} ceiling={Bounded:false Value:0} -> true
+ceilings units want={Bounded:true Value:6} ceiling={Bounded:false Value:0} -> accepted {MaxUnits:6 MaxCostMicros:0}
+ceilings costMicros want={Bounded:true Value:6} ceiling={Bounded:false Value:0} -> accepted {MaxUnits:5 MaxCostMicros:6}
+Limit.Fits want={Bounded:false Value:0} ceiling={Bounded:false Value:0} -> true
+ceilings units want={Bounded:false Value:0} ceiling={Bounded:false Value:0} -> rejected: denied
+ceilings costMicros want={Bounded:false Value:0} ceiling={Bounded:false Value:0} -> accepted {MaxUnits:5 MaxCostMicros:0}

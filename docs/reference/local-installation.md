@@ -107,7 +107,7 @@ service with `sproozi service stop` and `sproozi service start`.
 | Maximum checkpoint (`local.maxCheckpointBytes`) | 32 MiB; it also bounds the workspace's expanded Git objects at `run`. The highest value home accepts is 64 MiB. |
 | Retained checkpoint storage (`local.retainedBytes`) | 256 MiB; at least twice the maximum checkpoint |
 | Model | None: each harness uses its own default model unless `--model` names one |
-| Model allowance | No limit; usage is still counted. Set `allowances.model.inference.units` to `{"bounded": true, "value": N}` for one |
+| Model allowance | No limit; usage is still counted. Set `allowances.model.inference.units` to `{"bounded": true, "value": N}` for one. A bound must be positive; leave an allowance out to forbid its capability |
 | Monetary allowance | Unbounded; a bound needs administrator pricing |
 | External services | Model inference only |
 | First gateway port | 18443; each further harness uses the next free port |

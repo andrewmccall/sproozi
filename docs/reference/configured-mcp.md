@@ -349,7 +349,8 @@ Add a unit allowance for each server to the top-level `allowances` object in
 `"allowances": {"mcp.deepwiki": {"units": {"bounded": true, "value": 10}}}`
 beside the allowances already there, then restart the service with
 `sproozi service stop --leave-running` and `sproozi service start`. Monetary MCP
-allowances are rejected because MCP has no trusted pricing. Sproozi generates
+allowances are rejected because MCP has no trusted pricing. A unit bound must be
+positive; leave a server's allowance out to forbid it. Sproozi generates
 the client configuration for each session from these allowances: Codex
 `mcp_servers` options, Claude Code's `--strict-mcp-config` file and
 Copilot's `--additional-mcp-config`, each beside the `sproozi` control

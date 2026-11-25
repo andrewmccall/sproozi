@@ -1,0 +1,108 @@
+validateConfig units={Bounded:false Value:0} costMicros={Bounded:false Value:0} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:false Value:0} costMicros={Bounded:false Value:0} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:false Value:0} costMicros={Bounded:false Value:0} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:false Value:0} costMicros={Bounded:true Value:5} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:false Value:0} costMicros={Bounded:true Value:5} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:false Value:0} costMicros={Bounded:true Value:5} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:false Value:0} costMicros={Bounded:true Value:0} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:false Value:0} costMicros={Bounded:true Value:0} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:false Value:0} costMicros={Bounded:true Value:0} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:false Value:0} costMicros={Bounded:true Value:-1} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:false Value:0} costMicros={Bounded:true Value:-1} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:false Value:0} costMicros={Bounded:true Value:-1} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:false Value:0} costMicros={Bounded:false Value:1} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:false Value:0} costMicros={Bounded:false Value:1} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:false Value:0} costMicros={Bounded:false Value:1} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:false Value:0} costMicros={Bounded:false Value:-1} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:false Value:0} costMicros={Bounded:false Value:-1} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:false Value:0} costMicros={Bounded:false Value:-1} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:true Value:5} costMicros={Bounded:false Value:0} -> accepted
+ceilings units={Bounded:true Value:5} costMicros={Bounded:false Value:0} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> accepted
+ceilings units={Bounded:true Value:5} costMicros={Bounded:false Value:0} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:true Value:5} costMicros={Bounded:true Value:5} -> accepted
+ceilings units={Bounded:true Value:5} costMicros={Bounded:true Value:5} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> accepted
+ceilings units={Bounded:true Value:5} costMicros={Bounded:true Value:5} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> accepted
+validateConfig units={Bounded:true Value:5} costMicros={Bounded:true Value:0} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:true Value:5} costMicros={Bounded:true Value:0} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:true Value:5} costMicros={Bounded:true Value:0} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:true Value:5} costMicros={Bounded:true Value:-1} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:true Value:5} costMicros={Bounded:true Value:-1} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:true Value:5} costMicros={Bounded:true Value:-1} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:true Value:5} costMicros={Bounded:false Value:1} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:true Value:5} costMicros={Bounded:false Value:1} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:true Value:5} costMicros={Bounded:false Value:1} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:true Value:5} costMicros={Bounded:false Value:-1} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:true Value:5} costMicros={Bounded:false Value:-1} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:true Value:5} costMicros={Bounded:false Value:-1} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:true Value:0} costMicros={Bounded:false Value:0} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:true Value:0} costMicros={Bounded:false Value:0} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:true Value:0} costMicros={Bounded:false Value:0} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:true Value:0} costMicros={Bounded:true Value:5} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:true Value:0} costMicros={Bounded:true Value:5} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:true Value:0} costMicros={Bounded:true Value:5} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:true Value:0} costMicros={Bounded:true Value:0} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:true Value:0} costMicros={Bounded:true Value:0} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:true Value:0} costMicros={Bounded:true Value:0} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:true Value:0} costMicros={Bounded:true Value:-1} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:true Value:0} costMicros={Bounded:true Value:-1} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:true Value:0} costMicros={Bounded:true Value:-1} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:true Value:0} costMicros={Bounded:false Value:1} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:true Value:0} costMicros={Bounded:false Value:1} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:true Value:0} costMicros={Bounded:false Value:1} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:true Value:0} costMicros={Bounded:false Value:-1} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:true Value:0} costMicros={Bounded:false Value:-1} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:true Value:0} costMicros={Bounded:false Value:-1} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:true Value:-1} costMicros={Bounded:false Value:0} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:true Value:-1} costMicros={Bounded:false Value:0} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:true Value:-1} costMicros={Bounded:false Value:0} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:true Value:-1} costMicros={Bounded:true Value:5} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:true Value:-1} costMicros={Bounded:true Value:5} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:true Value:-1} costMicros={Bounded:true Value:5} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:true Value:-1} costMicros={Bounded:true Value:0} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:true Value:-1} costMicros={Bounded:true Value:0} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:true Value:-1} costMicros={Bounded:true Value:0} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:true Value:-1} costMicros={Bounded:true Value:-1} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:true Value:-1} costMicros={Bounded:true Value:-1} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:true Value:-1} costMicros={Bounded:true Value:-1} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:true Value:-1} costMicros={Bounded:false Value:1} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:true Value:-1} costMicros={Bounded:false Value:1} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:true Value:-1} costMicros={Bounded:false Value:1} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:true Value:-1} costMicros={Bounded:false Value:-1} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:true Value:-1} costMicros={Bounded:false Value:-1} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:true Value:-1} costMicros={Bounded:false Value:-1} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:false Value:1} costMicros={Bounded:false Value:0} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:false Value:1} costMicros={Bounded:false Value:0} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:false Value:1} costMicros={Bounded:false Value:0} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:false Value:1} costMicros={Bounded:true Value:5} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:false Value:1} costMicros={Bounded:true Value:5} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:false Value:1} costMicros={Bounded:true Value:5} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:false Value:1} costMicros={Bounded:true Value:0} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:false Value:1} costMicros={Bounded:true Value:0} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:false Value:1} costMicros={Bounded:true Value:0} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:false Value:1} costMicros={Bounded:true Value:-1} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:false Value:1} costMicros={Bounded:true Value:-1} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:false Value:1} costMicros={Bounded:true Value:-1} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:false Value:1} costMicros={Bounded:false Value:1} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:false Value:1} costMicros={Bounded:false Value:1} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:false Value:1} costMicros={Bounded:false Value:1} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:false Value:1} costMicros={Bounded:false Value:-1} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:false Value:1} costMicros={Bounded:false Value:-1} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:false Value:1} costMicros={Bounded:false Value:-1} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:false Value:-1} costMicros={Bounded:false Value:0} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:false Value:-1} costMicros={Bounded:false Value:0} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:false Value:-1} costMicros={Bounded:false Value:0} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:false Value:-1} costMicros={Bounded:true Value:5} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:false Value:-1} costMicros={Bounded:true Value:5} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:false Value:-1} costMicros={Bounded:true Value:5} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:false Value:-1} costMicros={Bounded:true Value:0} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:false Value:-1} costMicros={Bounded:true Value:0} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:false Value:-1} costMicros={Bounded:true Value:0} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:false Value:-1} costMicros={Bounded:true Value:-1} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:false Value:-1} costMicros={Bounded:true Value:-1} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:false Value:-1} costMicros={Bounded:true Value:-1} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:false Value:-1} costMicros={Bounded:false Value:1} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:false Value:-1} costMicros={Bounded:false Value:1} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:false Value:-1} costMicros={Bounded:false Value:1} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied
+validateConfig units={Bounded:false Value:-1} costMicros={Bounded:false Value:-1} -> refused: placement: finite positive units and explicit cost limit required
+ceilings units={Bounded:false Value:-1} costMicros={Bounded:false Value:-1} fixed={Units:{Bounded:false Value:0} CostMicros:{Bounded:false Value:0}} -> rejected: denied
+ceilings units={Bounded:false Value:-1} costMicros={Bounded:false Value:-1} fixed={Units:{Bounded:true Value:5} CostMicros:{Bounded:true Value:5}} -> rejected: denied

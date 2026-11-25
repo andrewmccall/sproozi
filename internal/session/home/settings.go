@@ -252,7 +252,12 @@ func (c Config) AllowanceProblems() []string {
 		capability := api.CapabilityKind(name)
 		_, mcp := capability.MCPServerName()
 		modelInference := capability == api.CapabilityModelInference
+		// A bound of 0 is an exhausted allowance, never a configured one
+		// (ADR 0051): leaving the allowance out is what forbids a capability.
+		zeroBound := ` ("bounded": true needs a positive "value"; leave ` + key + ` out to forbid its capability)`
 		switch {
+		case a.Units.Exhausted():
+			p = append(p, key+`.units`+zeroBound)
 		case !a.Units.Valid() && modelInference:
 			p = append(p, key+`.units ("bounded": true with a positive "value", or "bounded": false with "value": 0 `+
 				`for no limit)`)
@@ -260,7 +265,10 @@ func (c Config) AllowanceProblems() []string {
 			p = append(p, key+`.units ("bounded": true with a positive "value")`)
 		}
 		switch {
-		case !a.CostMicros.Valid():
+		case a.CostMicros.Exhausted() && modelInference:
+			p = append(p, key+`.costMicros ("bounded": true needs a positive "value"; for no cost cap write `+
+				`"bounded": false with "value": 0; to forbid the capability leave `+key+` out)`)
+		case !a.CostMicros.Valid() && !a.CostMicros.Exhausted():
 			p = append(p, key+`.costMicros ("bounded": false with "value": 0 for no cap, or "bounded": true `+
 				`with a positive "value")`)
 		case a.CostMicros.Bounded && !modelInference:
