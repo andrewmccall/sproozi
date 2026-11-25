@@ -720,19 +720,13 @@ func (c *modelCall) usage(output int64) (units, costMicros int64, inputSource st
 	units = input + output
 	if c.limits.MaxCostMicros > 0 {
 		price := c.h.price(requestModel(c.body))
-		rateOr := func(rate int64) int64 {
-			if rate > 0 {
-				return rate
-			}
-			return price.InputMicrosPerMillionTokens
-		}
 		categories := [][2]int64{{input, price.InputMicrosPerMillionTokens}}
 		if inputSource == inputFromProvider {
 			categories = [][2]int64{
 				{exact.Input, price.InputMicrosPerMillionTokens},
 				{exact.CacheRead, price.CachedInputMicrosPerMillionTokens},
-				{exact.CacheWrite5m, rateOr(price.CacheWrite5mMicrosPerMillionTokens)},
-				{exact.CacheWrite1h, rateOr(price.CacheWrite1hMicrosPerMillionTokens)},
+				{exact.CacheWrite5m, price.CacheWrite5mMicrosPerMillionTokens},
+				{exact.CacheWrite1h, price.CacheWrite1hMicrosPerMillionTokens},
 			}
 		}
 		numerator := new(big.Int).Mul(big.NewInt(output), big.NewInt(price.OutputMicrosPerMillionTokens))
@@ -786,7 +780,9 @@ func (c *modelCall) settleProvider(usage responseUsage, anthropic anthropicUsage
 
 // settleInterrupted charges an interrupted call the estimate E, capped at its
 // reservation, or the whole reservation when the request's input cannot be
-// sized or an event outgrew the parser.
+// sized, an event outgrew the parser, or the stream reported cache-write
+// tokens that the model's price has no rate for, which is what a completed
+// call is charged for them.
 func (c *modelCall) settleInterrupted(reason string) {
 	if c.passthrough {
 		c.chargeReservation(endParseLimit, reasonParseLimit)
@@ -794,6 +790,10 @@ func (c *modelCall) settleInterrupted(reason string) {
 	}
 	if !c.plan.sizable {
 		c.chargeReservation(reason, reasonUnsizable)
+		return
+	}
+	if c.cacheWriteUnrated() {
+		c.chargeReservation(reason, reasonUnpriced)
 		return
 	}
 	units, cost, inputSource := c.estimate()
@@ -815,6 +815,23 @@ func (c *modelCall) settleInterrupted(reason string) {
 		"endReason", reason, "units", units, "costMicros", cost, "inputSource", inputSource,
 		"visibleBytes", c.visible, "elapsed", max(c.now().Sub(c.startedAt), 0).String())
 	c.e.UsageSource, c.e.EndReason, c.e.TokensUsed = usageEstimated, reason, units
+}
+
+// cacheWriteUnrated reports whether a call under a cost cap has reported
+// cache-write tokens of a lifetime the model's price has no rate for. The
+// estimate cannot price them, and a completed call with them is charged its
+// whole reservation, so an interrupted one is too.
+func (c *modelCall) cacheWriteUnrated() bool {
+	if c.limits.MaxCostMicros <= 0 {
+		return false
+	}
+	reported, exactInput, _ := c.reported()
+	if !exactInput {
+		return false
+	}
+	price := c.h.price(requestModel(c.body))
+	return reported.CacheWrite5m > 0 && price.CacheWrite5mMicrosPerMillionTokens <= 0 ||
+		reported.CacheWrite1h > 0 && price.CacheWrite1hMicrosPerMillionTokens <= 0
 }
 
 func (c *modelCall) chargeReservation(reason, why string) {
