@@ -780,9 +780,9 @@ func (c *modelCall) settleProvider(usage responseUsage, anthropic anthropicUsage
 
 // settleInterrupted charges an interrupted call the estimate E, capped at its
 // reservation, or the whole reservation when the request's input cannot be
-// sized, an event outgrew the parser, or the stream reported cache-write
-// tokens that the model's price has no rate for, which is what a completed
-// call is charged for them.
+// sized, an event outgrew the parser, or the stream reported tokens that the
+// model's price has no rate for, which is what a completed call is charged
+// for them.
 func (c *modelCall) settleInterrupted(reason string) {
 	if c.passthrough {
 		c.chargeReservation(endParseLimit, reasonParseLimit)
@@ -792,7 +792,7 @@ func (c *modelCall) settleInterrupted(reason string) {
 		c.chargeReservation(reason, reasonUnsizable)
 		return
 	}
-	if c.cacheWriteUnrated() {
+	if c.reportedUsageUnpriced() {
 		c.chargeReservation(reason, reasonUnpriced)
 		return
 	}
@@ -817,11 +817,14 @@ func (c *modelCall) settleInterrupted(reason string) {
 	c.e.UsageSource, c.e.EndReason, c.e.TokensUsed = usageEstimated, reason, units
 }
 
-// cacheWriteUnrated reports whether a call under a cost cap has reported
-// cache-write tokens of a lifetime the model's price has no rate for. The
-// estimate cannot price them, and a completed call with them is charged its
-// whole reservation, so an interrupted one is too.
-func (c *modelCall) cacheWriteUnrated() bool {
+// reportedUsageUnpriced reports whether a call under a cost cap has reported
+// usage that the model's price cannot price: a non-zero count in a category
+// with no rate. It asks costAnthropic, which settles a completed call, so the
+// estimate and settlement cannot disagree about what is unpriced. The estimate
+// has no rate to charge such usage at, so an interrupted call is charged its
+// whole reservation, as a completed one is. Before message_start nothing is
+// reported and the call is estimated.
+func (c *modelCall) reportedUsageUnpriced() bool {
 	if c.limits.MaxCostMicros <= 0 {
 		return false
 	}
@@ -829,9 +832,11 @@ func (c *modelCall) cacheWriteUnrated() bool {
 	if !exactInput {
 		return false
 	}
-	price := c.h.price(requestModel(c.body))
-	return reported.CacheWrite5m > 0 && price.CacheWrite5mMicrosPerMillionTokens <= 0 ||
-		reported.CacheWrite1h > 0 && price.CacheWrite1hMicrosPerMillionTokens <= 0
+	if c.h.Config.Pricing == nil {
+		return true
+	}
+	_, err := c.h.Config.Pricing.costAnthropic(requestModel(c.body), reported)
+	return err != nil
 }
 
 func (c *modelCall) chargeReservation(reason, why string) {
