@@ -91,7 +91,8 @@ request reserves. Unit ceilings must be finite and positive, except for
 `model.inference`, whose units may be unbounded (`bounded:false` with `value:0`;
 [ADR 0051](../../docs/adr/0051-interactive-sessions-may-run-without-a-model-budget.md)). A
 cost limit with `bounded:false` and `value:0` explicitly has no monetary cap;
-a bounded cost limit must be positive and requires administrator pricing. A value of the wrong JSON type is reported
+a bounded cost limit must be positive and requires administrator pricing. A
+bound of 0 is refused: to forbid a capability, leave its allowance out. A value of the wrong JSON type is reported
 by its key, for example `local.gatewayPort: number -1 is not a whole number from
 0 to 65535`.
 
