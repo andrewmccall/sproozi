@@ -61,7 +61,9 @@ against its live template, policy, runtime and session binding. A missing
 reference or a policy denial moves it to `Failed`. The runtime's own rules
 (`RuntimeInvalid`) are checked only when the run is admitted and just before
 its Pod is built, so an edit to its `AgentRuntime` never fails a run that has
-its Pod ([ADR 0077](../adr/0077-runtime-rules-gate-the-building-of-a-pod.md)). The `Ready` condition holds the reason
+its Pod with `RuntimeInvalid` ([ADR 0077](../adr/0077-runtime-rules-gate-the-building-of-a-pod.md)). An edit that also
+breaks the policy's resource bounds (a limit removed or raised, a container
+added) still fails the run with `ResourceLimitExceeded`. The `Ready` condition holds the reason
 and message. A queued run that fails this check is never admitted. Until its
 own reconcile fails it, it can briefly hold a place in the admission queue and
 delay later runs under the cluster cap. A run whose template or policy is

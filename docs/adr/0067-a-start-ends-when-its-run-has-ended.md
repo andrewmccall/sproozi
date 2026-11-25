@@ -3,8 +3,10 @@
 Status: accepted
 Date: 2026-11-17
 
-Corrected 2026-11-25: the Kubernetes placement's `Prepare` of a launch with
-no registration yet also returns `StartRefused`, before it creates a
+Corrected 2026-11-25: the Kubernetes placement's `Prepare` of a launch whose
+locally recorded registration reference is empty (the executor has not yet
+recorded a registration for it; one that was created but not recorded, after a
+crash between the two, counts as empty) also returns `StartRefused`, before it creates a
 registration or AgentRun, when the launch passes every check `denied` covers
 but its AgentRuntime cannot launch a sandbox (a template rule, the harness, or
 the managed shape; see ADR 0027's correction of the same date). The reason is

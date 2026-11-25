@@ -136,9 +136,11 @@ created, and again just before the run's Pod is built. A runtime that breaks
 any of them fails a queued run with reason `RuntimeInvalid` before it is admitted,
 so it never counts against a concurrency cap, and fails an admitted run that
 has no Pod yet when its Pod would be built. A run or session that already has
-its Pod keeps running when its runtime is edited to break a rule, and when the
-edit is reverted
-([ADR 0077](../adr/0077-runtime-rules-gate-the-building-of-a-pod.md)). To take
+its Pod is not failed with `RuntimeInvalid` when its runtime is edited to break
+a rule, or when the edit is reverted
+([ADR 0077](../adr/0077-runtime-rules-gate-the-building-of-a-pod.md)). An edit
+that also breaks the policy's resource bounds (a limit removed or raised, a
+container added) still fails the run with `ResourceLimitExceeded`. To take
 running work off a runtime, ask each session's owner to stop it, which keeps a
 checkpoint, or set `spec.cancel: true` on its AgentRun. The `Ready` condition message names the runtime and the rule, for
 example `AgentRuntime codex: cannot launch a sandbox: container "agent" image

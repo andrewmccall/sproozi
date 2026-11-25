@@ -87,7 +87,7 @@ that is the session's own owner, so it is shown.
 | Code | HTTP status | Meaning |
 | --- | --- | --- |
 | `invalid_request` | 400, 404, 413, 415 | The request is malformed or names the wrong placement. |
-| `denied` | 401, 403, 426 | The token or the Kubernetes user was refused, or the launch is not allowed: the template is not managed or its instructions differ from the executor's, the policy does not allow its capabilities or allowances, or its deadline is past a cap. An `activate` or `attach` is not denied because its AgentRuntime was edited since its Pod was built ([ADR 0077](../adr/0077-runtime-rules-gate-the-building-of-a-pod.md)), and an attached terminal is not cut for it. |
+| `denied` | 401, 403, 426 | The token or the Kubernetes user was refused, or the launch is not allowed: the template is not managed or its instructions differ from the executor's, the policy does not allow its capabilities or allowances, or its deadline is past a cap. An `activate` or `attach` is not denied for `RuntimeInvalid` because its AgentRuntime was edited since its Pod was built ([ADR 0077](../adr/0077-runtime-rules-gate-the-building-of-a-pod.md)), and an attached terminal is not cut for it. An edit that also breaks the policy's resource bounds (a limit removed or raised, a container added) still fails the run with `ResourceLimitExceeded`, and denies `activate` and `attach`. |
 | `conflict` | 409 | The request conflicts with what the executor holds for that execution. |
 | `expired` | 410 | The execution's deadline has passed. |
 | `unsupported` | 422 | The executor cannot take this launch, such as a profile it does not keep. |

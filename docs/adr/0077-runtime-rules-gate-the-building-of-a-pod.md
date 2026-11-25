@@ -39,17 +39,24 @@ that disappears ends the run with `SandboxGone`.
 Runtime rules gate the building of a Pod. They are checked when a run is
 admitted, so a run on a broken runtime never takes a place under a cap, and
 again when its Pod is about to be built. A run or session that already has
-its Pod keeps running when its `AgentRuntime` is edited into an invalid state,
-and keeps running when the edit is reverted; anything that needs a new Pod on
-the broken runtime fails with `RuntimeInvalid`.
+its Pod is not failed with `RuntimeInvalid` when its `AgentRuntime` is edited
+into an invalid state, and is not failed for it when the edit is reverted;
+anything that needs a new Pod on the broken runtime fails with
+`RuntimeInvalid`. An edit that also breaks the policy's resource bounds (a
+limit removed or raised, a container added) still fails the run with
+`ResourceLimitExceeded`, because the policy is evaluated on every reconcile,
+and the executor's `Activate` and `Attach` deny it. Deleting the `AgentRuntime`
+still ends its runs with `RuntimeNotFound`.
 
 - **Controller.** `resolveAdmission` calls `ValidateRuntime` only for a
   `Queued` run. `ensureSandbox`, which runs only while no sandbox is recorded,
   calls it again, then creates the agent contract and builds the Pod. Any
   error wrapping `ErrInvalidRuntime` from these steps (from `ValidateRuntime`,
   the contract's harness rule, `BuildManagedPodSpec`'s managed rules or the
-  gateway address) fails the run with `RuntimeInvalid`, so an edit that lands
-  between the check and the build still ends the run rather than retrying.
+  gateway address) fails the run with `RuntimeInvalid`. One reconcile reads the
+  runtime once and uses that copy for the check and the build, so no edit can
+  land between them; the mapping is defensive, keeping any `ErrInvalidRuntime`
+  from the build path terminal rather than retried.
   The agent contract is no longer re-ensured once the Pod exists: it is
   immutable, built from the runtime, and the Pod already mounts it.
 - **All of `ValidateRuntime`.** The ordinary template rules, the trust-bundle
@@ -59,7 +66,9 @@ the broken runtime fails with `RuntimeInvalid`.
   to the next Pod.
 - **A completed session stop** builds no Pod, so it is not checked; it ends
   `Succeeded` with `SessionStopped` on any runtime.
-- **Remote executor.** `Prepare` of a launch with no registration yet refuses
+- **Remote executor.** `Prepare` of a launch whose locally recorded
+  registration reference is empty (a registration created but not yet recorded,
+  after a crash between the two, counts as empty) refuses
   a broken runtime with the start refusal of ADR 0067, after every check that
   answers `denied`. A repeated `Prepare` of a registered launch, `Activate`
   and `Attach` do not apply the runtime rules; they still check the template,
@@ -100,10 +109,17 @@ the broken runtime fails with `RuntimeInvalid`.
   only by the next run admitted or started on it, which fails with
   `RuntimeInvalid`.
 - Other per-reconcile checks still read the runtime: the policy evaluation
-  (for example a resource limit raised above the policy's bound fails an
+  (for example a resource limit raised above the policy's bound, or an edit
+  that breaks a runtime rule and also removes the agent container's CPU limit
+  or adds a third container so the combined limit exceeds the bound, fails an
   active run with `ResourceLimitExceeded`) and the agent-contract input check
   (`InvalidRunInput`). They are policy and input checks, not runtime rules, and
   apply to a stopped session too.
+- Known, and not fixed here: a run with no Pod yet whose runtime gets a valid
+  edit that changes the agent contract (for example another model) returns
+  "existing agent contract ... has different immutable contents" on every
+  reconcile until its deadline. This is older than this record and unchanged by
+  it.
 - If the controller loses the status write that records a just-created Pod and
   the runtime is edited before the next reconcile, that reconcile checks the
   runtime again and fails the run although its Pod exists.
