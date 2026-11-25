@@ -296,6 +296,32 @@ OpenAI or Anthropic key or token must be configured when model inference is
 enabled. Anthropic-only operation does not require an OpenAI key. Bedrock,
 Vertex and remote-control integration are outside this contract.
 
+### Headers on model calls
+
+The model endpoint treats the two provider protocols differently
+([ADR 0076](../adr/0076-the-model-endpoint-relays-headers-by-protocol.md)).
+Matching is by header name, ignoring case.
+
+| Direction | Anthropic Messages (`api.anthropic.com`, Copilot's `/messages`) | OpenAI (OpenAI, ChatGPT, Copilot's `/chat/completions`) |
+| --- | --- | --- |
+| Request to the provider | Only `Content-Type`, `Accept`, `Anthropic-Beta` and a credential. `Anthropic-Version` is always `2023-06-01`. Copilot's Messages route also forwards the harness's other headers. | Every header except those below. |
+| Response to the sandbox | Only `Content-Type` and `Request-Id`. A provider's non-2xx answer is replaced by the gateway's own error. | Every header except `Set-Cookie`, `Set-Cookie2`, `Openai-Organization` and `Openai-Project`. |
+
+Never forwarded to the provider, on any route: `Cookie`, `Proxy-Authorization`
+and `Content-Encoding`, and the gateway removes `Accept-Encoding` so its own
+transport negotiates compression. A gateway-held credential replaces the harness's `Authorization` and
+`X-Api-Key`; the harness's own sign-in is forwarded, so with its own Anthropic
+sign-in both headers reach Anthropic and the provider chooses. With a
+gateway-held OpenAI key, token or ChatGPT sign-in the gateway also removes the
+harness's `OpenAI-Organization`, `OpenAI-Project` and `ChatGPT-Account-ID`
+before it sends the credential; with the harness's own sign-in it forwards them.
+
+The four denied response headers are dropped in every credential mode, for
+streamed, JSON and non-2xx answers alike. The first two set cookies the gateway
+never sends back; the others name the organisation and project of the
+credential, which under a gateway-held key is the administrator's. A new
+identifying header from a provider is relayed until the list names it.
+
 The gateway certificate must cover `api.anthropic.com` when its handler is
 active. The sandbox trust bundle must include the inspection CA. A disabled
 Anthropic authority stays reserved, so generic destination egress cannot supply
