@@ -660,3 +660,100 @@ func TestInitSetsUpNamedLoginsForASignedInHarness(t *testing.T) {
 		t.Fatalf("a login for a gateway-held key: %v", err)
 	}
 }
+
+// doctor reports a configuration that the service refuses to start with as a
+// failed config check, naming each problem, not as a valid one.
+func TestDoctorReportsWhatServiceRunRefuses(t *testing.T) {
+	l, inst := testInstallation(t)
+	c := renderConfig(l, inst, DefaultInstructions)
+	c.Model = " "
+	if err := writeConfig(l, c, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.save(inst); err != nil {
+		t.Fatal(err)
+	}
+	read, err := home.ReadConfig(l.Config())
+	if err != nil {
+		t.Fatalf("the case must be one ReadConfig accepts: %v", err)
+	}
+	want := "model (model name the harness requests, or omit it for the harness's default)"
+	if !slices.Contains(read.ServeProblems(), want) {
+		t.Fatalf("serve does not refuse the case: %q", read.ServeProblems())
+	}
+	report := Doctor(t.Context(), l, false)
+	named := slices.ContainsFunc(report.Checks, func(c Check) bool {
+		return c.Component == "config" && !c.OK && c.Detail == want
+	})
+	if !named || report.OK {
+		t.Fatalf("doctor on a refused configuration: %+v", report)
+	}
+}
+
+// A token file that holds a placeholder or nothing is fixed in that file, or
+// with "credentials set" when that command writes it; never by editing the
+// configuration, which is fine.
+func TestDoctorSaysHowToFixAProviderTokenFile(t *testing.T) {
+	placeholder := "REPLACE_WITH_PROVIDER_API_KEY\n"
+	placeholderIn := func(key string) func(string) string {
+		return func(p string) string {
+			return key + " (replace REPLACE_WITH_PROVIDER_API_KEY in " + p + " with the provider API key)"
+		}
+	}
+	for _, tc := range []struct {
+		name, content   string
+		further, custom bool
+		detail, next    func(path string) string
+	}{
+		{name: "primary placeholder", content: placeholder, detail: placeholderIn("gateway.providerTokenFile"),
+			next: func(string) string { return "run sproozi credentials set codex" }},
+		{name: "further placeholder", content: placeholder, further: true,
+			detail: placeholderIn("harnesses[0].providerTokenFile"),
+			next:   func(string) string { return "run sproozi credentials set claude-code" }},
+		{name: "empty", content: " \n",
+			detail: func(p string) string {
+				return "gateway.providerTokenFile (" + p + " is empty; write the provider API key there)"
+			},
+			next: func(string) string { return "run sproozi credentials set codex" }},
+		{name: "file credentials set does not write", content: placeholder, custom: true,
+			detail: placeholderIn("gateway.providerTokenFile"),
+			next:   func(p string) string { return "write the provider API key to " + p }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			l, inst := testInstallation(t)
+			path := filepath.Join(l.Credentials(), "openai")
+			if tc.further {
+				inst.Harnesses = append(inst.Harnesses, Harness{Harness: harness.NativeClaude, Name: claudePlacement, Port: 18444,
+					Model: "claude-model", ProviderURL: anthropicURL, Credential: filepath.Join(l.Credentials(), "anthropic")})
+				path = filepath.Join(l.Credentials(), "anthropic")
+			}
+			c := renderConfig(l, inst, DefaultInstructions)
+			if tc.custom {
+				path = filepath.Join(filepath.Dir(l.Root), "my-key")
+				c.Gateway.ProviderTokenFile = path
+			}
+			if err := testutil.WriteFile(path, []byte(tc.content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := writeConfig(l, c, false); err != nil {
+				t.Fatal(err)
+			}
+			if err := l.save(inst); err != nil {
+				t.Fatal(err)
+			}
+			report := Doctor(t.Context(), l, false)
+			var found []Check
+			for _, check := range report.Checks {
+				if strings.Contains(check.Detail, "providerTokenFile") {
+					found = append(found, check)
+				}
+			}
+			if len(found) != 1 || found[0].OK || found[0].Detail != tc.detail(path) || found[0].Next != tc.next(path) {
+				t.Fatalf("checks %+v; want one failure %q, next %q", found, tc.detail(path), tc.next(path))
+			}
+			if strings.Contains(found[0].Next, "config.json") {
+				t.Fatalf("next step sends the user to the configuration: %q", found[0].Next)
+			}
+		})
+	}
+}

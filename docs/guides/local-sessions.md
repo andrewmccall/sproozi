@@ -232,7 +232,8 @@ the profile and reports files no agent reads.
 ## Check and maintain the installation
 
 `sproozi doctor` checks the installation without changing it and names the next
-step for anything that fails.
+step for anything that fails. It reports every setting that would stop
+`sproozi service run`, for each harness.
 
 | Task | Command |
 | --- | --- |

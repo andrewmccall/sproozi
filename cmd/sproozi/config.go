@@ -120,10 +120,7 @@ func readConfig(path string) (home.Config, error) {
 
 // serveReady names every setting a hand-written configuration still needs.
 func serveReady(path string, c home.Config) error {
-	problems := c.ServeProblems()
-	if problem := c.ProviderTokenProblem(); problem != "" {
-		problems = append(problems, problem)
-	}
+	problems := c.ReadinessProblems()
 	if len(problems) == 0 {
 		return nil
 	}

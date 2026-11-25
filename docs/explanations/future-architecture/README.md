@@ -22,6 +22,7 @@ See the [current architecture](../system-architecture.md), [Move a live session 
 | [Harness and client compatibility](harness-portability.md) | Which additional harnesses and clients support session continuity? | Client-specific state and connection support |
 | [Session extensions](session-mobility.md) | How should adoption, enterprise profiles and retention broaden the current session? | Stop the original writer and approve destination access independently |
 | [Event webhooks](event-webhooks.md) | How should external events start runs again? ([ADR 0043](../../adr/0043-remove-the-event-webhook.md) removed the first receiver.) | A supported, signed sender and exactly-once delivery |
+| [Telemetry](telemetry.md) | Where would traces, metrics and an export to a collector attach, and what may leave the cluster? | Keep content and credentials out; keep the gateway's outbound rules |
 
 ## Execution roadmap extensions
 
