@@ -31,6 +31,7 @@ internal/gateway/, internal/proxytransport/   Gateway dispatch, TLS inspection, 
 internal/endpoints/<service>/ Per-service handlers: kubernetes, github, model, packages, mcp, destination
 internal/runtime/{kubernetes,docker}/         Execution backends
 internal/budget/              Usage accounting (Kubernetes store in internal/budget/kubernetes)
+internal/localsetup/          Local setup on Docker: `sproozi init`, `sproozi doctor`, images, owned network, private CA, provider credentials and the supervised local service
 internal/session/, internal/work/, internal/checkpoint/, internal/workspace/   Sessions, remote work, checkpoints
 internal/harness/, internal/nativeconfig/, internal/nativepty/                 Harness registry (registry.go), configuration and terminal
 internal/policy/, internal/mcppolicy/, internal/modelauth/, internal/pki/, internal/privatefs/   Policy evaluation, provider auth, CA and host-private files (`ls internal` for the rest)
@@ -56,6 +57,7 @@ Run the gates that match the change before declaring it done:
 | Any Go code | `make lint-fix`, `make test`, `make verify-fast` |
 | `go.mod`, `go.sum` or the Go toolchain pin | also `make verify-deps` (tidiness and `govulncheck`) |
 | Controller, gateway, network policy or install manifests | also `make test-e2e` (creates and removes its own Kind cluster) |
+| `internal/localsetup`, `hack/release`, `config/install` or `config/certificates` | also `make verify-local-onboarding` (Docker with Buildx) and `make verify-kubernetes-release` (creates and removes its own Kind cluster; needs Docker with Buildx, Kind and kubectl); CI runs neither |
 | Documentation | `make verify-docs` |
 | A new harness | follow `docs/contributing/add-a-harness.md`; `go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/ ./cmd/sproozi/ ./internal/nativeconfig/ ./internal/localsetup/ ./internal/runtime/kubernetes/` guards the registry, CRD enum, rendered `sproozi` connection, MCP loader and bridge hook, examples, reference row, Pod credential variables and managed wiring (each managed kind's facts, its conversation state through the checkpoint format, its supervisor adapter's required functions, and every remaining kind switch naming it), and the recorded outcomes; client loading and launch behaviour need review and `make verify-harness-clients`, `make verify-harness-process` (see the guide's "What the guards check") |
 | MCP registry, policy or examples | `make verify-mcp` |
