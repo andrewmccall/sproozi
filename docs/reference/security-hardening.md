@@ -454,8 +454,8 @@ budget cut. It can't estimate an
 interrupted request that references input it can't size, a provider event over
 the 8 MiB parse limit or, under a cost cap, an Anthropic response that
 reports tokens in a category whose rate the administrator didn't set, such as a
-cache write (an interrupted call is charged this way only for cache writes,
-once its stream has reported them). The charge applies only in the parts of the budget that have a
+cache write. An interrupted call is charged this way once its stream has
+reported such tokens; before that it is estimated. The charge applies only in the parts of the budget that have a
 limit. While an unbounded call streams, the gateway also performs a
 [budget cut](../../GLOSSARY.md#budget-cut): when the call's observed input plus
 its visible output bytes ÷ 4 reaches its reservation, it sends the protocol's error event,

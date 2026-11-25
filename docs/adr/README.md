@@ -104,6 +104,10 @@ correction, that behaviour stays in code: the registry now also holds a
 managed harness's argument syntax and the capture of its conversation, and
 that behaviour sits behind two contracts with guards.
 
+ADR 0078 extends ADR 0028's estimate: an interrupted Anthropic call whose
+reported usage the model's price cannot price is charged its whole reservation,
+as a completed call is.
+
 ADR 0065 replaces ADR 0057's rule that an interactive session's unsettled stop
 or cancellation always waits for `recover`: once its project is revoked, the
 driver settles it as it settles a task's.
@@ -172,6 +176,7 @@ driver settles it as it settles a task's.
 | [0073](0073-codex-harness-arguments-fail-closed.md) | Codex harness arguments fail closed: the validator reads each `-c`/`--config` key as a TOML dotted key and refuses one it cannot read, one with no `=`, a controlled key, a key below one and a table that holds one; the whole `mcp_servers` table is controlled (awaiting the owner); `-c`, `--config`, `--model` and `-m` need a separate value that is not an option; arguments are checked where a launch is created and started, not when a stored record loads. |
 | [0074](0074-account-requests-only-with-a-forwarded-sign-in-or-no-api-authority.md) | Extends ADRs 0047 and 0048. `Provider.Routes` serves a provider's account requests on another capability's host only when its credential forwards the harness's own sign-in or the provider has no API authority, so a gateway-held key or token for a provider's API never reaches another host; both gateway compositions take this rule from the one function. |
 | [0076](0076-the-model-endpoint-relays-headers-by-protocol.md) | Extends ADRs 0002 and 0047. The model endpoint forwards and relays headers by protocol: Anthropic Messages uses fixed lists in both directions; the OpenAI protocol forwards every request header that is not a credential, cookie or account selector, and relays every response header except `Set-Cookie`, `Set-Cookie2`, `Openai-Organization` and `Openai-Project`, in every credential mode. A new identifying provider header is relayed until it joins the list. |
+| [0078](0078-an-interrupted-model-call-that-cannot-be-priced-is-charged-its-reservation.md) | Extends ADR 0028. An Anthropic call under a cost cap that is interrupted after its stream reported a non-zero count in any token category the model's price has no rate for is charged its whole reservation, as a completed call is, instead of an estimate; the check asks `costAnthropic`, which prices a completed call. |
 
 ## Reserved numbers
 

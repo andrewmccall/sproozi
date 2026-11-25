@@ -287,7 +287,7 @@ after provider work. Under a cost cap, Anthropic usage in a category with no
 rate, such as `cacheWrite5mMicrosPerMillionTokens` or
 `cacheWrite1hMicrosPerMillionTokens` for cache writes, is charged the call's
 whole reservation, whether the call completes or is interrupted after the
-stream reported it. Carry both cache-write rates for any model used with
+stream reported it ([ADR 0078](../adr/0078-an-interrupted-model-call-that-cannot-be-priced-is-charged-its-reservation.md)). Carry both cache-write rates for any model used with
 prompt caching. This table does not price all non-token provider charges or
 establish a hard spending ceiling.
 

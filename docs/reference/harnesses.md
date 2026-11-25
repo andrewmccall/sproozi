@@ -371,7 +371,7 @@ any consumed category. Rates are microdollars per million tokens. Missing model
 pricing denies Anthropic and OpenAI requests before inference, with a 403 and
 nothing charged; a consumed category without a rate charges the whole
 reservation, after the output has reached the client. An interrupted call is
-charged the same way when its stream has already reported cache-write tokens
+charged the same way when its stream has already reported tokens in a category
 without a rate, instead of an estimate. A pricing file should therefore carry
 both cache-write rates for any model used with prompt caching. Explicit one-hour cache
 requests, hosted billable tools, nonstandard service tiers, `context-1m`
