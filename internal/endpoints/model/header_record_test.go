@@ -51,9 +51,11 @@ var providerHeaders = map[string]string{
 	"Anthropic-Ratelimit-Requests-Remaining": "9",
 	contentTypeHeader:                        jsonMediaType,
 	"Openai-Organization":                    "org-fixture",
+	"Openai-Project":                         "proj-fixture",
 	"Request-Id":                             "req_provider",
 	"Retry-After":                            "1",
 	"Set-Cookie":                             "provider=1",
+	"Set-Cookie2":                            "provider=2",
 	"X-Provider-Custom":                      "provider-value",
 	"X-Request-Id":                           "x-req-provider",
 }
