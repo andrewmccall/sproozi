@@ -538,6 +538,24 @@ func cacheWritePricing(oneHour int64) *model.PricingTable {
 	return table
 }
 
+// pricingWithout is the fixture model's price with one category's rate left
+// out: "input", "cacheRead" or "output".
+func pricingWithout(category string) *model.PricingTable {
+	table := anthropicFixturePricing()
+	for name, price := range table.Models {
+		switch category {
+		case "input":
+			price.InputMicrosPerMillionTokens = 0
+		case "cacheRead":
+			price.CachedInputMicrosPerMillionTokens = 0
+		case "output":
+			price.OutputMicrosPerMillionTokens = 0
+		}
+		table.Models[name] = price
+	}
+	return table
+}
+
 func gzipped(text string) string {
 	var b bytes.Buffer
 	w := gzip.NewWriter(&b)
@@ -1116,6 +1134,82 @@ func TestModelOutcomesAreRecorded(t *testing.T) {
 			config: func(_ *caseRun, c *model.HandlerConfig) { c.Pricing = cacheWritePricing(3_000_000) },
 			client: respond(http.StatusOK, eventStream, withCacheWrites(anthropicEvents[0], 50, 0)+
 				strings.Join(anthropicEvents[1:], ""))},
+		{name: "row 26/anthropic stream under a cost cap, no cache-read rate, after message_start, workload left", anthropic: true,
+			body: anthropicStreamRequest, limits: cappedCost, client: pipeClient(eventStream, &pipe),
+			config: func(_ *caseRun, c *model.HandlerConfig) { c.Pricing = pricingWithout("cacheRead") },
+			drive: func(run *caseRun) {
+				send(run, anthropicEvents[0])
+				run.writer.waitFor(t, "message_start")
+				run.cancel()
+			}},
+		{name: "row 26/anthropic stream under a cost cap, no cache-read rate, after message_delta, workload left", anthropic: true,
+			body: anthropicStreamRequest, limits: cappedCost, client: pipeClient(eventStream, &pipe),
+			config: func(_ *caseRun, c *model.HandlerConfig) { c.Pricing = pricingWithout("cacheRead") },
+			drive: func(run *caseRun) {
+				send(run, anthropicEvents[0], anthropicEvents[len(anthropicEvents)-2])
+				run.writer.waitFor(t, "message_delta")
+				run.cancel()
+			}},
+		{name: "row 26/anthropic stream under a cost cap, no cache-read rate, completed", anthropic: true,
+			body: anthropicStreamRequest, limits: cappedCost,
+			config: func(_ *caseRun, c *model.HandlerConfig) { c.Pricing = pricingWithout("cacheRead") },
+			client: respond(http.StatusOK, eventStream, anthropicStream)},
+		{name: "row 26/anthropic stream under a cost cap, no input rate, after message_start, workload left", anthropic: true,
+			body: anthropicStreamRequest, limits: cappedCost, client: pipeClient(eventStream, &pipe),
+			config: func(_ *caseRun, c *model.HandlerConfig) { c.Pricing = pricingWithout("input") },
+			drive: func(run *caseRun) {
+				send(run, anthropicEvents[0])
+				run.writer.waitFor(t, "message_start")
+				run.cancel()
+			}},
+		{name: "row 26/anthropic stream under a cost cap, no input rate, after message_delta, workload left", anthropic: true,
+			body: anthropicStreamRequest, limits: cappedCost, client: pipeClient(eventStream, &pipe),
+			config: func(_ *caseRun, c *model.HandlerConfig) { c.Pricing = pricingWithout("input") },
+			drive: func(run *caseRun) {
+				send(run, anthropicEvents[0], anthropicEvents[len(anthropicEvents)-2])
+				run.writer.waitFor(t, "message_delta")
+				run.cancel()
+			}},
+		{name: "row 26/anthropic stream under a cost cap, no input rate, completed", anthropic: true,
+			body: anthropicStreamRequest, limits: cappedCost,
+			config: func(_ *caseRun, c *model.HandlerConfig) { c.Pricing = pricingWithout("input") },
+			client: respond(http.StatusOK, eventStream, anthropicStream)},
+		{name: "row 26/anthropic stream under a cost cap, no output rate, after message_start, workload left", anthropic: true,
+			body: anthropicStreamRequest, limits: cappedCost, client: pipeClient(eventStream, &pipe),
+			config: func(_ *caseRun, c *model.HandlerConfig) { c.Pricing = pricingWithout("output") },
+			drive: func(run *caseRun) {
+				send(run, anthropicEvents[0])
+				run.writer.waitFor(t, "message_start")
+				run.cancel()
+			}},
+		{name: "row 26/anthropic stream under a cost cap, no output rate, after message_delta, workload left", anthropic: true,
+			body: anthropicStreamRequest, limits: cappedCost, client: pipeClient(eventStream, &pipe),
+			config: func(_ *caseRun, c *model.HandlerConfig) { c.Pricing = pricingWithout("output") },
+			drive: func(run *caseRun) {
+				send(run, anthropicEvents[0], anthropicEvents[len(anthropicEvents)-2])
+				run.writer.waitFor(t, "message_delta")
+				run.cancel()
+			}},
+		{name: "row 26/anthropic stream under a cost cap, no output rate, completed", anthropic: true,
+			body: anthropicStreamRequest, limits: cappedCost,
+			config: func(_ *caseRun, c *model.HandlerConfig) { c.Pricing = pricingWithout("output") },
+			client: respond(http.StatusOK, eventStream, anthropicStream)},
+		{name: "row 26/anthropic stream under a cost cap, no output rate, no usage reported yet, workload left", anthropic: true,
+			body: anthropicStreamRequest, limits: cappedCost, client: pipeClient(eventStream, &pipe),
+			config: func(_ *caseRun, c *model.HandlerConfig) { c.Pricing = pricingWithout("output") },
+			drive: func(run *caseRun) {
+				send(run, ": keep-alive\n\n")
+				run.writer.waitFor(t, "keep-alive")
+				run.cancel()
+			}},
+		{name: "row 26/anthropic stream under a cost cap, no output rate, output still zero, workload left", anthropic: true,
+			body: anthropicStreamRequest, limits: cappedCost, client: pipeClient(eventStream, &pipe),
+			config: func(_ *caseRun, c *model.HandlerConfig) { c.Pricing = pricingWithout("output") },
+			drive: func(run *caseRun) {
+				send(run, strings.Replace(anthropicEvents[0], `"output_tokens":1`, `"output_tokens":0`, 1))
+				run.writer.waitFor(t, "message_start")
+				run.cancel()
+			}},
 		{name: "row 27/openai body read error after headers", path: chatPath, body: chatBody,
 			client: respondFailing(http.StatusOK, `{"id":"chatcmpl-1",`)},
 		{name: "row 27/openai terminal, then body read error (provider usage)", path: testResponsesPath,
